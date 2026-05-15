@@ -709,6 +709,28 @@ export const areAllUAVsInMissionWithoutErrors = createSelector(
   }
 );
 
+/**
+ * True if any mission-mapped UAV reports INVALID_MISSION_CONFIGURATION (69).
+ * Used to block show authorization when path/mission may not be ready on that airframe.
+ */
+export const isAnyMissionUAVInInvalidMissionConfiguration = createSelector(
+  getUAVIdsParticipatingInMission,
+  getUAVIdToStateMapping,
+  (uavIds, uavStatesById) => {
+    for (const uavId of uavIds) {
+      const errors = uavStatesById[uavId]?.errors;
+      if (
+        Array.isArray(errors) &&
+        errors.includes(UAVErrorCode.INVALID_MISSION_CONFIGURATION)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+);
+
 export function getSingleUAVStatusLevel(uav: StoredUAV): Status {
   let severity: Severity | undefined;
 

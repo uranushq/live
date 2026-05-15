@@ -59,9 +59,14 @@ function* pushSettingsToServer() {
   const duration = yield select(getShowDuration);
   const uavIdsToStartAutomatically =
     method === 'auto' ? reject(mapping || [], isNil) : [];
+  // Flockwave StartConditions: authorizationScope must stay consistent with
+  // authorized. Omitting scope can be merged as "none" on the server, which then
+  // clears authorized (authorized + scope NONE → authorized false).
+  const authorizationScope = authorized ? 'live' : 'none';
   yield call(messageHub.execute.setShowConfiguration, {
     start: {
       authorized,
+      authorizationScope,
       clock,
       time,
       method,

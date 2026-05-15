@@ -19,6 +19,11 @@ import {
   synchronizeShowSettings,
 } from '~/features/show/slice';
 import { getSetupStageStatuses } from '~/features/show/stages';
+import { showError } from '~/features/snackbar/actions';
+import {
+  isAnyMissionUAVInInvalidMissionConfiguration,
+} from '~/features/uavs/selectors';
+import i18n from '~/i18n';
 import type { AppDispatch, RootState } from '~/store/reducers';
 
 const buttonStyle: SxProps<typeof ListItemButton> = {
@@ -29,6 +34,7 @@ const buttonStyle: SxProps<typeof ListItemButton> = {
 
 type Props = Readonly<{
   isAuthorized: boolean;
+  missionInvalidConfigBlocksStart: boolean;
   numUAVsTakingOffAutomatically: number;
   status: Status;
 }>;
@@ -40,6 +46,7 @@ type Props = Readonly<{
  */
 const AuthorizationButton = ({
   isAuthorized,
+  missionInvalidConfigBlocksStart,
   numUAVsTakingOffAutomatically,
   status,
   ...rest
@@ -48,7 +55,7 @@ const AuthorizationButton = ({
 
   return (
     <ListItemButton
-      /* disabled={!isAuthorized && status === Status.OFF} */
+      disabled={!isAuthorized && missionInvalidConfigBlocksStart}
       selected={isAuthorized}
       sx={buttonStyle}
       {...rest}
@@ -73,7 +80,9 @@ const AuthorizationButton = ({
                   : t('show.takeOffMore', {
                       quantity: numUAVsTakingOffAutomatically,
                     })
-              : t('show.authorizationReq')}
+              : missionInvalidConfigBlocksStart
+                ? t('show.cannotAuthorizeInvalidMissionConfigurationHint')
+                : t('show.authorizationReq')}
           </Typography>
         }
       />
@@ -85,6 +94,8 @@ export default connect(
   // mapStateToProps
   (state: RootState) => ({
     isAuthorized: isShowAuthorizedToStartLocally(state),
+    missionInvalidConfigBlocksStart:
+      isAnyMissionUAVInInvalidMissionConfiguration(state),
     numUAVsTakingOffAutomatically: countUAVsTakingOffAutomatically(state),
     status: getSetupStageStatuses(state).authorization,
   }),
@@ -93,6 +104,17 @@ export default connect(
     onClick: () => (dispatch: AppDispatch, getState: () => RootState) => {
       const state = getState();
       const newAuthorizationState = !isShowAuthorizedToStartLocally(state);
+      if (
+        newAuthorizationState &&
+        isAnyMissionUAVInInvalidMissionConfiguration(state)
+      ) {
+        dispatch(
+          showError(
+            i18n.t('show.cannotAuthorizeInvalidMissionConfiguration')
+          )
+        );
+        return;
+      }
       dispatch(setShowAuthorization(newAuthorizationState));
       dispatch(synchronizeShowSettings('toServer'));
       if (newAuthorizationState) {

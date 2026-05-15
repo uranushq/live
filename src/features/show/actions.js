@@ -19,7 +19,9 @@ import {
   updateLandingPositions,
   updateTakeoffHeadings,
 } from '~/features/mission/slice';
-import { showNotification } from '~/features/snackbar/actions';
+import { showError, showNotification } from '~/features/snackbar/actions';
+import { isAnyMissionUAVInInvalidMissionConfiguration } from '~/features/uavs/selectors';
+import i18n from '~/i18n';
 import { MessageSemantics } from '~/features/snackbar/types';
 import {
   getActiveUAVIds,
@@ -82,10 +84,18 @@ export const approveTakeoffArea = () => (dispatch) => {
  * and deauthorizes it if it does not have a scheduled start time.
  */
 export const authorizeIfAndOnlyIfHasStartTime = () => (dispatch, getState) => {
-  const shouldAuthorize = hasScheduledStartTime(getState());
+  const state = getState();
+  const hasStartTime = hasScheduledStartTime(state);
+  const missionInvalid = isAnyMissionUAVInInvalidMissionConfiguration(state);
+  const shouldAuthorize = hasStartTime && !missionInvalid;
+
   dispatch(setShowAuthorization(shouldAuthorize));
   if (shouldAuthorize) {
     dispatch(setCommandsAreBroadcast(true));
+  } else if (hasStartTime && missionInvalid) {
+    dispatch(
+      showError(i18n.t('show.cannotAuthorizeInvalidMissionConfiguration'))
+    );
   }
 };
 
