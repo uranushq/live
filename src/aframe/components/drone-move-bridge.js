@@ -32,7 +32,7 @@ if (!AFrame.components['drone-move-bridge']) {
     },
 
     _onMove(e) {
-      const { id, x, y, z } = e.detail || {};
+      const { id, x, y, z, yaw } = e.detail || {};
       if (!id) return;
 
       const sceneEl = this.el.sceneEl || this.el; // scene에 붙여도 되고 entity에 붙여도 됨
@@ -50,9 +50,22 @@ if (!AFrame.components['drone-move-bridge']) {
       // 단일 이동은 즉시 위치 변경
       target.setAttribute('position', `${x} ${y} ${z}`);
 
+      const yawNum = Number(yaw);
+      if (Number.isFinite(yawNum)) {
+        target.setAttribute('rotation', `0 0 ${yawNum}`);
+      }
+
       // 선택적으로: 패널 값 갱신용 이벤트
       window.dispatchEvent(
-        new CustomEvent('drone-moved', { detail: { id, x, y, z } })
+        new CustomEvent('drone-moved', {
+          detail: {
+            id,
+            x,
+            y,
+            z,
+            ...(Number.isFinite(yawNum) ? { yaw: yawNum } : {}),
+          },
+        })
       );
     },
 

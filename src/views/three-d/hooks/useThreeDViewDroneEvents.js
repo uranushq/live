@@ -138,7 +138,7 @@ export default function useThreeDViewDroneEvents({
     };
 
     const onDroneMoved = (e) => {
-      const { id, x, y, z } = e.detail || {};
+      const { id, x, y, z, yaw } = e.detail || {};
       if (!id) return;
 
       const nx = Number(x);
@@ -146,11 +146,30 @@ export default function useThreeDViewDroneEvents({
       const nz = Number(z);
       if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nz)) return;
 
+      const yawNum = Number(yaw);
+      const hasYaw = Number.isFinite(yawNum);
+
+      setDroneConfig((prev) => {
+        const base =
+          prev && Array.isArray(prev.drones) && prev.drones.length
+            ? prev
+            : collectConfigFromScene();
+
+        if (!base || !Array.isArray(base.drones)) return base;
+
+        const drones = base.drones.map((d) => {
+          if (!sameDroneId(d.id, id)) return d;
+          return hasYaw ? { ...d, yaw: yawNum } : d;
+        });
+        return { ...base, drones };
+      });
+
       setSelectedDrone((prev) => {
         if (!prev || !sameDroneId(prev.id, id)) return prev;
         return {
           ...prev,
           currentPosition: { x: nx, y: ny, z: nz },
+          ...(hasYaw ? { yaw: yawNum } : {}),
         };
       });
     };

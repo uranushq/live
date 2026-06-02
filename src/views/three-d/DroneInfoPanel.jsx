@@ -704,6 +704,7 @@ export default function DroneInfoPanel({
             const px = captured?.x;
             const py = captured?.y;
             const pz = captured?.z;
+            const pyaw = captured?.yaw;
             return (
               <div
                 key={phase.id}
@@ -863,7 +864,7 @@ export default function DroneInfoPanel({
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '1fr 1fr 1fr',
+                      gridTemplateColumns: '1fr 1fr 1fr 1fr',
                       gap: 5,
                     }}
                   >
@@ -871,6 +872,7 @@ export default function DroneInfoPanel({
                       { label: 'X', key: 'x', value: px },
                       { label: 'Y', key: 'y', value: py },
                       { label: 'Z', key: 'z', value: pz },
+                      { label: 'Yaw', key: 'yaw', value: pyaw },
                     ].map(({ label, key, value }) => {
                       const draftKey = formationPositionDraftKey(phase.id, droneId, key);
                       const displayValue =
@@ -884,6 +886,7 @@ export default function DroneInfoPanel({
                           x: Number(captured?.x ?? 0),
                           y: Number(captured?.y ?? 0),
                           z: Number(captured?.z ?? 0),
+                          yaw: Number(captured?.yaw ?? 0),
                         };
                         if (raw === '') {
                           next[key] = 0;

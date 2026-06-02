@@ -18,6 +18,31 @@ export const toFiniteHoldMs = (value, fallback = 0) => {
   return fallback;
 };
 
+/** edit 모드 FBX 마커: 내부 자식 X=90으로 수평, 외부 래퍼 Z=yaw(보는 방향) */
+export const DRONE_MARKER_PITCH_DEG = 90;
+
+export const DRONE_MARKER_PITCH_ROTATION = `${DRONE_MARKER_PITCH_DEG} 0 0`;
+
+/** 드론 래퍼 엔티티 rotation — Z축 yaw만 (수평은 자식 pitch가 담당) */
+export const toDroneMarkerRotationStr = (yaw = 0) => {
+  const y = Number(yaw);
+  return `0 0 ${Number.isFinite(y) ? y : 0}`;
+};
+
+export const readYawFromMarkerRotation = (rotation) => {
+  if (rotation == null) return 0;
+  if (typeof rotation === 'string') {
+    const parts = rotation.trim().split(/\s+/);
+    const z = Number(parts[2]);
+    return Number.isFinite(z) ? z : 0;
+  }
+  if (typeof rotation === 'object') {
+    const z = Number(rotation.z);
+    return Number.isFinite(z) ? z : 0;
+  }
+  return 0;
+};
+
 const segmentDurationMsForPlayback = (point, index, durationPerSegment) => {
   const parsed = Number(point?.durationMs);
   if (Number.isFinite(parsed) && parsed >= 0) return parsed;
@@ -442,6 +467,7 @@ export const normalizeDroneForConfigIO = (drone, index = 0) => {
   const rawInitialPos = drone?.initialPos ?? drone?.initial_position ?? drone?.pos;
   const initialPos = parsePositionLike(rawInitialPos, fallbackPos);
   const basePos = firstPathPoint ? fallbackPos : parsePositionLike(drone?.pos, initialPos);
+  const yawNum = Number(drone?.yaw);
 
   return {
     id,
@@ -451,6 +477,7 @@ export const normalizeDroneForConfigIO = (drone, index = 0) => {
     pos: basePos,
     initialPos,
     path,
+    ...(Number.isFinite(yawNum) ? { yaw: yawNum } : {}),
   };
 };
 
@@ -490,6 +517,7 @@ export const collectConfigFromScene = () => {
     }
 
     const batteryNum = Number(batteryAttr);
+    const yaw = readYawFromMarkerRotation(el.getAttribute('rotation'));
 
     return {
       id,
@@ -499,6 +527,7 @@ export const collectConfigFromScene = () => {
       pos,
       initialPos,
       path,
+      yaw,
     };
   });
 

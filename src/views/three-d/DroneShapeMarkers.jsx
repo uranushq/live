@@ -1,6 +1,8 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 
+import { DRONE_MARKER_PITCH_ROTATION, toDroneMarkerRotationStr } from './utils/threeDViewUtils';
+
 function normalizeDrones(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
 
@@ -28,6 +30,7 @@ function normalizeDrones(drones) {
         initialPosArray = d.initial_position;
       }
       const posArray = firstPathPoint ? fallbackPos : (Array.isArray(d.pos) && d.pos.length === 3 ? d.pos : initialPosArray);
+      const yawNum = Number(d.yaw);
 
       return {
         id,
@@ -37,6 +40,7 @@ function normalizeDrones(drones) {
         pos: posArray,
         initialPos: initialPosArray,
         path: Array.isArray(d.path) ? d.path : [],
+        yaw: Number.isFinite(yawNum) ? yawNum : 0,
       };
     })
     .filter((d) => d.id);
@@ -48,9 +52,8 @@ const DroneShapeMarkers = ({ drones }) => {
   return items.map((d) => (
     <a-entity
       key={d.id}
-      mixin="drone-marker"
       position={d.pos.join(' ')}
-      rotation="90 0 0"
+      rotation={toDroneMarkerRotationStr(d.yaw)}
       class="three-d-clickable"
       data-drone-id={d.id}
       data-drone-name={d.name}
@@ -58,7 +61,9 @@ const DroneShapeMarkers = ({ drones }) => {
       data-status={d.status}
       data-initial-pos={d.initialPos.join(' ')}
       data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
-    />
+    >
+      <a-entity mixin="drone-marker" rotation={DRONE_MARKER_PITCH_ROTATION} />
+    </a-entity>
   ));
 };
 
@@ -73,6 +78,7 @@ DroneShapeMarkers.propTypes = {
       initialPos: PropTypes.arrayOf(PropTypes.number),
       initial_position: PropTypes.arrayOf(PropTypes.number),
       path: PropTypes.array,
+      yaw: PropTypes.number,
     })
   ),
 };
