@@ -84,6 +84,24 @@
     "initialBearing": ", initial bearing: ",
     "selectTwoItems": "Select exactly two items to calculate the bearing and distance between them"
   },
+  "flightModeControl": {
+    "apply": "Apply",
+    "applyFailed": "Failed to set flight mode: {{message}}",
+    "applyFailedGeneric": "Failed to set flight mode.",
+    "applyPartial": "Flight mode was not set on some drones{{detail}}",
+    "applySuccess": "Flight mode updated (FLTMODE5/6).",
+    "label": "Mode",
+    "modes": {
+      "auto": "Auto (3)",
+      "guided": "Guided (4)",
+      "loiter": "Loiter (5)",
+      "show": "Show (127)",
+      "stabilize": "Stabilize (0)"
+    },
+    "tooltipBroadcast": "Sets FLTMODE5/6 on all connected MAVLink drones",
+    "tooltipNoSelection": "Select drones to change FLTMODE5/6",
+    "tooltipSelection": "Sets FLTMODE5/6 on {{count}} selected drone(s)"
+  },
   "bottomBar": {
     "aircraftPreflightCheck": "Aircraft preflight check",
     "collapse": "Collapse flight control panel",

@@ -5,7 +5,10 @@ import TimeAgo from 'react-timeago';
 
 import { StatusText } from '@skybrush/mui-components';
 
+import { Status } from '@skybrush/app-theme-mui';
+
 import MiniTable, { naText } from '~/components/MiniTable';
+import { getFltModeSlotLabelForUavId } from '~/features/mavlink/selectors';
 import { getDatalinkColor } from '~/features/uavs/datalink';
 import {
   abbreviateGPSFixType,
@@ -27,13 +30,16 @@ const StatusSummaryMiniTable = ({
   heading,
   lastUpdated,
   localPosition,
+  fltModeSlotLabel,
   mode,
   position,
   rssi,
 }) => {
   const { lat, lon, amsl, ahl, agl } = position || {};
   const hasLocalPosition = localPosition && Array.isArray(localPosition);
-  const flightModeLabel = mode ? (
+  const flightModeLabel = fltModeSlotLabel ? (
+    <StatusText status={Status.OFF}>{fltModeSlotLabel}</StatusText>
+  ) : mode ? (
     <StatusText status={getSemanticsForFlightMode(mode)}>
       {getFlightModeLabel(mode)}
     </StatusText>
@@ -154,6 +160,7 @@ StatusSummaryMiniTable.propTypes = {
   heading: PropTypes.number,
   lastUpdated: PropTypes.number,
   localPosition: PropTypes.arrayOf(PropTypes.number),
+  fltModeSlotLabel: PropTypes.string,
   mode: PropTypes.string,
   position: PropTypes.shape({
     lat: PropTypes.number,
@@ -167,7 +174,15 @@ StatusSummaryMiniTable.propTypes = {
 
 export default connect(
   // mapStateToProps
-  (state, ownProps) => getUAVById(state, ownProps.uavId),
+  (state, ownProps) => {
+    const uav = getUAVById(state, ownProps.uavId);
+    return {
+      ...uav,
+      fltModeSlotLabel: ownProps.uavId
+        ? getFltModeSlotLabelForUavId(state, ownProps.uavId)
+        : undefined,
+    };
+  },
 
   // mapDispatchToProps
   {}

@@ -52,6 +52,7 @@ import logReducer from '~/features/log/slice';
 import mapCachingReducer from '~/features/map-caching/slice';
 import featuresReducer from '~/features/map-features/slice';
 import mapReducer from '~/features/map/slice';
+import mavlinkReducer from '~/features/mavlink/slice';
 import measurementReducer from '~/features/measurement/slice';
 import messagesReducer from '~/features/messages/slice';
 import missionReducer from '~/features/mission/slice';
@@ -128,6 +129,7 @@ const reducer = combineReducers({
   logDownload: logDownloadReducer,
   map: mapReducer,
   mapCaching: mapCachingReducer,
+  mavlink: mavlinkReducer,
   measurement: measurementReducer,
   messages: messagesReducer,
   mission: missionReducer,

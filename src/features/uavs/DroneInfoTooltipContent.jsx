@@ -9,6 +9,7 @@ import { StatusPill } from '@skybrush/mui-components';
 import { BatteryFormatter } from '~/components/battery';
 import BatteryIndicator from '~/components/BatteryIndicator';
 import { getBatteryFormatter } from '~/features/settings/selectors';
+import { getFltModeSlotLabelForUavId } from '~/features/mavlink/selectors';
 import { UAVAge } from '~/model/uav';
 import { formatCoordinateArray, formatNumberSafely } from '~/utils/formatting';
 import FlightModeStatusPill from '~/views/uavs/FlightModeStatusPill';
@@ -85,6 +86,7 @@ const DroneInfoTooltipContent = ({
   batteryFormatter,
   batteryStatus,
   details,
+  fltModeSlotLabel,
   gpsFix,
   heading,
   label,
@@ -118,6 +120,7 @@ const DroneInfoTooltipContent = ({
       </div>
       <div className={classes.row}>
         <FlightModeStatusPill
+          label={fltModeSlotLabel}
           mode={mode}
           className={clsx(classes.pill, classes.modePill)}
         />
@@ -156,6 +159,7 @@ DroneInfoTooltipContent.propTypes = {
     percentage: PropTypes.number,
   }),
   details: PropTypes.string,
+  fltModeSlotLabel: PropTypes.string,
   gpsFix: PropTypes.shape({
     type: PropTypes.number,
     numSatellites: PropTypes.number,
@@ -180,6 +184,7 @@ export default connect(
       const uav = getUAVById(state, uavId);
       return {
         batteryFormatter: getBatteryFormatter(state),
+        fltModeSlotLabel: getFltModeSlotLabelForUavId(state, uavId),
         gpsFix: uav?.gpsFix,
         heading: uav?.heading,
         label: uavId,
