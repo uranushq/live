@@ -17,6 +17,7 @@ import { connect } from 'react-redux';
 import { colorForStatus } from '~/components/colors';
 import { Status as SemanticStatus } from '~/components/semantics';
 import { getBatteryFormatter } from '~/features/settings/selectors';
+import { getFltModeSlotLabelForUavId } from '~/features/mavlink/selectors';
 import { hasActiveGeofencePolygon } from '~/features/mission/selectors';
 import {
   hasScheduledStartTime,
@@ -201,7 +202,7 @@ PillBadge.propTypes = {
 
 export const buildDroneTelemetryItems = (
   drone,
-  { batteryStyle, gpsFixType, gpsNumSatellites, mode, pathUploaded, linked }
+  { batteryStyle, fltModeSlotLabel, gpsFixType, gpsNumSatellites, mode, pathUploaded, linked }
 ) => {
   const gpsLabel =
     linked && gpsFixType !== undefined
@@ -209,7 +210,11 @@ export const buildDroneTelemetryItems = (
       : displayValue(drone?.gpsFix);
 
   const modeLabel =
-    linked && mode ? abbreviateFlightMode(mode) || displayValue(drone?.mode) : displayValue(drone?.mode);
+    linked && fltModeSlotLabel
+      ? fltModeSlotLabel
+      : linked && mode
+        ? abbreviateFlightMode(mode) || displayValue(drone?.mode)
+        : displayValue(drone?.mode);
 
   const gpsTileStyle =
     linked && gpsFixType !== undefined
@@ -280,6 +285,7 @@ const DroneStatusOverlayPresentation = ({
   alert,
   batteryStyle,
   drone,
+  fltModeSlotLabel,
   gpsFixType,
   gpsNumSatellites,
   linked,
@@ -292,13 +298,23 @@ const DroneStatusOverlayPresentation = ({
     () =>
       buildDroneTelemetryItems(drone, {
         batteryStyle,
+        fltModeSlotLabel,
         gpsFixType,
         gpsNumSatellites,
         mode,
         pathUploaded,
         linked,
       }),
-    [batteryStyle, drone, gpsFixType, gpsNumSatellites, mode, pathUploaded, linked]
+    [
+      batteryStyle,
+      drone,
+      fltModeSlotLabel,
+      gpsFixType,
+      gpsNumSatellites,
+      mode,
+      pathUploaded,
+      linked,
+    ]
   );
 
   const currentPositionText = useMemo(() => {
@@ -464,6 +480,7 @@ DroneStatusOverlayPresentation.propTypes = {
   }),
   gpsFixType: PropTypes.number,
   gpsNumSatellites: PropTypes.number,
+  fltModeSlotLabel: PropTypes.string,
   linked: PropTypes.bool,
   mode: PropTypes.string,
   pathUploaded: PropTypes.bool,
@@ -513,6 +530,7 @@ export default connect((state, { drone }) => {
       showStartTimeSet: hasScheduledStartTime(state),
     }),
     batteryStyle: getBatteryLevelStyle(batteryPercentage),
+    fltModeSlotLabel: getFltModeSlotLabelForUavId(state, uavId),
     gpsFixType: uav.gpsFix?.type,
     gpsNumSatellites: uav.gpsFix?.numSatellites,
     mode: uav.mode,

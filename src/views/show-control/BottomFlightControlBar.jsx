@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { makeStyles } from '@skybrush/app-theme-mui';
 
 import FlightCommandTargetToggle from './FlightCommandTargetToggle';
+import FlightModeControl from './FlightModeControl';
 import LargeControlButtonGroup from './LargeControlButtonGroup';
 import MissionSetupStrip from './MissionSetupStrip';
 import PreflightStartStrip from './PreflightStartStrip';
@@ -120,6 +121,15 @@ const useStyles = makeStyles((theme) => ({
     minHeight: 28,
     padding: theme.spacing(0.625, 1.25, 0.375),
   },
+  panelHeaderControls: {
+    alignItems: 'center',
+    display: 'flex',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    gap: theme.spacing(0.75),
+    justifyContent: 'flex-end',
+    minWidth: 0,
+  },
   panelTitle: {
     color: 'rgba(255,255,255,0.55)',
     fontSize: 'clamp(0.72rem, 0.88vw, 0.78rem)',
@@ -185,7 +195,10 @@ const BottomFlightControlBar = () => {
                   <Typography className={classes.panelTitle} component='div'>
                     {t('bottomBar.droneControl')}
                   </Typography>
-                  <FlightCommandTargetToggle />
+                  <Box className={classes.panelHeaderControls}>
+                    <FlightCommandTargetToggle />
+                    <FlightModeControl />
+                  </Box>
                 </Box>
                 <LargeControlButtonGroup variant='bottomBar' />
               </Box>
