@@ -27,6 +27,7 @@ import MapCachingDialog from './features/map-caching/MapCachingDialog';
 import CoordinateAveragingDialog from './features/measurement/CoordinateAveragingDialog';
 import MissionPlannerDialog from './features/mission/MissionPlannerDialog';
 import MissionProgressObserver from './features/mission/MissionProgressObserver';
+import MavlinkFlightModeUpdater from './features/mavlink/MavlinkFlightModeUpdater';
 import ParameterUploadSetupDialog from './features/parameters/ParameterUploadSetupDialog';
 import PromptDialog from './features/prompt/PromptDialog';
 import RTKSetupDialog from './features/rtk/RTKSetupDialog';
@@ -202,6 +203,7 @@ const App = ({ onFirstRender }) => (
 
       <LanguageWatcher />
       <MissionProgressObserver />
+      <MavlinkFlightModeUpdater />
       <ShowFileWatcher />
       {hasFeature('ledShow') && <LedPlaybackDriver />}
 

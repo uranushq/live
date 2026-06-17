@@ -34,6 +34,7 @@ import {
   getLightColorByUavIdInCSSNotation,
   getUAVById,
 } from '~/features/uavs/selectors';
+import { getFltModeSlotLabelForUavId } from '~/features/mavlink/selectors';
 import { UAVAge } from '~/model/uav';
 import { getPreferredCoordinateFormatter } from '~/selectors/formatting';
 import { formatCoordinateArray } from '~/utils/formatting';
@@ -195,6 +196,7 @@ const DroneStatusLine = ({
   label,
   localPosition,
   missing,
+  fltModeSlotLabel,
   mode,
   pathUploaded,
   position,
@@ -272,6 +274,7 @@ const DroneStatusLine = ({
             style={listDataColumnStyle('mode')}
           >
             <FlightModeStatusPill
+              label={fltModeSlotLabel}
               mode={mode}
               className={clsx(classes.pill, classes.modePill)}
             />
@@ -425,6 +428,7 @@ DroneStatusLine.propTypes = {
   label: PropTypes.string,
   localPosition: PropTypes.arrayOf(PropTypes.number),
   missing: PropTypes.bool,
+  fltModeSlotLabel: PropTypes.string,
   mode: PropTypes.string,
   pathUploaded: PropTypes.bool,
   position: PropTypes.shape({
@@ -497,6 +501,7 @@ export default connect(
         headingDeviation,
         localPosition: uav ? uav.localPosition : undefined,
         missing: !uav,
+        fltModeSlotLabel: getFltModeSlotLabelForUavId(state, uavId),
         mode: uav ? uav.mode : undefined,
         position: uav ? uav.position : undefined,
         rssi: uav ? uav.rssi : undefined,
