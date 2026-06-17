@@ -58,6 +58,7 @@ import {
 import {
   isMapCoordinateSystemLeftHanded,
 } from '~/selectors/map';
+import { hasFeature } from '~/utils/configuration';
 
 const getEffectiveScenery = (state) => {
   return getEffectiveSceneryUtil(state, getSceneryForThreeDView, isShowIndoor);
@@ -1743,6 +1744,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
           {!isCreateMode && <a-drone-flock />}
           <Room />
         </a-entity>
+
+        {hasFeature('ledShow') && <a-entity led-show-grid='' />}
 
         <Scenery type={`${scenery}-${effectiveLighting}`} grid={grid} />
       </a-scene>
