@@ -2,8 +2,11 @@ import React from 'react';
 import PropTypes from 'prop-types';
 
 import { showYawToModelRotationZ } from '~/aframe/components/fbx-model';
+import { hasFeature } from '~/utils/configuration';
 
 import { DEFAULT_DRONE_GROUND_POSITION } from './utils/threeDViewUtils';
+
+const ledShowEnabled = hasFeature('ledShow');
 
 function normalizeDrones(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
@@ -58,7 +61,7 @@ function normalizeDrones(drones) {
 const DroneShapeMarkers = ({ drones }) => {
   const items = normalizeDrones(drones);
 
-  return items.map((d) => (
+  return items.map((d, index) => (
     <a-entity
       key={d.id}
       position={d.pos.join(' ')}
@@ -72,6 +75,7 @@ const DroneShapeMarkers = ({ drones }) => {
       data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
     >
       <a-entity mixin="drone-marker" class="three-d-clickable" />
+      {ledShowEnabled && <a-entity drone-led-panel={`index: ${index}`} />}
     </a-entity>
   ));
 };

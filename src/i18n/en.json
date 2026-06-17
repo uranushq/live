@@ -84,30 +84,6 @@
     "initialBearing": ", initial bearing: ",
     "selectTwoItems": "Select exactly two items to calculate the bearing and distance between them"
   },
-  "bottomBar": {
-    "aircraftPreflightCheck": "Aircraft preflight check",
-    "collapse": "Collapse flight control panel",
-    "detachedPanelHint": "Show controls are available in the bottom bar.",
-    "droneControl": "Drone control",
-    "droneCount": "{{count}} drones",
-    "dronePlacement": "Drone placement",
-    "environmentSetup": "Environment setup",
-    "expand": "Expand flight control panel",
-    "exportPath": "Export path",
-    "failed": "Failed",
-    "flightControls": "Flight controls",
-    "manualPreflightCheck": "Manual preflight check",
-    "missionSetup": "Mission setup",
-    "noShowLoaded": "No show loaded",
-    "preflightCheck": "Preflight check & start",
-    "ready": "Ready",
-    "selectStartTime": "Select start time",
-    "showStartPermissionRequired": "SHOW START permission required",
-    "startTime": "Start time",
-    "tapToUpload": "Tap to upload",
-    "uploadData": "Upload data",
-    "waiting": "Waiting"
-  },
   "broadcastButton": {
     "disable": "Disable broadcast",
     "enable": "Enable broadcast for {{time}} seconds"
@@ -381,12 +357,16 @@
   },
   "navigationInstructions": {
     "altitude": "Altitude",
+    "arrows": "Arrows",
+    "flyForwardBackward": "Fly forward / backward",
     "flyMove": "Fly / strafe",
     "leftDragLook": "Left drag: look around",
+    "lookAround": "Look around",
     "middleDrag": "Middle drag",
+    "moveSideways": "Move sideways",
     "noInstruction": "No instructions for this navigation mode",
     "rightDrag": "Right drag",
-    "run": "Faster move",
+    "run": "Run",
     "shiftDrag": "Shift + drag",
     "walkAround": "Walk around"
   },

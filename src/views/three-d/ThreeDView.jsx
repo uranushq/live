@@ -58,7 +58,8 @@ import {
 import {
   isMapCoordinateSystemLeftHanded,
 } from '~/selectors/map';
-import { hasFeature } from '~/utils/configuration';
+import { setPlayhead, setPlaying } from '~/features/led-editor/slice';
+import store from '~/store';
 
 const getEffectiveScenery = (state) => {
   return getEffectiveSceneryUtil(state, getSceneryForThreeDView, isShowIndoor);
@@ -1208,6 +1209,19 @@ const ThreeDView = React.forwardRef((props, ref) => {
     };
   }, [isPlaybackRunning, maxPathDurationMs]);
 
+  // When the 3D path playback starts, start the LED show from the same instant
+  // (the drone "arm") so the LEDs play on the drones together with the flight.
+  // The two then run on independent clocks, each for its own length — so the
+  // combined playback lasts as long as the longer of (path, LED).
+  const ledSyncPrevRunning = useRef(false);
+  useEffect(() => {
+    if (isPlaybackRunning && !ledSyncPrevRunning.current) {
+      store.dispatch(setPlayhead(0));
+      store.dispatch(setPlaying(true));
+    }
+    ledSyncPrevRunning.current = isPlaybackRunning;
+  }, [isPlaybackRunning]);
+
   useEffect(() => {
     const onGizmoDragState = (e) => {
       const detail = e.detail || {};
@@ -1744,8 +1758,6 @@ const ThreeDView = React.forwardRef((props, ref) => {
           {!isCreateMode && <a-drone-flock />}
           <Room />
         </a-entity>
-
-        {hasFeature('ledShow') && <a-entity led-show-grid='' />}
 
         <Scenery type={`${scenery}-${effectiveLighting}`} grid={grid} />
       </a-scene>
