@@ -257,6 +257,38 @@ export async function startRTKSurvey(
 }
 
 /**
+ * Asks the server to set the current flight mode of a UAV via OBJ-CMD.
+ */
+export async function setUAVFlightMode(
+  hub: MessageHub,
+  { uavId, mode }: { uavId: string; mode: string },
+  options: AsyncResponseHandlerOptions = {}
+) {
+  validateObjectId(uavId);
+
+  try {
+    await hub.sendCommandRequest(
+      {
+        uavId,
+        command: 'mode',
+        args: [mode],
+      },
+      {
+        timeout: 30,
+        ...options,
+      }
+    );
+  } catch (error) {
+    throw new Error(
+      errorToString(
+        (error as any).message || error,
+        `Failed to set flight mode to ${mode} on UAV ${uavId}`
+      )
+    );
+  }
+}
+
+/**
  * Asks the server to upload a drone show specification to a given UAV.
  */
 export async function uploadDroneShow(
@@ -405,6 +437,7 @@ const _operations = {
   setRTKCorrectionsSource,
   setShowConfiguration,
   setShowLightConfiguration,
+  setUAVFlightMode,
   startRTKSurvey,
   uploadDroneShow,
   uploadFirmware,

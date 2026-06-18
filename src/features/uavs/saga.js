@@ -18,7 +18,9 @@ import { dismissAlerts, triggerAlert } from '~/features/alert/slice';
 import { setClockState } from '~/features/clocks/slice';
 import { CommonClockId } from '~/features/clocks/types';
 import { getTickCountOnClockAt } from '~/features/clocks/utils';
-import { getRoundedClockSkewInMilliseconds } from '~/features/servers/selectors';
+import {
+  getRoundedClockSkewInMilliseconds,
+} from '~/features/servers/selectors';
 import { getUAVAgingThresholds } from '~/features/settings/selectors';
 import { getShowDuration } from '~/features/show/selectors';
 import UAVErrorCode from '~/flockwave/UAVErrorCode';

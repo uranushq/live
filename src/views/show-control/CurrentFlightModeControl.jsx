@@ -1,4 +1,4 @@
-import FlightTakeoff from '@mui/icons-material/FlightTakeoff';
+import Flight from '@mui/icons-material/Flight';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -11,17 +11,18 @@ import { connect } from 'react-redux';
 
 import { makeStyles } from '@skybrush/app-theme-mui';
 
-import { mergeFltModeSlotsByUavId } from '~/features/mavlink/slice';
 import { areFlightCommandsBroadcast } from '~/features/mission/selectors';
+import { getUAVIdsParticipatingInMission } from '~/features/mission/selectors';
 import { showError, showSuccess } from '~/features/snackbar/actions';
-import { getSelectedUAVIds } from '~/features/uavs/selectors';
+import { getSelectedUAVIds, getUAVById } from '~/features/uavs/selectors';
+import messageHub from '~/message-hub';
+import store from '~/store';
 import {
-  FLIGHT_MODE_PRESETS,
-  getDefaultFlightModeValue,
-  getFlightModes,
-  parseFltModeSlotsByUavId,
-  setFlightModes,
-  summarizeFlightModeFromResults,
+  CURRENT_FLIGHT_MODE_COMMANDS,
+  getDefaultCurrentFlightModeCommand,
+  isSupportedCurrentFlightModeCommand,
+  summarizeTelemetryModes,
+  telemetryModeToCommand,
 } from '~/utils/mavlinkFlightModes';
 
 const useStyles = makeStyles((theme) => ({
@@ -58,7 +59,7 @@ const useStyles = makeStyles((theme) => ({
     fontSize: '0.74rem',
     fontWeight: 600,
     height: 26,
-    minWidth: 108,
+    minWidth: 116,
 
     '& .MuiSelect-select': {
       padding: theme.spacing(0.35, 3, 0.35, 1),
@@ -93,86 +94,104 @@ const useStyles = makeStyles((theme) => ({
   },
 }));
 
-const FlightModeControl = ({
+const CurrentFlightModeControl = ({
   broadcast,
-  onFltModeSlotsUpdated,
+  missionUAVIds,
   onNotifyError,
   onNotifySuccess,
   selectedUAVIds,
   t,
 }) => {
   const classes = useStyles();
-  const [mode, setMode] = useState(getDefaultFlightModeValue);
-  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState(getDefaultCurrentFlightModeCommand);
   const [applying, setApplying] = useState(false);
 
   const targetUAVIds = useMemo(
-    () => (broadcast ? undefined : selectedUAVIds),
-    [broadcast, selectedUAVIds]
+    () => (broadcast ? missionUAVIds : selectedUAVIds),
+    [broadcast, missionUAVIds, selectedUAVIds]
   );
 
-  const canApply = broadcast || selectedUAVIds.length > 0;
+  const canApply = targetUAVIds.length > 0;
 
   const modeOptions = useMemo(
     () =>
-      FLIGHT_MODE_PRESETS.map((preset) => ({
-        value: preset.value,
-        label: t(`flightModeControl.modes.${preset.labelKey}`),
+      CURRENT_FLIGHT_MODE_COMMANDS.map((preset) => ({
+        value: preset.command,
+        label: t(`currentFlightModeControl.modes.${preset.labelKey}`),
       })),
     [t]
   );
 
-  const refreshCurrentMode = useCallback(async () => {
-    if (!broadcast && selectedUAVIds.length === 0) {
-      setMode(getDefaultFlightModeValue());
+  useEffect(() => {
+    if (!canApply) {
+      setMode(getDefaultCurrentFlightModeCommand());
       return;
     }
 
-    setLoading(true);
-    try {
-      const body = await getFlightModes(targetUAVIds);
-      onFltModeSlotsUpdated(parseFltModeSlotsByUavId(body));
-      const summarized = summarizeFlightModeFromResults(body);
-      if (typeof summarized === 'number') {
-        setMode(summarized);
-      }
-    } catch (error) {
-      // Silent on refresh; the user can still apply a mode manually.
-    } finally {
-      setLoading(false);
+    const state = store.getState();
+    const telemetryModes = targetUAVIds.map(
+      (uavId) => getUAVById(state, uavId)?.mode
+    );
+    const summarized = summarizeTelemetryModes(telemetryModes);
+    if (summarized) {
+      setMode(summarized);
     }
-  }, [broadcast, onFltModeSlotsUpdated, selectedUAVIds, targetUAVIds]);
-
-  useEffect(() => {
-    refreshCurrentMode();
-  }, [refreshCurrentMode]);
+  }, [canApply, targetUAVIds]);
 
   const handleApply = useCallback(async () => {
     if (!canApply || applying) {
       return;
     }
 
-    setApplying(true);
-    try {
-      const { body, partial } = await setFlightModes(mode, targetUAVIds);
-      onFltModeSlotsUpdated(parseFltModeSlotsByUavId(body));
+    if (!isSupportedCurrentFlightModeCommand(mode)) {
+      onNotifyError(t('currentFlightModeControl.applyFailedGeneric'));
+      return;
+    }
 
-      if (partial) {
-        const detail =
-          Array.isArray(body?.errors) && body.errors.length > 0
-            ? `: ${body.errors.join('; ')}`
-            : '';
-        onNotifyError(t('flightModeControl.applyPartial', { detail }));
-      } else {
-        onNotifySuccess(t('flightModeControl.applySuccess'));
+    setApplying(true);
+    const failures = [];
+
+    try {
+      const state = store.getState();
+
+      for (const uavId of targetUAVIds) {
+        const currentTelemetry = getUAVById(state, uavId)?.mode;
+        const currentCommand = telemetryModeToCommand(currentTelemetry);
+        if (currentCommand === mode) {
+          continue;
+        }
+
+        try {
+          await messageHub.execute.setUAVFlightMode({ uavId, mode });
+        } catch (error) {
+          failures.push(
+            `${uavId}: ${error?.message ? String(error.message) : String(error)}`
+          );
+        }
       }
 
-      await refreshCurrentMode();
+      if (failures.length === targetUAVIds.length) {
+        onNotifyError(
+          t('currentFlightModeControl.applyFailed', {
+            message: failures.join('; '),
+          })
+        );
+      } else if (failures.length > 0) {
+        onNotifyError(
+          t('currentFlightModeControl.applyPartial', {
+            detail: `: ${failures.join('; ')}`,
+          })
+        );
+      } else {
+        onNotifySuccess(t('currentFlightModeControl.applySuccess'));
+      }
     } catch (error) {
       onNotifyError(
         error?.message
-          ? t('flightModeControl.applyFailed', { message: error.message })
-          : t('flightModeControl.applyFailedGeneric')
+          ? t('currentFlightModeControl.applyFailed', {
+              message: error.message,
+            })
+          : t('currentFlightModeControl.applyFailedGeneric')
       );
     } finally {
       setApplying(false);
@@ -181,10 +200,8 @@ const FlightModeControl = ({
     applying,
     canApply,
     mode,
-    onFltModeSlotsUpdated,
     onNotifyError,
     onNotifySuccess,
-    refreshCurrentMode,
     t,
     targetUAVIds,
   ]);
@@ -192,16 +209,16 @@ const FlightModeControl = ({
   return (
     <Box className={classes.root}>
       <span className={classes.label}>
-        <FlightTakeoff className={classes.labelIcon} />
-        {t('flightModeControl.label')}
+        <Flight className={classes.labelIcon} />
+        {t('currentFlightModeControl.label')}
       </span>
       <Select
         className={classes.select}
-        disabled={!canApply || loading || applying}
+        disabled={!canApply || applying}
         displayEmpty
         size='small'
         value={mode}
-        onChange={(event) => setMode(Number(event.target.value))}
+        onChange={(event) => setMode(String(event.target.value))}
       >
         {modeOptions.map((option) => (
           <MenuItem key={option.value} value={option.value}>
@@ -220,16 +237,16 @@ const FlightModeControl = ({
         {applying ? (
           <CircularProgress color='inherit' size={14} />
         ) : (
-          t('flightModeControl.apply')
+          t('currentFlightModeControl.apply')
         )}
       </Button>
     </Box>
   );
 };
 
-FlightModeControl.propTypes = {
+CurrentFlightModeControl.propTypes = {
   broadcast: PropTypes.bool,
-  onFltModeSlotsUpdated: PropTypes.func,
+  missionUAVIds: PropTypes.arrayOf(PropTypes.string),
   onNotifyError: PropTypes.func,
   onNotifySuccess: PropTypes.func,
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
@@ -239,12 +256,11 @@ FlightModeControl.propTypes = {
 export default connect(
   (state) => ({
     broadcast: areFlightCommandsBroadcast(state),
+    missionUAVIds: getUAVIdsParticipatingInMission(state),
     selectedUAVIds: getSelectedUAVIds(state),
   }),
   (dispatch) => ({
-    onFltModeSlotsUpdated: (slotsByUavId) =>
-      dispatch(mergeFltModeSlotsByUavId(slotsByUavId)),
     onNotifyError: (message) => dispatch(showError(message)),
     onNotifySuccess: (message) => dispatch(showSuccess(message)),
   })
-)(withTranslation()(FlightModeControl));
+)(withTranslation()(CurrentFlightModeControl));

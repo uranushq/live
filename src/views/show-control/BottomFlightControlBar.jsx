@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { makeStyles } from '@skybrush/app-theme-mui';
 
+import CurrentFlightModeControl from './CurrentFlightModeControl';
 import FlightCommandTargetToggle from './FlightCommandTargetToggle';
 import FlightModeControl from './FlightModeControl';
 import LargeControlButtonGroup from './LargeControlButtonGroup';
@@ -197,6 +198,7 @@ const BottomFlightControlBar = () => {
                   </Typography>
                   <Box className={classes.panelHeaderControls}>
                     <FlightCommandTargetToggle />
+                    <CurrentFlightModeControl />
                     <FlightModeControl />
                   </Box>
                 </Box>
