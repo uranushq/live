@@ -85,7 +85,6 @@ const Sidebar = ({
           icon={<ThreeDRotation />}
           label={t('view.three-d-view')}
           component='three-d-view'
-          reorderEnabled={false}
         />
         <Module
           id='layers'

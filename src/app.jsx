@@ -117,6 +117,14 @@ const sanitizeWorkbenchState = (state) => {
       }
     }
 
+    const isThreeDViewPanel =
+      node.component === 'three-d-view' ||
+      node.componentName === 'three-d-view' ||
+      node.id === 'threeDView';
+    if (isThreeDViewPanel) {
+      node.reorderEnabled = true;
+    }
+
     Object.keys(node).forEach((key) => {
       sanitizeNode(node[key]);
     });

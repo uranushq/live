@@ -11,6 +11,11 @@ body .lm_content {
   background-color: white;
 }
 
+/* Keep A-Frame canvases inside panel bounds (avoids blocking GoldenLayout tab drags) */
+body .lm_content:has(a-scene) {
+  overflow: hidden;
+}
+
 /* Fix the background color of the panel bodies and the tabs */
 body .lm_header {
   .lm_tab {

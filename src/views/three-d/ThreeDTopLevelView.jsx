@@ -177,8 +177,17 @@ const ThreeDTopLevelView = ({
   }, [glContainer]);
 
   return (
-    <IgnoreKeys style={{ height: '100%' }}>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <IgnoreKeys style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          width: '100%',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
         <AppBar color='inherit' position='static' className={classes.appBar}>
           <Toolbar disableGutters variant='dense' className={classes.toolbar}>
             <NavigationButtonGroup

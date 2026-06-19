@@ -179,6 +179,7 @@ export const componentRegistry = {
   'three-d-view': {
     component: views.ThreeDTopLevelView,
     label: '3D View',
+    detachable: true,
     feature: 'threeDView',
   },
   'uav-details': {
