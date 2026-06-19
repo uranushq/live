@@ -58,7 +58,13 @@ import {
 import {
   isMapCoordinateSystemLeftHanded,
 } from '~/selectors/map';
-import { setPlayhead, setPlaying } from '~/features/led-editor/slice';
+import { setPlayhead, setPlaying, setThreeDSync } from '~/features/led-editor/slice';
+import {
+  getPlayheadSec,
+  getPlaying,
+  getThreeDSync,
+  getTimelineDuration,
+} from '~/features/led-editor/selectors';
 import store from '~/store';
 
 const getEffectiveScenery = (state) => {
@@ -451,7 +457,16 @@ const ThreeDView = React.forwardRef((props, ref) => {
     viewRuntime,
     persistRehydrated,
     onSetViewRuntimeState,
+    ledPlayheadSec,
+    ledPlaying,
+    threeDSync,
+    ledTimelineDuration,
   } = props;
+
+  // Sync is only meaningful when an LED show exists (its playhead is the master
+  // clock). With no boards the LED clock can't advance, so fall back to the
+  // 3D view's own independent playback even when the checkbox is on.
+  const syncActive = threeDSync && ledTimelineDuration > 0;
 
   const isCreateMode =
     typeof isCreateModeProp === 'boolean'
@@ -1145,12 +1160,22 @@ const ThreeDView = React.forwardRef((props, ref) => {
   };
 
   const handlePathProgressChange = (nextValue) => {
+    if (syncActive) {
+      // Sync on: the LED-show playhead is the master clock. Pause and seek it;
+      // the sync effect below mirrors the new position onto the 3D drones.
+      const clamped = Math.min(100, Math.max(0, Number(nextValue) || 0));
+      const absSec = (maxPathDurationMs * (clamped / 100)) / 1000;
+      store.dispatch(setPlaying(false));
+      store.dispatch(setPlayhead(absSec));
+      return;
+    }
     setIsPlaybackRunning(false);
     setPathProgress(nextValue);
     applyProgressToAll(nextValue);
   };
 
   useEffect(() => {
+    if (syncActive) return undefined; // sync mode drives drones from the LED clock
     if (!isPlaybackRunning || maxPathDurationMs <= 0) return undefined;
 
     let rafId = null;
@@ -1207,20 +1232,24 @@ const ThreeDView = React.forwardRef((props, ref) => {
       window.removeEventListener('drone-path-finished', onPathFinished);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [isPlaybackRunning, maxPathDurationMs]);
+  }, [isPlaybackRunning, maxPathDurationMs, syncActive]);
 
-  // When the 3D path playback starts, start the LED show from the same instant
-  // (the drone "arm") so the LEDs play on the drones together with the flight.
-  // The two then run on independent clocks, each for its own length — so the
-  // combined playback lasts as long as the longer of (path, LED).
-  const ledSyncPrevRunning = useRef(false);
+  // Bidirectional playback sync. When enabled, the LED-show playhead is the
+  // single source of truth: whether playback is started/seeked from the LED
+  // simulator or from this 3D view (its buttons/slider write to the same
+  // playhead), this effect mirrors the playhead onto the 3D drones so both
+  // timelines stay aligned. Seeking the LED bar to e.g. 4s and playing moves
+  // the 3D drones — and the 3D progress bar — to the matching instant.
   useEffect(() => {
-    if (isPlaybackRunning && !ledSyncPrevRunning.current) {
-      store.dispatch(setPlayhead(0));
-      store.dispatch(setPlaying(true));
-    }
-    ledSyncPrevRunning.current = isPlaybackRunning;
-  }, [isPlaybackRunning]);
+    if (!syncActive) return;
+    if (!(maxPathDurationMs > 0)) return;
+    const absMs = Math.max(0, Number(ledPlayheadSec) || 0) * 1000;
+    const progress = Math.min(100, (absMs / maxPathDurationMs) * 100);
+    setPathProgress(progress);
+    applyProgressToAll(progress);
+    // applyProgressToAll closes over the latest effectiveConfig each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncActive, ledPlayheadSec, maxPathDurationMs]);
 
   useEffect(() => {
     const onGizmoDragState = (e) => {
@@ -1239,6 +1268,13 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const base = effectiveConfig;
 
     if (!base || !Array.isArray(base.drones) || !base.drones.length) return;
+
+    if (syncActive) {
+      // Sync on: just start the shared LED-show clock; the sync effect advances
+      // the 3D drones to follow it. (Resume from the current playhead, not 0.)
+      store.dispatch(setPlaying(true));
+      return;
+    }
 
     const progress = Math.min(100, Math.max(0, Number(pathProgress) || 0)) / 100;
     const elapsedMs = maxPathDurationMs * progress;
@@ -1279,6 +1315,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
   };
 
   const handleResetAll = () => {
+    if (syncActive) {
+      // Reset the shared clock too so the LED simulator rewinds in lockstep.
+      store.dispatch(setPlaying(false));
+      store.dispatch(setPlayhead(0));
+    }
     setIsPlaybackRunning(false);
     playbackActiveDroneIdsRef.current = [];
     playbackFinishedDroneIdsRef.current = new Set();
@@ -1304,6 +1345,15 @@ const ThreeDView = React.forwardRef((props, ref) => {
         })
       );
     });
+  };
+
+  const handleLedSyncToggle = (next) => {
+    // Stop the 3D view's own playback when handing control to the shared clock,
+    // so the two playback systems don't fight over the drones.
+    if (next) {
+      setIsPlaybackRunning(false);
+    }
+    store.dispatch(setThreeDSync(!!next));
   };
 
   const handleResetPanelSettings = () => {
@@ -1639,7 +1689,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
         currentPositionMs={currentPositionMs}
         totalDurationMs={maxPathDurationMs}
         playbackSourceLabel={playbackSourceLabel}
-        isPlaybackRunning={isPlaybackRunning}
+        isPlaybackRunning={syncActive ? ledPlaying : isPlaybackRunning}
+        ledSyncEnabled={threeDSync}
+        onLedSyncToggle={handleLedSyncToggle}
         droneCount={
           effectiveConfig && Array.isArray(effectiveConfig.drones)
             ? effectiveConfig.drones.length
@@ -1876,6 +1928,10 @@ ThreeDView.propTypes = {
   }),
   persistRehydrated: PropTypes.bool,
   onSetViewRuntimeState: PropTypes.func,
+  ledPlayheadSec: PropTypes.number,
+  ledPlaying: PropTypes.bool,
+  threeDSync: PropTypes.bool,
+  ledTimelineDuration: PropTypes.number,
 };
 
 export default connect(
@@ -1892,6 +1948,10 @@ export default connect(
     showData: state.show.data,
     swarmSpecification: getDroneSwarmSpecification(state),
     uavToMissionIndex: getReverseMissionMapping(state),
+    ledPlayheadSec: getPlayheadSec(state),
+    ledPlaying: getPlaying(state),
+    threeDSync: getThreeDSync(state),
+    ledTimelineDuration: getTimelineDuration(state),
   }),
   {
     onSetViewRuntimeState: setViewRuntimeState,

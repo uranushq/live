@@ -61,6 +61,11 @@ export const getPlayheadSec = (state: RootState) => state.ledEditor.playheadSec;
 
 export const getPlaying = (state: RootState) => state.ledEditor.playing;
 
+// Defaults to true so a persisted state from before this field existed still
+// syncs by default.
+export const getThreeDSync = (state: RootState) =>
+  state.ledEditor.threeDSync !== false;
+
 export const getUploadStatus = (state: RootState) => state.ledEditor.upload;
 
 export const getTimelineDuration = (state: RootState) =>

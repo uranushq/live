@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function PathControlPanel({
   fileInputRef,
@@ -9,6 +9,8 @@ export default function PathControlPanel({
   totalDurationMs,
   playbackSourceLabel,
   isPlaybackRunning,
+  ledSyncEnabled,
+  onLedSyncToggle,
   droneCount,
   onPlayAll,
   onResetAll,
@@ -22,6 +24,8 @@ export default function PathControlPanel({
   isSendingPaths,
   pathDeliveryStatus,
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   const formatMs = (ms) => {
     const safe = Math.max(0, Math.round(Number(ms) || 0));
     const totalSec = Math.floor(safe / 1000);
@@ -60,36 +64,93 @@ export default function PathControlPanel({
       >
         <div
           style={{
-            marginBottom: 12,
+            marginBottom: collapsed ? 0 : 12,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, letterSpacing: 0.2 }}>Path Control</div>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setCollapsed((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setCollapsed((v) => !v);
+              }
+            }}
+            style={{ cursor: 'pointer', userSelect: 'none', flex: 1 }}
+            title={collapsed ? '펼치기' : '접기'}
+          >
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 13,
+                letterSpacing: 0.2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                  fontSize: 10,
+                  opacity: 0.8,
+                }}
+              >
+                ▼
+              </span>
+              Path Control
+            </div>
             <div style={{ opacity: 0.66, fontSize: 11, marginTop: 1 }}>
               {playbackSourceLabel} · {droneCount}대
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onAddDroneClick}
-            style={{
-              padding: '6px 11px',
-              borderRadius: 8,
-              border: '1px solid rgba(96,173,255,0.72)',
-              background: 'linear-gradient(140deg, rgba(56,141,255,0.32), rgba(40,104,194,0.34))',
-              color: '#d8ecff',
-              cursor: 'pointer',
-              fontSize: 11.5,
-              fontWeight: 600,
-              letterSpacing: 0.2,
-            }}
-          >
-            + 드론
-          </button>
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={onAddDroneClick}
+              style={{
+                padding: '6px 11px',
+                borderRadius: 8,
+                border: '1px solid rgba(96,173,255,0.72)',
+                background: 'linear-gradient(140deg, rgba(56,141,255,0.32), rgba(40,104,194,0.34))',
+                color: '#d8ecff',
+                cursor: 'pointer',
+                fontSize: 11.5,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+              }}
+            >
+              + 드론
+            </button>
+          )}
         </div>
+        {!collapsed && (
+        <>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            marginBottom: 10,
+            cursor: 'pointer',
+            userSelect: 'none',
+            fontSize: 11.5,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={ledSyncEnabled}
+            onChange={(e) => onLedSyncToggle(e.target.checked)}
+            style={{ accentColor: '#67b4ff', cursor: 'pointer' }}
+          />
+          <span style={{ opacity: 0.9 }}>LED 시뮬레이션과 동기화</span>
+        </label>
         <div style={{ marginBottom: 6 }}>
           <div style={{ marginBottom: 4, fontSize: 11.5, opacity: 0.84 }}>재생 위치</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -228,6 +289,8 @@ export default function PathControlPanel({
             설정 초기화
           </button>
         </div>
+        </>
+        )}
       </div>
     </>
   );
@@ -241,6 +304,8 @@ PathControlPanel.propTypes = {
   totalDurationMs: PropTypes.number.isRequired,
   playbackSourceLabel: PropTypes.string.isRequired,
   isPlaybackRunning: PropTypes.bool.isRequired,
+  ledSyncEnabled: PropTypes.bool.isRequired,
+  onLedSyncToggle: PropTypes.func.isRequired,
   droneCount: PropTypes.number.isRequired,
   onPlayAll: PropTypes.func.isRequired,
   onResetAll: PropTypes.func.isRequired,

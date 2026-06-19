@@ -45,6 +45,7 @@ const initialState: LedEditorState = {
   activeColor: [255, 255, 255],
   playheadSec: 0,
   playing: false,
+  threeDSync: true,
   upload: { state: 'idle' },
 };
 
@@ -391,6 +392,10 @@ const { actions, reducer } = createSlice({
       state.playing = action.payload;
     },
 
+    setThreeDSync(state, action: PayloadAction<boolean>) {
+      state.threeDSync = action.payload;
+    },
+
     setUploadStatus(state, action: PayloadAction<UploadStatus>) {
       state.upload = action.payload;
     },
@@ -420,6 +425,7 @@ export const {
   pasteClipboard,
   setPlayhead,
   setPlaying,
+  setThreeDSync,
   setUploadStatus,
 } = actions;
 

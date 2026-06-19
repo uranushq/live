@@ -90,5 +90,11 @@ export type LedEditorState = {
   playheadSec: number;
   /** Whether the show is currently playing back. */
   playing: boolean;
+  /**
+   * Whether the 3D view mirrors LED-show playback. When on, the 3D drones and
+   * their pixel panels follow the shared playhead; when off, the pixel panels
+   * are hidden and the 3D view plays independently.
+   */
+  threeDSync: boolean;
   upload: UploadStatus;
 };
