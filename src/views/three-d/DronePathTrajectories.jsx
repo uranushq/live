@@ -5,10 +5,10 @@ import Colors from '~/components/colors';
 
 import Trajectory from './Trajectory';
 
-const DEFAULT_LINE_WIDTH = 8;
-const WAYPOINT_RADIUS = 0.12;
-const START_POINT_RADIUS = 0.18;
-const END_POINT_RADIUS = 0.16;
+const DEFAULT_LINE_WIDTH = 4;
+const WAYPOINT_RADIUS = 0.07;
+const START_POINT_RADIUS = 0.1;
+const END_POINT_RADIUS = 0.09;
 
 const pathPointToTuple = (point) => {
   const x = Number(point?.x);

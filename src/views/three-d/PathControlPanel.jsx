@@ -22,13 +22,19 @@ const iconButtonStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 36,
-  height: 36,
+  width: 32,
+  height: 32,
   padding: 0,
-  borderRadius: 10,
+  borderRadius: 6,
   border: 'none',
   cursor: 'pointer',
   transition: 'background 0.15s ease, opacity 0.15s ease',
+};
+
+const panelSurface = {
+  background: 'rgba(20, 22, 26, 0.88)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  backdropFilter: 'blur(10px)',
 };
 
 function ActionIconButton({ title, onClick, disabled, background, iconColor, children }) {
@@ -84,7 +90,6 @@ export default function PathControlPanel({
   pathDeliveryStatus,
 }) {
   const progress = Math.min(100, Math.max(0, Number(pathProgress) || 0));
-  const progressRounded = Math.round(progress);
 
   return (
     <>
@@ -93,39 +98,37 @@ export default function PathControlPanel({
           -webkit-appearance: none;
           appearance: none;
           width: 100%;
-          height: 3px;
+          height: 2px;
           border-radius: 999px;
           outline: none;
           cursor: pointer;
           background: linear-gradient(
             to right,
-            rgba(120, 180, 255, 0.85) 0%,
-            rgba(120, 180, 255, 0.85) ${progress}%,
-            rgba(255, 255, 255, 0.14) ${progress}%,
-            rgba(255, 255, 255, 0.14) 100%
+            rgba(255, 255, 255, 0.55) 0%,
+            rgba(255, 255, 255, 0.55) ${progress}%,
+            rgba(255, 255, 255, 0.12) ${progress}%,
+            rgba(255, 255, 255, 0.12) 100%
           );
         }
         .path-control-range::-webkit-slider-thumb {
           -webkit-appearance: none;
-          width: 11px;
-          height: 11px;
+          width: 10px;
+          height: 10px;
           border-radius: 50%;
-          background: #7ec8ff;
+          background: #fff;
           border: none;
-          box-shadow: 0 0 0 2px rgba(126, 200, 255, 0.25);
         }
         .path-control-range::-moz-range-thumb {
-          width: 11px;
-          height: 11px;
+          width: 10px;
+          height: 10px;
           border-radius: 50%;
-          background: #7ec8ff;
+          background: #fff;
           border: none;
-          box-shadow: 0 0 0 2px rgba(126, 200, 255, 0.25);
         }
         .path-control-range::-moz-range-track {
-          height: 3px;
+          height: 2px;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.12);
         }
       `}</style>
 
@@ -141,27 +144,26 @@ export default function PathControlPanel({
         style={{
           position: 'absolute',
           left: '50%',
-          bottom: 28,
+          bottom: 20,
           transform: 'translateX(-50%)',
           zIndex: 11000,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           pointerEvents: 'none',
-          width: 'min(920px, calc(100% - 32px))',
+          width: 'min(860px, calc(100% - 32px))',
         }}
       >
         {pathDeliveryStatus && (
           <div
             style={{
               pointerEvents: 'auto',
-              padding: '6px 14px',
-              borderRadius: 999,
-              background: 'rgba(30, 36, 48, 0.92)',
-              border: '1px solid rgba(126, 200, 255, 0.28)',
-              color: '#cce8ff',
-              fontSize: 11.5,
+              padding: '5px 12px',
+              borderRadius: 6,
+              ...panelSurface,
+              color: 'rgba(255, 255, 255, 0.75)',
+              fontSize: 11,
               whiteSpace: 'pre-line',
               maxWidth: '100%',
               textAlign: 'center',
@@ -174,69 +176,31 @@ export default function PathControlPanel({
         <div
           style={{
             pointerEvents: 'auto',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 16px',
-            borderRadius: 999,
-            background: 'rgba(28, 30, 36, 0.88)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.28)',
-            backdropFilter: 'blur(10px)',
-            color: '#eef2f7',
-            fontSize: 12,
-            fontWeight: 500,
-            letterSpacing: 0.15,
-          }}
-        >
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: '#4da3ff',
-              boxShadow: '0 0 8px rgba(77, 163, 255, 0.65)',
-              flexShrink: 0,
-            }}
-          />
-          <span>
-            Path Control · {playbackSourceLabel} · {droneCount}대
-          </span>
-        </div>
-
-        <div
-          style={{
-            pointerEvents: 'auto',
             display: 'flex',
             alignItems: 'center',
-            gap: 18,
+            gap: 14,
             width: '100%',
-            padding: '10px 16px',
-            borderRadius: 18,
-            background: 'rgba(24, 26, 32, 0.9)',
-            border: '1px solid rgba(255, 255, 255, 0.07)',
-            boxShadow: '0 10px 32px rgba(0, 0, 0, 0.38)',
-            backdropFilter: 'blur(12px)',
+            padding: '8px 12px',
+            borderRadius: 10,
+            ...panelSurface,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <Tooltip title={isPlaybackRunning ? '일시정지' : '재생'} placement="top">
               <button
                 type="button"
                 onClick={isPlaybackRunning ? onPausePlayback : onPlayAll}
                 style={{
                   ...iconButtonStyle,
-                  width: 40,
-                  height: 40,
-                  borderRadius: 11,
-                  background: 'linear-gradient(145deg, #4da3ff, #2f7fd6)',
-                  boxShadow: '0 4px 14px rgba(47, 127, 214, 0.35)',
+                  width: 34,
+                  height: 34,
+                  background: 'rgba(255, 255, 255, 0.14)',
                 }}
               >
                 {isPlaybackRunning ? (
-                  <Pause sx={{ fontSize: 20, color: '#fff' }} />
+                  <Pause sx={{ fontSize: 18, color: '#fff' }} />
                 ) : (
-                  <PlayArrow sx={{ fontSize: 22, color: '#fff', ml: '1px' }} />
+                  <PlayArrow sx={{ fontSize: 20, color: '#fff', ml: '1px' }} />
                 )}
               </button>
             </Tooltip>
@@ -246,15 +210,15 @@ export default function PathControlPanel({
                 onClick={onResetAll}
                 style={{
                   ...iconButtonStyle,
-                  background: 'rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(255, 255, 255, 0.06)',
                 }}
               >
-                <Replay sx={{ fontSize: 18, color: 'rgba(255,255,255,0.82)' }} />
+                <Replay sx={{ fontSize: 17, color: 'rgba(255,255,255,0.7)' }} />
               </button>
             </Tooltip>
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <input
               type="range"
               className="path-control-range"
@@ -269,39 +233,50 @@ export default function PathControlPanel({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                color: 'rgba(255, 255, 255, 0.72)',
-                fontSize: 11,
+                color: 'rgba(255, 255, 255, 0.5)',
+                fontSize: 10,
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
               <span>{formatMs(currentPositionMs)}</span>
-              <span style={{ color: '#a9d4ff', fontWeight: 700 }}>{progressRounded}%</span>
+              <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+                {playbackSourceLabel} · {droneCount}대
+              </span>
               <span>{formatMs(totalDurationMs)}</span>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              flexShrink: 0,
+              paddingLeft: 8,
+              borderLeft: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
             <ActionIconButton
               title="불러오기"
               onClick={onLoadConfigClick}
-              background="rgba(255, 255, 255, 0.07)"
-              iconColor="#f5c84c"
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
             >
               <FolderOpen />
             </ActionIconButton>
             <ActionIconButton
               title="저장"
               onClick={onSaveConfigClick}
-              background="rgba(255, 255, 255, 0.07)"
-              iconColor="#b48cff"
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
             >
               <Save />
             </ActionIconButton>
             <ActionIconButton
               title="드론 추가"
               onClick={onAddDroneClick}
-              background="rgba(255, 255, 255, 0.07)"
-              iconColor="#5eb3ff"
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
             >
               <Add />
             </ActionIconButton>
@@ -309,16 +284,16 @@ export default function PathControlPanel({
               title={isSendingPaths ? '다운로드 중...' : '.skyc 저장 (로컬)'}
               onClick={onSendPathsClick}
               disabled={isSendingPaths}
-              background="rgba(255, 255, 255, 0.07)"
-              iconColor="#5fd68a"
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
             >
               <Download />
             </ActionIconButton>
             <ActionIconButton
               title="설정 초기화"
               onClick={onResetPanelSettings}
-              background="rgba(255, 255, 255, 0.07)"
-              iconColor="#ff7b7b"
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
             >
               <DeleteOutline />
             </ActionIconButton>

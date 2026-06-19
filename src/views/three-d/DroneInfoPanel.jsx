@@ -446,23 +446,19 @@ export default function DroneInfoPanel({
 
   const renderPathTab = () => (
     <>
-      <div style={{ marginTop: 4 }}>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>ANIMATION PATH</div>
-        <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 8, lineHeight: 1.4 }}>
-          첫 번째 점(#1)이 곧 시작 위치입니다. <b>경로 재생</b>을 누르면 #1로 즉시
-          스냅한 뒤 #2부터 애니메이션됩니다.
-        </div>
+      <div style={{ marginTop: 2 }}>
+        <div style={{ fontSize: 11, opacity: 0.45, marginBottom: 8 }}>Animation Path</div>
 
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: PATH_ROW_GRID_COLUMNS,
-            gap: 6,
+            gap: 4,
             alignItems: 'center',
             marginBottom: 4,
             fontSize: 10,
-            opacity: 0.5,
-            padding: '0 4px',
+            opacity: 0.35,
+            padding: '0 2px',
           }}
         >
           <span />
@@ -482,14 +478,11 @@ export default function DroneInfoPanel({
             style={{
               display: 'grid',
               gridTemplateColumns: PATH_ROW_GRID_COLUMNS,
-              gap: 6,
+              gap: 4,
               alignItems: 'center',
-              marginBottom: 6,
+              marginBottom: 4,
               fontSize: 12,
-              borderRadius: 6,
-              padding: '2px 4px',
-              border: '1px dashed transparent',
-              background: 'rgba(255,255,255,0.03)',
+              padding: '2px 2px',
             }}
           >
             <label
@@ -559,13 +552,13 @@ export default function DroneInfoPanel({
               style={pathTimingInputStyle}
             />
             <div
-              title="이 점에 도달하는 재생 시각 (mm:ss)"
+              title="이 점에 도달하는 재생 시각"
               style={{
-                fontSize: 11,
+                fontSize: 10,
                 textAlign: 'center',
-                color: '#a9d4ff',
+                color: 'rgba(255,255,255,0.45)',
                 fontVariantNumeric: 'tabular-nums',
-                opacity: pathPointArrivalMsByRow[idx] == null ? 0.35 : 0.92,
+                opacity: pathPointArrivalMsByRow[idx] == null ? 0.3 : 1,
               }}
             >
               {formatPathPlaybackMs(pathPointArrivalMsByRow[idx])}
@@ -574,12 +567,12 @@ export default function DroneInfoPanel({
               type="button"
               onClick={() => removePathPoint(idx)}
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                border: '1px solid rgba(255,80,80,0.45)',
-                background: 'rgba(255,60,60,0.12)',
-                color: '#ff9b9b',
+                width: 22,
+                height: 22,
+                borderRadius: 4,
+                border: 'none',
+                background: 'rgba(255,255,255,0.06)',
+                color: 'rgba(255,255,255,0.45)',
                 cursor: 'pointer',
                 fontSize: 14,
                 lineHeight: 1,
@@ -634,18 +627,15 @@ export default function DroneInfoPanel({
           style={{
             marginTop: 10,
             width: '100%',
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid rgba(120, 255, 175, 0.42)',
-            background:
-              !canPlayPath || isDownloadingSkyc
-                ? 'rgba(80, 116, 97, 0.45)'
-                : 'rgba(25, 129, 76, 0.42)',
-            color: '#e8fff1',
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.12)',
+            background: 'rgba(255,255,255,0.06)',
+            color: 'rgba(255,255,255,0.85)',
             cursor: !canPlayPath || isDownloadingSkyc ? 'not-allowed' : 'pointer',
-            fontWeight: 700,
-            fontSize: 13,
-            letterSpacing: 0.2,
+            fontWeight: 500,
+            fontSize: 12,
+            opacity: !canPlayPath || isDownloadingSkyc ? 0.45 : 1,
           }}
         >
           {isDownloadingSkyc ? '다운로드 중...' : '수정된 경로로 .skyc 저장 (로컬)'}
@@ -654,14 +644,13 @@ export default function DroneInfoPanel({
         {skycDownloadStatus && (
           <div
             style={{
-              marginTop: 10,
-              padding: '8px 10px',
-              borderRadius: 8,
-              border: '1px solid rgba(126, 200, 255, 0.28)',
-              background: 'rgba(83, 170, 255, 0.12)',
-              color: '#cce8ff',
+              marginTop: 8,
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: 'rgba(255,255,255,0.04)',
+              color: 'rgba(255,255,255,0.6)',
               whiteSpace: 'pre-line',
-              fontSize: 11.5,
+              fontSize: 11,
             }}
           >
             {skycDownloadStatus}
@@ -1257,64 +1246,54 @@ export default function DroneInfoPanel({
     <div
       style={{
         position: 'absolute',
-        top: 14,
+        top: 0,
         right: 0,
-        width: 460,
-        maxWidth: 'min(460px, 92vw)',
-        height: 'calc(100% - 28px)',
-        background: 'linear-gradient(170deg, rgba(18,24,36,0.95), rgba(11,15,24,0.93))',
-        color: '#edf5ff',
-        padding: 16,
+        width: 420,
+        maxWidth: 'min(420px, 92vw)',
+        height: '100%',
+        background: 'rgba(18, 20, 24, 0.92)',
+        color: 'rgba(255,255,255,0.88)',
+        padding: 14,
         boxSizing: 'border-box',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 200ms ease',
-        zIndex: 10000,
-        borderLeft: '1px solid rgba(126, 200, 255, 0.25)',
-        backdropFilter: 'blur(8px)',
+        zIndex: 10,
+        borderLeft: '1px solid rgba(255, 255, 255, 0.08)',
+        backdropFilter: 'blur(10px)',
         overflowY: 'auto',
       }}
     >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 17 }}>Drone Info</div>
-          <div style={{ fontSize: 11, opacity: 0.65, marginTop: 1 }}>선택 드론 상세 제어</div>
-        </div>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Drone Info</div>
         <button
           onClick={onClose}
           style={{
-            background: 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.22)',
-            color: '#f2f8ff',
-            borderRadius: 8,
-            padding: '5px 9px',
+            background: 'transparent',
+            border: 'none',
+            color: 'rgba(255,255,255,0.5)',
+            borderRadius: 4,
+            padding: '4px 8px',
             cursor: 'pointer',
+            fontSize: 12,
           }}
         >
           닫기
         </button>
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 14 }}>
         {!drone ? (
           <div style={{ opacity: 0.5 }}>드론을 선택하세요.</div>
         ) : (
           <>
             {/* ID */}
-            <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: 11, opacity: 0.62 }}>ID</div>
-              <div style={{ fontSize: 15.5, fontWeight: 600 }}>{drone.id}</div>
+            <div style={{ marginBottom: 10, fontSize: 13, opacity: 0.85 }}>
+              <span style={{ opacity: 0.45, marginRight: 6 }}>ID</span>
+              {drone.id}
             </div>
-            <div
-              style={{
-                marginBottom: 12,
-                padding: '10px 10px',
-                borderRadius: 10,
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(126, 200, 255, 0.18)',
-              }}
-            >
-              <div style={{ fontSize: 11, opacity: 0.62, marginBottom: 6 }}>초기 위치 (x, y, z)</div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, opacity: 0.45, marginBottom: 6 }}>초기 위치</div>
               <div
                 style={{
                   display: 'grid',
@@ -1359,7 +1338,6 @@ export default function DroneInfoPanel({
                   style={{
                     ...secondaryBtnStyle,
                     flex: '1 1 120px',
-                    border: '1px solid rgba(120, 190, 255, 0.45)',
                     fontWeight: 600,
                   }}
                 >
@@ -1371,25 +1349,18 @@ export default function DroneInfoPanel({
                   title="씬에서 드론 마커를 입력 좌표로 즉시 이동합니다."
                   style={{ ...secondaryBtnStyle, flex: '1 1 120px' }}
                 >
-                  적용 후 드론 이동
+                  적용 후 이동
                 </button>
-              </div>
-              <div style={{ fontSize: 10.5, opacity: 0.52, marginTop: 8, lineHeight: 1.45 }}>
-                JSON보내기·재생 기준 시작점과 맞추려면 경로가 있을 때 첫 점 좌표도 함께 갱신됩니다.
               </div>
             </div>
 
             {/* Tab switcher */}
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 6,
-                padding: 4,
-                borderRadius: 10,
-                border: '1px solid rgba(126, 200, 255, 0.22)',
-                background: 'rgba(255,255,255,0.04)',
-                marginBottom: 14,
+                display: 'flex',
+                gap: 0,
+                borderBottom: '1px solid rgba(255,255,255,0.08)',
+                marginBottom: 12,
               }}
             >
               {[
@@ -1403,33 +1374,20 @@ export default function DroneInfoPanel({
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     style={{
-                      padding: '7px 10px',
-                      borderRadius: 7,
-                      border: '1px solid transparent',
-                      background: active
-                        ? 'linear-gradient(140deg, rgba(56,141,255,0.4), rgba(40,104,194,0.4))'
-                        : 'transparent',
-                      color: active ? '#f4faff' : 'rgba(220,234,250,0.7)',
+                      padding: '8px 12px',
+                      border: 'none',
+                      borderBottom: active ? '2px solid rgba(255,255,255,0.7)' : '2px solid transparent',
+                      background: 'transparent',
+                      color: active ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)',
                       cursor: 'pointer',
-                      fontWeight: active ? 700 : 500,
-                      fontSize: 12.5,
-                      letterSpacing: 0.2,
-                      transition: 'background 120ms ease',
+                      fontWeight: active ? 600 : 400,
+                      fontSize: 12,
+                      marginBottom: -1,
                     }}
                   >
                     {tab.label}
                     {tab.id === 'formation' && formationPhases.length > 0 ? (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          padding: '1px 6px',
-                          borderRadius: 999,
-                          background: 'rgba(255,255,255,0.18)',
-                          color: '#f4faff',
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                        }}
-                      >
+                      <span style={{ marginLeft: 5, opacity: 0.5, fontSize: 10 }}>
                         {formationPhases.length}
                       </span>
                     ) : null}
@@ -1461,15 +1419,13 @@ export default function DroneInfoPanel({
               }}
               style={{
                 width: '100%',
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid rgba(255,80,80,0.45)',
-                background: 'rgba(255,60,60,0.12)',
-                color: '#ff8080',
+                padding: '7px 10px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'rgba(255,255,255,0.04)',
+                color: 'rgba(255,120,120,0.85)',
                 cursor: 'pointer',
                 fontSize: 12,
-                fontWeight: 600,
-                letterSpacing: 0.3,
               }}
             >
               이 드론 삭제
@@ -1485,11 +1441,11 @@ const PATH_ROW_GRID_COLUMNS =
   '28px 22px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 52px 48px 50px 24px';
 
 const pathTimingInputStyle = {
-  padding: '7px 6px',
-  borderRadius: 8,
-  border: '1px solid rgba(130,190,255,0.24)',
-  background: 'rgba(248,252,255,0.07)',
-  color: '#ecf5ff',
+  padding: '6px 4px',
+  borderRadius: 4,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.85)',
   fontSize: 11,
   width: '100%',
   boxSizing: 'border-box',
@@ -1508,11 +1464,11 @@ const formatPathPlaybackMs = (ms) => {
 };
 
 const smallInputStyle = {
-  padding: '7px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(130,190,255,0.24)',
-  background: 'rgba(248,252,255,0.07)',
-  color: '#ecf5ff',
+  padding: '6px 6px',
+  borderRadius: 4,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.85)',
   fontSize: 12,
   width: '100%',
   boxSizing: 'border-box',
@@ -1521,13 +1477,13 @@ const smallInputStyle = {
 
 const secondaryBtnStyle = {
   flex: 1,
-  padding: '8px 10px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,0.22)',
-  background: 'rgba(255,255,255,0.09)',
-  color: '#f1f7ff',
+  padding: '7px 8px',
+  borderRadius: 6,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.8)',
   cursor: 'pointer',
-  fontSize: 12.5,
+  fontSize: 12,
 };
 
 const phaseIconBtnStyle = {

@@ -1817,28 +1817,24 @@ const ThreeDView = React.forwardRef((props, ref) => {
           zIndex: 9999,
         }}
       />
-      {panelOpen && (
+      {panelOpen && gizmoDragState.dragging && gizmoDragState.axis && (
         <div
           style={{
             position: 'absolute',
             left: '50%',
-            top: 14,
+            top: 12,
             transform: 'translateX(-50%)',
             zIndex: 12000,
             pointerEvents: 'none',
-            padding: '7px 13px',
-            borderRadius: 999,
-            border: '1px solid rgba(160,220,255,0.3)',
-            background: 'linear-gradient(145deg, rgba(17,25,39,0.88), rgba(10,15,25,0.84))',
-            color: '#e6f3ff',
-            fontSize: 12,
-            letterSpacing: 0.2,
-            backdropFilter: 'blur(8px)',
+            padding: '4px 10px',
+            borderRadius: 6,
+            background: 'rgba(16, 18, 22, 0.75)',
+            color: 'rgba(255,255,255,0.7)',
+            fontSize: 11,
+            backdropFilter: 'blur(6px)',
           }}
         >
-          {gizmoDragState.dragging && gizmoDragState.axis
-            ? `${gizmoDragState.axis.toUpperCase()} 축 드래그 중`
-            : '축(빨강 X / 파랑 Y / 초록 Z) 클릭 후 마우스 드래그'}
+          {`${gizmoDragState.axis.toUpperCase()} 축 드래그 중`}
         </div>
       )}
     </div>
