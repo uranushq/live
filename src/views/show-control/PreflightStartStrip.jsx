@@ -46,7 +46,8 @@ const useStyles = makeStyles((theme) => ({
     gap: theme.spacing(1),
     gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, 0.85fr)',
     minWidth: 0,
-    padding: theme.spacing(0.25, 1.25, 1),
+    overflow: 'visible',
+    padding: theme.spacing(0.25, 1.5, 1),
 
     [theme.breakpoints.down('sm')]: {
       gridTemplateColumns: 'minmax(0, 1fr)',
@@ -79,33 +80,39 @@ const useStyles = makeStyles((theme) => ({
     },
 
     '&:hover:not(:disabled)': {
-      backgroundColor: 'rgba(255,255,255,0.04)',
+      backgroundColor: theme.palette.action.hover,
     },
   },
   checkIcon: {
     flexShrink: 0,
-    fontSize: '1.2rem',
+    fontSize: '1.35rem',
     marginTop: 1,
+  },
+  checkIconDone: {
+    color: '#3ecf6e',
+  },
+  checkIconPending: {
+    color: theme.palette.text.disabled,
   },
   checkText: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 1,
+    gap: 2,
     minWidth: 0,
   },
   checkPrimary: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 'clamp(0.78rem, 0.95vw, 0.84rem)',
+    color: theme.palette.text.primary,
+    fontSize: 'clamp(0.86rem, 1vw, 0.92rem)',
     fontWeight: 600,
-    lineHeight: 1.2,
+    lineHeight: 1.25,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   checkSecondary: {
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 'clamp(0.68rem, 0.82vw, 0.74rem)',
-    lineHeight: 1.2,
+    color: theme.palette.text.secondary,
+    fontSize: 'clamp(0.76rem, 0.9vw, 0.82rem)',
+    lineHeight: 1.25,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -119,15 +126,15 @@ const useStyles = makeStyles((theme) => ({
   },
   rcBox: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.1)',
+    backgroundColor: theme.palette.action.hover,
+    border: `1px solid ${theme.palette.divider}`,
     borderRadius: theme.spacing(1),
     display: 'flex',
     gap: theme.spacing(0.75),
     padding: theme.spacing(0.875, 1),
   },
   rcIcon: {
-    color: 'rgba(255,255,255,0.55)',
+    color: theme.palette.text.secondary,
     fontSize: '1.35rem',
   },
   rcText: {
@@ -137,22 +144,22 @@ const useStyles = makeStyles((theme) => ({
     minWidth: 0,
   },
   rcPrimary: {
-    color: 'rgba(255,255,255,0.82)',
+    color: theme.palette.text.primary,
     fontSize: '0.78rem',
     fontWeight: 600,
     lineHeight: 1.2,
   },
   rcSecondary: {
-    color: 'rgba(255,255,255,0.42)',
+    color: theme.palette.text.secondary,
     fontSize: '0.72rem',
     lineHeight: 1.2,
   },
   authorizeButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    border: '1px solid rgba(255,255,255,0.12)',
+    backgroundColor: theme.palette.action.hover,
+    border: `1px solid ${theme.palette.divider}`,
     borderRadius: theme.spacing(1),
-    color: 'rgba(255,255,255,0.55)',
+    color: theme.palette.text.secondary,
     display: 'flex',
     justifyContent: 'center',
     minHeight: 'clamp(44px, 5vh, 52px)',
@@ -161,14 +168,27 @@ const useStyles = makeStyles((theme) => ({
     transition: theme.transitions.create(['background-color', 'border-color']),
     width: '100%',
 
-    '&:hover': {
-      backgroundColor: 'rgba(255,255,255,0.1)',
+    '&:hover:not(:disabled)': {
+      backgroundColor: theme.palette.action.selected,
+    },
+
+    '&.Mui-disabled': {
+      opacity: 0.45,
+    },
+
+    '&.Mui-focusVisible': {
+      outline: `2px solid ${theme.palette.primary.main}`,
+      outlineOffset: 2,
     },
   },
   authorizeButtonActive: {
     backgroundColor: 'rgba(62, 207, 110, 0.18)',
     borderColor: 'rgba(62, 207, 110, 0.45)',
-    color: '#8ef0b0',
+    color: '#3ecf6e',
+
+    '&:hover:not(:disabled)': {
+      backgroundColor: 'rgba(62, 207, 110, 0.28)',
+    },
   },
   authorizeLabel: {
     fontSize: 'clamp(0.74rem, 0.9vw, 0.84rem)',
@@ -223,6 +243,14 @@ const PreflightStartStrip = ({
     ? t('show.authorized')
     : t('bottomBar.showStartPermissionRequired');
 
+  const canToggleAuthorization =
+    isAuthorized || authorizationStatus !== Status.OFF;
+
+  const handleAuthorizeClick = (event) => {
+    onAuthorizeToggle();
+    event.currentTarget.blur();
+  };
+
   return (
     <Box className={classes.root}>
       <Box className={classes.checklist}>
@@ -233,11 +261,12 @@ const PreflightStartStrip = ({
           type='button'
         >
           {isDone(onboardStatus) ? (
-            <CheckCircle className={classes.checkIcon} sx={{ color: '#3ecf6e' }} />
+            <CheckCircle
+              className={`${classes.checkIcon} ${classes.checkIconDone}`}
+            />
           ) : (
             <RadioButtonUnchecked
-              className={classes.checkIcon}
-              sx={{ color: 'rgba(255,255,255,0.28)' }}
+              className={`${classes.checkIcon} ${classes.checkIconPending}`}
             />
           )}
           <Box className={classes.checkText}>
@@ -255,11 +284,12 @@ const PreflightStartStrip = ({
             type='button'
           >
             {isDone(manualStatus) ? (
-              <CheckCircle className={classes.checkIcon} sx={{ color: '#3ecf6e' }} />
+              <CheckCircle
+                className={`${classes.checkIcon} ${classes.checkIconDone}`}
+              />
             ) : (
               <RadioButtonUnchecked
-                className={classes.checkIcon}
-                sx={{ color: 'rgba(255,255,255,0.28)' }}
+                className={`${classes.checkIcon} ${classes.checkIconPending}`}
               />
             )}
             <Box className={classes.checkText}>
@@ -276,11 +306,12 @@ const PreflightStartStrip = ({
           type='button'
         >
           {isDone(startTimeStatus) ? (
-            <CheckCircle className={classes.checkIcon} sx={{ color: '#3ecf6e' }} />
+            <CheckCircle
+              className={`${classes.checkIcon} ${classes.checkIconDone}`}
+            />
           ) : (
             <RadioButtonUnchecked
-              className={classes.checkIcon}
-              sx={{ color: 'rgba(255,255,255,0.28)' }}
+              className={`${classes.checkIcon} ${classes.checkIconPending}`}
             />
           )}
           <Box className={classes.checkText}>
@@ -319,8 +350,11 @@ const PreflightStartStrip = ({
           className={`${classes.authorizeButton} ${
             isAuthorized ? classes.authorizeButtonActive : ''
           }`}
-          disabled={revocationDisabled && isAuthorized}
-          onClick={onAuthorizeToggle}
+          disabled={
+            !canToggleAuthorization || (revocationDisabled && isAuthorized)
+          }
+          focusRipple={false}
+          onClick={handleAuthorizeClick}
         >
           <Typography className={classes.authorizeLabel} component='span'>
             {authorizeLabel}

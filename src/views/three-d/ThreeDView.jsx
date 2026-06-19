@@ -1090,7 +1090,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const playbackSourceLabel =
     effectiveConfig?.source === 'showSpec'
       ? '로드된 .skyc spec'
-      : '3D JSON/수동 경로';
+      : '3D JSON · 수동 경로';
 
   const maxPathDurationMs = useMemo(() => {
     if (!effectiveConfig || !Array.isArray(effectiveConfig.drones)) return 0;
@@ -1276,6 +1276,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
       startedAt: performance.now(),
     };
     setIsPlaybackRunning(true);
+  };
+
+  const handlePausePlayback = () => {
+    setIsPlaybackRunning(false);
   };
 
   const handleResetAll = () => {
@@ -1646,11 +1650,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
             : 0
         }
         onPlayAll={handlePlayAll}
+        onPausePlayback={handlePausePlayback}
         onResetAll={handleResetAll}
         onResetPanelSettings={handleResetPanelSettings}
         onLoadConfigClick={handleLoadConfigClick}
         onSaveConfigClick={handleSaveConfigClick}
-        onOpenPathGenerator={() => setPathGeneratorModalOpen(true)}
         onSendPathsClick={handleSendPathsClick}
         onFileChange={handleFileChange}
         onAddDroneClick={() => setAddDroneModalOpen(true)}

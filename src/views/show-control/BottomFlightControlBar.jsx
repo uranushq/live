@@ -34,9 +34,9 @@ const useStyles = makeStyles((theme) => ({
     width: '100%',
   },
   root: {
-    backgroundColor: '#12151a',
-    borderTop: '1px solid rgba(255,255,255,0.1)',
-    boxShadow: '0 -8px 28px rgba(0, 0, 0, 0.45)',
+    backgroundColor: theme.palette.background.paper,
+    borderTop: `1px solid ${theme.palette.divider}`,
+    boxShadow: '0 -2px 8px rgba(0,0,0,0.18)',
     boxSizing: 'border-box',
     maxHeight: 'calc(100vh - 52px)',
     overflowX: 'hidden',
@@ -63,9 +63,8 @@ const useStyles = makeStyles((theme) => ({
   },
   collapsedBar: {
     alignItems: 'center',
-    backgroundColor: '#12151a',
-    borderTop: '1px solid rgba(255,255,255,0.1)',
-    boxShadow: '0 -6px 20px rgba(0, 0, 0, 0.4)',
+    backgroundColor: theme.palette.background.paper,
+    borderTop: `1px solid ${theme.palette.divider}`,
     boxSizing: 'border-box',
     display: 'flex',
     gap: theme.spacing(1),
@@ -76,17 +75,17 @@ const useStyles = makeStyles((theme) => ({
     width: '100%',
   },
   collapsedLabel: {
-    color: 'rgba(255,255,255,0.55)',
+    color: theme.palette.text.secondary,
     fontSize: '0.76rem',
     fontWeight: 700,
     letterSpacing: '0.12em',
     textTransform: 'uppercase',
   },
   collapseToggle: {
-    color: 'rgba(255,255,255,0.72)',
+    color: theme.palette.text.secondary,
 
     '&:hover': {
-      backgroundColor: 'rgba(255,255,255,0.08)',
+      backgroundColor: theme.palette.action.hover,
     },
   },
   collapseToggleExpanded: {
@@ -96,8 +95,8 @@ const useStyles = makeStyles((theme) => ({
     zIndex: 2,
   },
   panel: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    backgroundColor: 'transparent',
+    border: `1px solid ${theme.palette.divider}`,
     borderRadius: 10,
     display: 'flex',
     flexDirection: 'column',
@@ -109,9 +108,11 @@ const useStyles = makeStyles((theme) => ({
   },
   missionPanel: {
     minWidth: 0,
+    overflow: 'visible',
   },
   preflightPanel: {
     minWidth: 0,
+    overflow: 'visible',
   },
   panelHeader: {
     alignItems: 'center',
@@ -122,17 +123,22 @@ const useStyles = makeStyles((theme) => ({
     minHeight: 28,
     padding: theme.spacing(0.625, 1.25, 0.375),
   },
+  modeControlsRow: {
+    alignItems: 'center',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: theme.spacing(0.5),
+    padding: theme.spacing(0, 1.25, 0.625),
+  },
   panelHeaderControls: {
     alignItems: 'center',
     display: 'flex',
-    flexShrink: 1,
-    flexWrap: 'wrap',
+    flexShrink: 0,
     gap: theme.spacing(0.75),
     justifyContent: 'flex-end',
-    minWidth: 0,
   },
   panelTitle: {
-    color: 'rgba(255,255,255,0.55)',
+    color: theme.palette.text.secondary,
     fontSize: 'clamp(0.72rem, 0.88vw, 0.78rem)',
     fontWeight: 700,
     letterSpacing: '0.14em',
@@ -196,11 +202,11 @@ const BottomFlightControlBar = () => {
                   <Typography className={classes.panelTitle} component='div'>
                     {t('bottomBar.droneControl')}
                   </Typography>
-                  <Box className={classes.panelHeaderControls}>
-                    <FlightCommandTargetToggle />
-                    <CurrentFlightModeControl />
-                    <FlightModeControl />
-                  </Box>
+                  <FlightCommandTargetToggle />
+                </Box>
+                <Box className={classes.modeControlsRow}>
+                  <CurrentFlightModeControl />
+                  <FlightModeControl />
                 </Box>
                 <LargeControlButtonGroup variant='bottomBar' />
               </Box>

@@ -69,6 +69,14 @@ export const contextMenu: Condition = (mapBrowserEvent) =>
 //   mapBrowserEvent.pointerEvent.button === 2;
 
 /**
+ * Helper condition that checks for a pointerdown event fired by the right mouse button.
+ * Used to trigger DragRotate on right-click drag.
+ */
+export const rightMouseButtonDown: Condition = (mapBrowserEvent) =>
+  mapBrowserEvent.originalEvent instanceof MouseEvent &&
+  (mapBrowserEvent.originalEvent as MouseEvent).button === 2;
+
+/**
  * Helper condition that checks for a keydown event fired by the `Escape` key.
  *
  * @param mapBrowserEvent - The actual event

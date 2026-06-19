@@ -14,7 +14,6 @@ import ConnectedFitAllFeaturesButton from '~/components/map/buttons/FitAllFeatur
 import * as Condition from '~/components/map/conditions';
 import {
   SelectNearestFeature,
-  ShowContextMenu,
   TrackNearestFeature,
   TransformFeatures,
 } from '~/components/map/interactions';
@@ -27,7 +26,6 @@ import {
   Tool,
   toolToDrawInteractionProps,
 } from '~/components/map/tools';
-import ToolbarDivider from '~/components/ToolbarDivider';
 import { handleError } from '~/error-handling';
 import {
   addFeature,
@@ -79,8 +77,8 @@ import { forwardCollectionChanges } from '~/utils/openlayers';
 
 import DrawingToolbar from './DrawingToolbar';
 import { Layers } from './layers';
-import MapContextMenu from './MapContextMenu';
 import MapReferenceRequestHandler from './MapReferenceRequestHandler';
+import MapRightSidebar from './MapRightSidebar';
 import MapSourceToggleButton from './MapSourceToggleButton';
 import { MAP_PANEL_BG } from './mapPanelStyles';
 
@@ -173,7 +171,7 @@ const MapViewInteractions = withMap((props) => {
   const interactions = [];
 
   // Common interactions that can be used regardless of the selected tool
-  /* Alt + Shift + drag --> Rotate view */
+  /* Alt + Shift + drag --> Rotate view (fallback) */
   /* Alt + Shift + middle button drag --> Rotate and zoom view */
   interactions.push(
     <interaction.DragRotate
@@ -376,7 +374,16 @@ class MapViewPresentation extends React.Component {
 
     this._map = React.createRef();
     this._mapInnerDiv = React.createRef();
+    this._mapFrameRef = React.createRef();
+
+    this.state = {
+      originPickMode: null,
+    };
   }
+
+  _onOriginPickModeChange = (mode) => {
+    this.setState({ originPickMode: mode });
+  };
 
   componentDidMount() {
     const { glContainer } = this.props;
@@ -384,6 +391,11 @@ class MapViewPresentation extends React.Component {
 
     mapViewManager.initialize();
     this._disableDefaultContextMenu();
+    this._setupRightClickDragRotate();
+  }
+
+  componentWillUnmount() {
+    this._teardownRightClickDragRotate();
   }
 
   componentDidUpdate() {
@@ -439,7 +451,7 @@ class MapViewPresentation extends React.Component {
     return (
       <NearestItemTooltip>
         <div className='skycontrol-map-panel' style={skycontrolMapWrapperStyle}>
-          <div style={skycontrolMapFrameStyle}>
+          <div ref={this._mapFrameRef} style={skycontrolMapFrameStyle}>
             <BaseMap
               ref={this._map}
               loadTilesWhileInteracting
@@ -452,11 +464,11 @@ class MapViewPresentation extends React.Component {
             >
               <MapReferenceRequestHandler />
 
+              {/* Left drawing toolbar — self-contained panel, same style as right sidebar */}
+              <DrawingToolbar drawingTools={config.map.drawingTools} />
+
               <MapToolbars
                 variant='skycontrol'
-                left={
-                  <DrawingToolbar dense drawingTools={config.map.drawingTools} />
-                }
                 top={
                   <>
                     <MapRotationTextBox resetDuration={500} fieldWidth='75px' />
@@ -484,18 +496,55 @@ class MapViewPresentation extends React.Component {
               onSingleFeatureSelected={this._onFeatureSelected}
             />
 
-            {/* OpenLayers interaction that triggers a context menu */}
-            <ShowContextMenu
-              layers={isLayerVisibleAndSelectable}
-              projection='EPSG:4326'
-              threshold={40}
-              onOpening={this._hideNearestFeatureTooltip}
-              selectAction={this._onFeatureSelected}
-            >
-              {/* The context menu that appears on the map when the user right-clicks */}
-              <MapContextMenu />
-            </ShowContextMenu>
             </BaseMap>
+
+          {/* Right sidebar: UAV control actions (replaces popup context menu) */}
+          <MapRightSidebar
+            hintContainerRef={this._mapFrameRef}
+            onPickModeChange={this._onOriginPickModeChange}
+          />
+
+          {/* Bottom hint: right-click drag to rotate */}
+          {!this.state.originPickMode && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 10,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              pointerEvents: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(18,21,26,0.80)',
+              backdropFilter: 'blur(4px)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              borderRadius: 6,
+              padding: '3px 10px',
+              color: 'rgba(255,255,255,0.55)',
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.02em',
+              whiteSpace: 'nowrap',
+              zIndex: 3,
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-block',
+                border: '1px solid rgba(255,255,255,0.28)',
+                borderRadius: 3,
+                padding: '1px 5px',
+                fontSize: 10,
+                lineHeight: '14px',
+                marginRight: 2,
+              }}
+            >
+              우클릭 드래그
+            </span>
+            지도 회전
+          </div>
+          )}
           </div>
         </div>
       </NearestItemTooltip>
@@ -727,6 +776,70 @@ class MapViewPresentation extends React.Component {
       event.preventDefault();
       return false;
     });
+  };
+
+  /**
+   * Sets up native pointer event listeners on the map viewport so that
+   * right-click drag rotates the map view.
+   *
+   * OL's built-in DragRotate only accepts the left mouse button (mouseActionButton),
+   * so we handle right-click rotation directly at the DOM level.
+   */
+  _setupRightClickDragRotate = () => {
+    const { map } = this._map.current;
+    const viewport = map.getViewport();
+
+    this._rightDrag = null;
+
+    this._onRightMouseDown = (e) => {
+      if (e.button !== 2) return;
+      const view = map.getView();
+      const size = map.getSize();
+      const cx = size[0] / 2;
+      const cy = size[1] / 2;
+      const rect = viewport.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      this._rightDrag = {
+        startAngle: Math.atan2(py - cy, px - cx),
+        startRotation: view.getRotation(),
+      };
+    };
+
+    this._onRightMouseMove = (e) => {
+      if (!this._rightDrag) return;
+      const view = map.getView();
+      const size = map.getSize();
+      const cx = size[0] / 2;
+      const cy = size[1] / 2;
+      const rect = viewport.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const angle = Math.atan2(py - cy, px - cx);
+      view.setRotation(
+        this._rightDrag.startRotation + angle - this._rightDrag.startAngle
+      );
+    };
+
+    this._onRightMouseUp = (e) => {
+      if (e.button === 2) {
+        this._rightDrag = null;
+      }
+    };
+
+    viewport.addEventListener('mousedown', this._onRightMouseDown);
+    document.addEventListener('mousemove', this._onRightMouseMove);
+    document.addEventListener('mouseup', this._onRightMouseUp);
+  };
+
+  _teardownRightClickDragRotate = () => {
+    if (!this._map.current) return;
+    const { map } = this._map.current;
+    if (map) {
+      map.getViewport().removeEventListener('mousedown', this._onRightMouseDown);
+    }
+    document.removeEventListener('mousemove', this._onRightMouseMove);
+    document.removeEventListener('mouseup', this._onRightMouseUp);
   };
 
   /**

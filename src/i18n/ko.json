@@ -71,6 +71,7 @@
     "startTime": "시작 시간",
     "tapToUpload": "탭하여 업로드",
     "uploadData": "업로드 데이터",
+    "stepOf": "{{total}}단계 중 {{current}}단계",
     "waiting": "대기 중"
   },
   "largeControlButtonGroup": {

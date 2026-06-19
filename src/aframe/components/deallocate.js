@@ -7,15 +7,13 @@
 
 import AFrame from '@skybrush/aframe-components';
 
-import { notifySceneRemoval } from '~/features/three-d/slice';
-import store from '~/store';
-
 const { Cache } = AFrame.THREE;
 
 AFrame.registerComponent('deallocate', {
   remove() {
-    store.dispatch(notifySceneRemoval());
     Cache.clear();
-    this.el.renderer.forceContextLoss();
+    if (this.el?.renderer?.forceContextLoss) {
+      this.el.renderer.forceContextLoss();
+    }
   },
 });

@@ -38,20 +38,17 @@ const MapToolbars = ({
                 my: 0.25,
               },
               '& .MuiIconButton-root': {
-                color: 'rgba(255,255,255,0.92)',
+                color: 'rgba(255,255,255,0.78)',
                 height: 34,
                 width: 34,
 
                 '&:hover': {
-                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  backgroundColor: 'rgba(255,255,255,0.08)',
                 },
               },
               '& .MuiIconButton-root .MuiSvgIcon-root': {
-                color: 'rgba(255,255,255,0.92)',
-                fontSize: '1.1rem',
-              },
-              '& .MuiIconButton-colorPrimary .MuiSvgIcon-root': {
-                color: '#6eb6ff',
+                color: 'rgba(255,255,255,0.78)',
+                fontSize: '1rem',
               },
               bottom: 44,
               display: 'flex',

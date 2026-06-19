@@ -226,6 +226,8 @@ const { actions, reducer } = createSlice({
       state.preflight.onboardChecksSignedOffAt = undefined;
       state.preflight.takeoffAreaApprovedAt = undefined;
 
+      state.start.authorized = false;
+
       // Last upload result cleared in the upload feature as it also handles
       // this action
     }),

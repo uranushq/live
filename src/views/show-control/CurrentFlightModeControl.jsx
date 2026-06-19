@@ -1,4 +1,3 @@
-import Flight from '@mui/icons-material/Flight';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -14,7 +13,7 @@ import { makeStyles } from '@skybrush/app-theme-mui';
 import { areFlightCommandsBroadcast } from '~/features/mission/selectors';
 import { getUAVIdsParticipatingInMission } from '~/features/mission/selectors';
 import { showError, showSuccess } from '~/features/snackbar/actions';
-import { getSelectedUAVIds, getUAVById } from '~/features/uavs/selectors';
+import { getSelectedUAVIds, getUAVById, getActiveUAVIds } from '~/features/uavs/selectors';
 import messageHub from '~/message-hub';
 import store from '~/store';
 import {
@@ -28,73 +27,60 @@ import {
 const useStyles = makeStyles((theme) => ({
   root: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.38)',
-    border: '1px solid rgba(255, 255, 255, 0.22)',
-    borderRadius: 999,
     display: 'flex',
     flexShrink: 0,
-    gap: theme.spacing(0.5),
-    minHeight: 30,
-    padding: theme.spacing(0.25, 0.5, 0.25, 0.75),
+    gap: theme.spacing(0.375),
   },
   label: {
-    alignItems: 'center',
-    color: 'rgba(255, 255, 255, 0.72)',
-    display: 'flex',
-    fontSize: '0.68rem',
-    fontWeight: 700,
-    gap: theme.spacing(0.25),
-    letterSpacing: '0.08em',
+    color: theme.palette.text.secondary,
+    fontSize: '0.72rem',
+    fontWeight: 600,
     lineHeight: 1,
-    textTransform: 'uppercase',
     whiteSpace: 'nowrap',
   },
-  labelIcon: {
-    fontSize: '1rem',
-  },
   select: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 999,
-    color: '#fff',
-    fontSize: '0.74rem',
-    fontWeight: 600,
-    height: 26,
-    minWidth: 116,
+    backgroundColor: theme.palette.action.hover,
+    borderRadius: 6,
+    color: theme.palette.text.primary,
+    fontSize: '0.76rem',
+    fontWeight: 500,
+    height: 28,
+    minWidth: 96,
 
     '& .MuiSelect-select': {
-      padding: theme.spacing(0.35, 3, 0.35, 1),
+      padding: theme.spacing(0.5, 3, 0.5, 1),
     },
 
     '& .MuiOutlinedInput-notchedOutline': {
-      border: '1px solid rgba(255, 255, 255, 0.18)',
+      border: `1px solid ${theme.palette.divider}`,
     },
 
     '&:hover .MuiOutlinedInput-notchedOutline': {
-      borderColor: 'rgba(255, 255, 255, 0.32)',
+      borderColor: theme.palette.text.secondary,
     },
 
     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-      borderColor: '#5ca0ff',
+      borderColor: theme.palette.primary.main,
     },
 
     '& .MuiSvgIcon-root': {
-      color: 'rgba(255, 255, 255, 0.72)',
+      color: theme.palette.text.secondary,
     },
   },
   applyButton: {
-    borderRadius: 999,
-    color: '#fff',
+    borderRadius: 6,
     fontSize: '0.72rem',
-    fontWeight: 700,
+    fontWeight: 600,
     lineHeight: 1,
-    minHeight: 26,
-    minWidth: 52,
-    padding: theme.spacing(0.35, 1),
+    minHeight: 28,
+    minWidth: 48,
+    padding: theme.spacing(0.5, 1),
     textTransform: 'none',
   },
 }));
 
 const CurrentFlightModeControl = ({
+  activeUAVIds,
   broadcast,
   missionUAVIds,
   onNotifyError,
@@ -106,12 +92,15 @@ const CurrentFlightModeControl = ({
   const [mode, setMode] = useState(getDefaultCurrentFlightModeCommand);
   const [applying, setApplying] = useState(false);
 
-  const targetUAVIds = useMemo(
-    () => (broadcast ? missionUAVIds : selectedUAVIds),
-    [broadcast, missionUAVIds, selectedUAVIds]
-  );
+  const targetUAVIds = useMemo(() => {
+    if (broadcast) {
+      return missionUAVIds.length > 0 ? missionUAVIds : activeUAVIds;
+    }
 
-  const canApply = targetUAVIds.length > 0;
+    return selectedUAVIds;
+  }, [activeUAVIds, broadcast, missionUAVIds, selectedUAVIds]);
+
+  const canApply = broadcast || selectedUAVIds.length > 0;
 
   const modeOptions = useMemo(
     () =>
@@ -140,6 +129,11 @@ const CurrentFlightModeControl = ({
 
   const handleApply = useCallback(async () => {
     if (!canApply || applying) {
+      return;
+    }
+
+    if (targetUAVIds.length === 0) {
+      onNotifyError(t('currentFlightModeControl.applyFailedGeneric'));
       return;
     }
 
@@ -208,10 +202,7 @@ const CurrentFlightModeControl = ({
 
   return (
     <Box className={classes.root}>
-      <span className={classes.label}>
-        <Flight className={classes.labelIcon} />
-        {t('currentFlightModeControl.label')}
-      </span>
+      <span className={classes.label}>{t('currentFlightModeControl.label')}</span>
       <Select
         className={classes.select}
         disabled={!canApply || applying}
@@ -231,6 +222,17 @@ const CurrentFlightModeControl = ({
         color='primary'
         disabled={!canApply || applying}
         size='small'
+        title={
+          canApply
+            ? broadcast
+              ? t('currentFlightModeControl.tooltipBroadcast', {
+                  count: targetUAVIds.length,
+                })
+              : t('currentFlightModeControl.tooltipSelection', {
+                  count: selectedUAVIds.length,
+                })
+            : t('currentFlightModeControl.tooltipNoSelection')
+        }
         variant='contained'
         onClick={handleApply}
       >
@@ -245,6 +247,7 @@ const CurrentFlightModeControl = ({
 };
 
 CurrentFlightModeControl.propTypes = {
+  activeUAVIds: PropTypes.arrayOf(PropTypes.string),
   broadcast: PropTypes.bool,
   missionUAVIds: PropTypes.arrayOf(PropTypes.string),
   onNotifyError: PropTypes.func,
@@ -255,6 +258,7 @@ CurrentFlightModeControl.propTypes = {
 
 export default connect(
   (state) => ({
+    activeUAVIds: getActiveUAVIds(state),
     broadcast: areFlightCommandsBroadcast(state),
     missionUAVIds: getUAVIdsParticipatingInMission(state),
     selectedUAVIds: getSelectedUAVIds(state),

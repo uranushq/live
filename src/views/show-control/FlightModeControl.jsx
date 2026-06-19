@@ -1,4 +1,3 @@
-import FlightTakeoff from '@mui/icons-material/FlightTakeoff';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -27,68 +26,54 @@ import {
 const useStyles = makeStyles((theme) => ({
   root: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.38)',
-    border: '1px solid rgba(255, 255, 255, 0.22)',
-    borderRadius: 999,
     display: 'flex',
     flexShrink: 0,
-    gap: theme.spacing(0.5),
-    minHeight: 30,
-    padding: theme.spacing(0.25, 0.5, 0.25, 0.75),
+    gap: theme.spacing(0.375),
   },
   label: {
-    alignItems: 'center',
-    color: 'rgba(255, 255, 255, 0.72)',
-    display: 'flex',
-    fontSize: '0.68rem',
-    fontWeight: 700,
-    gap: theme.spacing(0.25),
-    letterSpacing: '0.08em',
+    color: theme.palette.text.secondary,
+    fontSize: '0.72rem',
+    fontWeight: 600,
     lineHeight: 1,
-    textTransform: 'uppercase',
     whiteSpace: 'nowrap',
   },
-  labelIcon: {
-    fontSize: '1rem',
-  },
   select: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 999,
-    color: '#fff',
-    fontSize: '0.74rem',
-    fontWeight: 600,
-    height: 26,
-    minWidth: 108,
+    backgroundColor: theme.palette.action.hover,
+    borderRadius: 6,
+    color: theme.palette.text.primary,
+    fontSize: '0.76rem',
+    fontWeight: 500,
+    height: 28,
+    minWidth: 96,
 
     '& .MuiSelect-select': {
-      padding: theme.spacing(0.35, 3, 0.35, 1),
+      padding: theme.spacing(0.5, 3, 0.5, 1),
     },
 
     '& .MuiOutlinedInput-notchedOutline': {
-      border: '1px solid rgba(255, 255, 255, 0.18)',
+      border: `1px solid ${theme.palette.divider}`,
     },
 
     '&:hover .MuiOutlinedInput-notchedOutline': {
-      borderColor: 'rgba(255, 255, 255, 0.32)',
+      borderColor: theme.palette.text.secondary,
     },
 
     '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-      borderColor: '#5ca0ff',
+      borderColor: theme.palette.primary.main,
     },
 
     '& .MuiSvgIcon-root': {
-      color: 'rgba(255, 255, 255, 0.72)',
+      color: theme.palette.text.secondary,
     },
   },
   applyButton: {
-    borderRadius: 999,
-    color: '#fff',
+    borderRadius: 6,
     fontSize: '0.72rem',
-    fontWeight: 700,
+    fontWeight: 600,
     lineHeight: 1,
-    minHeight: 26,
-    minWidth: 52,
-    padding: theme.spacing(0.35, 1),
+    minHeight: 28,
+    minWidth: 48,
+    padding: theme.spacing(0.5, 1),
     textTransform: 'none',
   },
 }));
@@ -191,10 +176,7 @@ const FlightModeControl = ({
 
   return (
     <Box className={classes.root}>
-      <span className={classes.label}>
-        <FlightTakeoff className={classes.labelIcon} />
-        {t('flightModeControl.label')}
-      </span>
+      <span className={classes.label}>{t('flightModeControl.label')}</span>
       <Select
         className={classes.select}
         disabled={!canApply || loading || applying}

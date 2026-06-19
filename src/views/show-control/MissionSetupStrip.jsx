@@ -1,13 +1,12 @@
 import Add from '@mui/icons-material/Add';
+import Check from '@mui/icons-material/Check';
 import CloudDownload from '@mui/icons-material/CloudDownload';
 import Flight from '@mui/icons-material/Flight';
-import Schedule from '@mui/icons-material/Schedule';
 import Settings from '@mui/icons-material/Settings';
 import UploadFile from '@mui/icons-material/UploadFile';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
-import { createSelector } from '@reduxjs/toolkit';
 import PropTypes from 'prop-types';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,61 +15,22 @@ import { connect } from 'react-redux';
 import { makeStyles } from '@skybrush/app-theme-mui';
 
 import { Status } from '~/components/semantics';
-import { AltitudeReference } from '~/features/show/constants';
 import { loadShowFromFile } from '~/features/show/actions';
-import {
-  getOutdoorShowAltitudeReference,
-  getAbsolutePathOfShowFile,
-  getShowDescription,
-  getShowEnvironmentType,
-  getShowStartTimeAsString,
-  getShowTitle,
-  hasLoadedShowFile,
-} from '~/features/show/selectors';
 import {
   openEnvironmentEditorDialog,
   openLoadShowFromCloudDialog,
-  openStartTimeDialog,
   openTakeoffAreaSetupDialog,
 } from '~/features/show/slice';
 import { getSetupStageStatuses } from '~/features/show/stages';
 import { SHOW_UPLOAD_JOB } from '~/features/show/constants';
-import { getUAVIdsParticipatingInMission } from '~/features/mission/selectors';
-import { getFarthestDistanceFromHome } from '~/features/uavs/selectors';
-import { isUploadInProgress } from '~/features/upload/selectors';
 import { openUploadDialogForJob } from '~/features/upload/slice';
 import { hasFeature } from '~/utils/configuration';
-import { formatDistance } from '~/utils/formatting';
 
 const EXTENSIONS = ['.skyc'];
 const isFile = (item) => item?.size > 0;
 
-const getFileNameFromPath = (path) => {
-  if (!path) return null;
-  const normalized = String(path).replace(/\\/g, '/');
-  const name = normalized.slice(normalized.lastIndexOf('/') + 1);
-  return name || null;
-};
-
-const getEnvironmentDescription = createSelector(
-  getShowEnvironmentType,
-  getOutdoorShowAltitudeReference,
-  (environmentType, outdoorAltitudeReference) => {
-    switch (environmentType) {
-      case 'indoor':
-        return 'indoor';
-      case 'outdoor': {
-        const { type, value } = outdoorAltitudeReference;
-        if (type === AltitudeReference.AMSL && Number.isFinite(value)) {
-          return 'outdoorAMSL';
-        }
-        return 'outdoor';
-      }
-      default:
-        return 'unknown';
-    }
-  }
-);
+const isDone = (status) =>
+  status === Status.SUCCESS || status === Status.SKIPPED;
 
 const statusColor = (status) => {
   switch (status) {
@@ -91,114 +51,149 @@ const statusColor = (status) => {
 const useStyles = makeStyles((theme) => ({
   root: {
     display: 'flex',
-    flex: '0 0 auto',
+    flex: 1,
     flexDirection: 'column',
     minWidth: 0,
-    padding: theme.spacing(0.75, 1.25, 1),
+    overflow: 'visible',
+    padding: theme.spacing(0.75, 1.5, 1),
+  },
+  header: {
+    alignItems: 'center',
+    display: 'flex',
+    flexShrink: 0,
+    justifyContent: 'space-between',
+    minHeight: 20,
   },
   title: {
-    color: 'rgba(255,255,255,0.55)',
+    color: theme.palette.text.secondary,
     fontSize: '0.76rem',
     fontWeight: 700,
     letterSpacing: '0.14em',
     lineHeight: 1,
-    marginBottom: theme.spacing(1),
     textTransform: 'uppercase',
   },
-  track: {
-    alignItems: 'stretch',
-    display: 'grid',
+  stepCounter: {
+    color: theme.palette.text.disabled,
+    fontSize: '0.72rem',
+    fontWeight: 500,
+    lineHeight: 1,
+  },
+  progressWrap: {
+    alignItems: 'center',
+    display: 'flex',
     flex: 1,
-    gap: theme.spacing(0.5),
-    gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
     minHeight: 0,
-    minWidth: 0,
-    paddingBottom: theme.spacing(0.25),
+    overflow: 'visible',
+    width: '100%',
+  },
+  progressTrack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(0.625),
+    overflow: 'visible',
     position: 'relative',
     width: '100%',
-
-    '&::before': {
-      backgroundColor: 'rgba(255,255,255,0.14)',
-      content: '""',
-      height: 2,
-      left: '10%',
-      pointerEvents: 'none',
-      position: 'absolute',
-      right: '10%',
-      top: 52,
-      zIndex: 0,
-    },
-
-    [theme.breakpoints.down('md')]: {
-      gap: theme.spacing(0.75),
-      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-      overflowX: 'auto',
-
-      '&::before': {
-        display: 'none',
-      },
-    },
   },
-
-  trackWithAdd: {
-    gridTemplateColumns: 'repeat(5, minmax(0, 1fr)) auto',
-
-    [theme.breakpoints.down('md')]: {
-      gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto',
-    },
+  circleRow: {
+    alignItems: 'flex-start',
+    display: 'flex',
+    overflow: 'visible',
+    paddingInline: theme.spacing(0.75),
+    position: 'relative',
+    width: '100%',
   },
-  step: {
+  progressBarBg: {
+    backgroundColor: theme.palette.divider,
+    height: 2,
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 15,
+    zIndex: 0,
+  },
+  progressBarFill: {
+    backgroundColor: '#3ecf6e',
+    height: 2,
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 15,
+    transition: theme.transitions.create('width'),
+    zIndex: 0,
+  },
+  stepColumn: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    flexDirection: 'column',
+    gap: theme.spacing(0.375),
+    minWidth: 0,
+  },
+  stepButton: {
     alignItems: 'center',
     background: 'none',
     border: 'none',
-    color: 'inherit',
+    borderRadius: 8,
     cursor: 'pointer',
     display: 'flex',
     flexDirection: 'column',
-    justifyContent: 'flex-start',
+    gap: theme.spacing(0.375),
     minWidth: 0,
-    padding: 0,
-    position: 'relative',
+    padding: theme.spacing(0.25, 0),
     width: '100%',
-    zIndex: 1,
 
     '&:disabled': {
       cursor: 'default',
       opacity: 0.45,
     },
+
+    '&:focus': {
+      outline: 'none',
+    },
+
+    '&:focus-visible': {
+      outline: `2px solid ${theme.palette.primary.main}`,
+      outlineOffset: 2,
+    },
   },
-  stepLabel: {
-    color: 'rgba(255,255,255,0.88)',
-    fontSize: 'clamp(0.72rem, 0.92vw, 0.78rem)',
-    fontWeight: 600,
-    lineHeight: 1.2,
-    marginBottom: theme.spacing(0.75),
-    maxWidth: '100%',
-    overflow: 'hidden',
-    textAlign: 'center',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  stepCircle: {
+  stepDot: {
     alignItems: 'center',
-    border: '2px solid transparent',
+    display: 'flex',
+    justifyContent: 'center',
+    overflow: 'visible',
+    padding: 3,
+  },
+  stepDotCircle: {
+    alignItems: 'center',
+    backgroundColor: theme.palette.background.paper,
+    border: `2px solid ${theme.palette.divider}`,
     borderRadius: '50%',
+    boxSizing: 'border-box',
     display: 'flex',
     flexShrink: 0,
-    height: 'clamp(34px, 4vw, 40px)',
+    height: 32,
     justifyContent: 'center',
-    position: 'relative',
-    width: 'clamp(34px, 4vw, 40px)',
-    zIndex: 1,
+    transition: theme.transitions.create(['border-color', 'background-color']),
+    width: 32,
   },
-  stepIcon: {
-    fontSize: '1.3rem',
+  stepDotCircleDone: {
+    backgroundColor: '#3ecf6e',
+    borderColor: '#3ecf6e',
+    color: '#fff',
   },
-  stepSub: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 'clamp(0.66rem, 0.82vw, 0.74rem)',
+  stepDotCircleActive: {
+    borderColor: '#e8b339',
+    borderWidth: 3,
+  },
+  stepDotIcon: {
+    fontSize: '1.05rem',
+  },
+  stepDotCheck: {
+    fontSize: '1.1rem',
+  },
+  stepDotLabel: {
+    color: theme.palette.text.disabled,
+    fontSize: '0.74rem',
+    fontWeight: 500,
     lineHeight: 1.25,
-    marginTop: theme.spacing(0.75),
     maxWidth: '100%',
     overflow: 'hidden',
     paddingInline: theme.spacing(0.25),
@@ -206,144 +201,37 @@ const useStyles = makeStyles((theme) => ({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  stepSubWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: theme.spacing(0.25),
-    marginTop: theme.spacing(0.75),
-    maxWidth: '100%',
-    minHeight: '2.6em',
-    paddingInline: theme.spacing(0.25),
-    width: '100%',
+  stepDotLabelActive: {
+    color: theme.palette.text.primary,
+    fontWeight: 600,
   },
-  stepSubLine: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 'clamp(0.66rem, 0.82vw, 0.74rem)',
-    lineHeight: 1.25,
-    textAlign: 'center',
-    whiteSpace: 'normal',
-    wordBreak: 'break-word',
+  stepDotLabelDone: {
+    color: '#3ecf6e',
   },
   addButton: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    color: 'rgba(255,255,255,0.55)',
+    backgroundColor: theme.palette.action.hover,
+    border: `1px solid ${theme.palette.divider}`,
+    color: theme.palette.text.secondary,
     flexShrink: 0,
-    height: 'clamp(30px, 3.5vw, 36px)',
-    justifySelf: 'center',
-    width: 'clamp(30px, 3.5vw, 36px)',
-    zIndex: 1,
+    height: 28,
+    width: 28,
+  },
+  footer: {
+    alignItems: 'center',
+    display: 'flex',
+    flexShrink: 0,
+    gap: theme.spacing(0.5),
+    justifyContent: 'center',
+    width: '100%',
   },
 }));
 
-const MissionStepContent = ({
-  classes,
-  icon: Icon,
-  label,
-  status,
-  sublabel,
-  sublabelLines,
-}) => (
-  <>
-    <Typography className={classes.stepLabel} component='span' title={label}>
-      {label}
-    </Typography>
-    <Box
-      className={classes.stepCircle}
-      sx={{
-        backgroundColor: `${statusColor(status)}22`,
-        borderColor: statusColor(status),
-        color:
-          status === Status.OFF ? 'rgba(255,255,255,0.35)' : statusColor(status),
-      }}
-    >
-      <Icon className={classes.stepIcon} />
-    </Box>
-    {Array.isArray(sublabelLines) && sublabelLines.length > 0 ? (
-      <Box className={classes.stepSubWrap}>
-        {sublabelLines.map((line) => (
-          <Typography
-            key={line}
-            className={classes.stepSubLine}
-            component='span'
-            title={line}
-          >
-            {line}
-          </Typography>
-        ))}
-      </Box>
-    ) : (
-      <Typography className={classes.stepSub} component='span' title={sublabel}>
-        {sublabel}
-      </Typography>
-    )}
-  </>
-);
-
-MissionStepContent.propTypes = {
-  classes: PropTypes.object.isRequired,
-  icon: PropTypes.elementType.isRequired,
-  label: PropTypes.string.isRequired,
-  status: PropTypes.string,
-  sublabel: PropTypes.string,
-  sublabelLines: PropTypes.arrayOf(PropTypes.string),
-};
-
-const MissionStep = ({
-  classes,
-  disabled,
-  icon,
-  label,
-  onClick,
-  status,
-  sublabel,
-  sublabelLines,
-}) => (
-  <button
-    className={classes.step}
-    disabled={disabled}
-    onClick={onClick}
-    type='button'
-  >
-    <MissionStepContent
-      classes={classes}
-      icon={icon}
-      label={label}
-      status={status}
-      sublabel={sublabel}
-      sublabelLines={sublabelLines}
-    />
-  </button>
-);
-
-MissionStep.propTypes = {
-  classes: PropTypes.object.isRequired,
-  disabled: PropTypes.bool,
-  icon: PropTypes.elementType.isRequired,
-  label: PropTypes.string.isRequired,
-  onClick: PropTypes.func,
-  status: PropTypes.string,
-  sublabel: PropTypes.string,
-  sublabelLines: PropTypes.arrayOf(PropTypes.string),
-};
-
 const MissionSetupStrip = ({
-  environmentKey,
-  formattedStartTime,
-  hasLoadedFile,
-  isUploading,
-  maxDistance,
-  missionDroneCount,
   onEditEnvironment,
   onLoadFromCloud,
-  onOpenStartTime,
   onOpenTakeoffArea,
   onOpenUpload,
   onShowFileSelected,
-  showDescription,
-  showFilePath,
-  showTitle,
   stageStatuses,
 }) => {
   const classes = useStyles();
@@ -368,164 +256,172 @@ const MissionSetupStrip = ({
     [onShowFileSelected]
   );
 
-  const exportSubLines = useMemo(() => {
-    if (hasLoadedFile) {
-      const lines = [];
-      const fileName = getFileNameFromPath(showFilePath);
-      if (fileName) {
-        lines.push(fileName);
-      } else if (showTitle) {
-        lines.push(showTitle);
-      }
-      if (showDescription) {
-        lines.push(showDescription);
-      }
-      if (lines.length > 0) {
-        return lines;
-      }
+  const steps = useMemo(
+    () => [
+      {
+        key: 'export',
+        shortLabel: t('bottomBar.exportPath'),
+        icon: CloudDownload,
+        status: stageStatuses.selectShowFile,
+        disabled: false,
+        onClick: handleExportPathClick,
+      },
+      {
+        key: 'environment',
+        shortLabel: t('bottomBar.environmentSetup'),
+        icon: Settings,
+        status: stageStatuses.setupEnvironment,
+        disabled: false,
+        onClick: onEditEnvironment,
+      },
+      {
+        key: 'placement',
+        shortLabel: t('bottomBar.dronePlacement'),
+        icon: Flight,
+        status: stageStatuses.setupTakeoffArea,
+        disabled: false,
+        onClick: onOpenTakeoffArea,
+      },
+      {
+        key: 'upload',
+        shortLabel: t('bottomBar.uploadData'),
+        icon: UploadFile,
+        status: stageStatuses.uploadShow,
+        disabled: false,
+        onClick: onOpenUpload,
+      },
+    ],
+    [
+      handleExportPathClick,
+      onEditEnvironment,
+      onOpenTakeoffArea,
+      onOpenUpload,
+      stageStatuses,
+      t,
+    ]
+  );
+
+  const activeIndex = useMemo(() => {
+    const nextIndex = steps.findIndex((step) => step.status === Status.NEXT);
+    if (nextIndex !== -1) {
+      return nextIndex;
     }
 
-    if (missionDroneCount > 0) {
-      return [t('bottomBar.droneCount', { count: missionDroneCount })];
+    const pending = steps.findIndex((step) => !isDone(step.status));
+    return pending === -1 ? steps.length - 1 : pending;
+  }, [steps]);
+
+  const progressBarMetrics = useMemo(() => {
+    const n = steps.length;
+    if (n <= 1) {
+      return { inset: '0%', fillWidth: '0%' };
     }
 
-    return [t('bottomBar.noShowLoaded')];
-  }, [
-    hasLoadedFile,
-    missionDroneCount,
-    showDescription,
-    showFilePath,
-    showTitle,
-    t,
-  ]);
+    const completedCount = steps.filter((step) => isDone(step.status)).length;
+    const inset = `${(0.5 / n) * 100}%`;
 
-  const environmentSub = useMemo(() => {
-    switch (environmentKey) {
-      case 'indoor':
-        return t('show.indoor');
-      case 'outdoor':
-        return t('show.outdoor.relativeToHome');
-      case 'outdoorAMSL':
-        return t('show.outdoor.relativeToHome');
-      default:
-        return t('show.unknown');
-    }
-  }, [environmentKey, t]);
-
-  const placementSub = useMemo(() => {
-    const status = stageStatuses.setupTakeoffArea;
-    if (typeof maxDistance === 'number' && Number.isFinite(maxDistance)) {
-      return t('show.placementAccuracy', {
-        distance: formatDistance(maxDistance),
-      });
-    }
-    switch (status) {
-      case Status.SUCCESS:
-        return t('show.dronePlacementApproved');
-      case Status.SKIPPED:
-        return t('show.dronePlacementPartial');
-      default:
-        return t('show.takeOffPlace');
-    }
-  }, [maxDistance, stageStatuses.setupTakeoffArea, t]);
-
-  const uploadSub = useMemo(() => {
-    if (isUploading) {
-      return t('show.uploadShowDataLoading');
-    }
-    switch (stageStatuses.uploadShow) {
-      case Status.SUCCESS:
-        return t('bottomBar.ready');
-      case Status.ERROR:
-        return t('bottomBar.failed');
-      default:
-        return t('bottomBar.tapToUpload');
-    }
-  }, [isUploading, stageStatuses.uploadShow, t]);
-
-  const startTimeSub =
-    formattedStartTime || t('show.chooseStartTimeNotSet');
-
-  const steps = [
-    {
-      key: 'export',
-      label: t('bottomBar.exportPath'),
-      icon: CloudDownload,
-      status: stageStatuses.selectShowFile,
-      sublabelLines: exportSubLines,
-      disabled: false,
-      onClick: handleExportPathClick,
-    },
-    {
-      key: 'environment',
-      label: t('bottomBar.environmentSetup'),
-      icon: Settings,
-      status: stageStatuses.setupEnvironment,
-      sublabel: environmentSub,
-      disabled: stageStatuses.setupEnvironment === Status.OFF,
-      onClick: onEditEnvironment,
-    },
-    {
-      key: 'placement',
-      label: t('bottomBar.dronePlacement'),
-      icon: Flight,
-      status: stageStatuses.setupTakeoffArea,
-      sublabel: placementSub,
-      disabled: stageStatuses.setupTakeoffArea === Status.OFF,
-      onClick: onOpenTakeoffArea,
-    },
-    {
-      key: 'upload',
-      label: t('bottomBar.uploadData'),
-      icon: UploadFile,
-      status: stageStatuses.uploadShow,
-      sublabel: uploadSub,
-      disabled: stageStatuses.uploadShow === Status.OFF,
-      onClick: onOpenUpload,
-    },
-    {
-      key: 'startTime',
-      label: t('bottomBar.startTime'),
-      icon: Schedule,
-      status: stageStatuses.setupStartTime,
-      sublabel: startTimeSub,
-      disabled: false,
-      onClick: onOpenStartTime,
-    },
-  ];
+    return {
+      inset,
+      fillWidth: `${(Math.min(completedCount, n - 1) / n) * 100}%`,
+    };
+  }, [steps]);
 
   return (
     <Box className={classes.root}>
-      <Typography className={classes.title} component='div'>
-        {t('bottomBar.missionSetup')}
-      </Typography>
-      <Box
-        className={`${classes.track} ${
-          hasFeature('loadShowFromCloud') ? classes.trackWithAdd : ''
-        }`}
-      >
-        <input
-          ref={exportFileInputRef}
-          accept={EXTENSIONS.join(',')}
-          hidden
-          id='bottom-bar-show-file-upload'
-          type='file'
-          onChange={handleExportFileChange}
-        />
-        {steps.map((step) => (
-          <MissionStep
-            key={step.key}
-            classes={classes}
-            disabled={step.disabled}
-            icon={step.icon}
-            label={step.label}
-            onClick={step.onClick}
-            status={step.status}
-            sublabel={step.sublabel}
-            sublabelLines={step.sublabelLines}
+      <Box className={classes.header}>
+        <Typography className={classes.title} component='div'>
+          {t('bottomBar.missionSetup')}
+        </Typography>
+        <Typography className={classes.stepCounter} component='span'>
+          {t('bottomBar.stepOf', {
+            current: activeIndex + 1,
+            total: steps.length,
+          })}
+        </Typography>
+      </Box>
+
+      <Box className={classes.progressWrap}>
+        <Box className={classes.progressTrack}>
+          <input
+            ref={exportFileInputRef}
+            accept={EXTENSIONS.join(',')}
+            hidden
+            id='bottom-bar-show-file-upload'
+            type='file'
+            onChange={handleExportFileChange}
           />
-        ))}
-        {hasFeature('loadShowFromCloud') ? (
+
+          <Box className={classes.circleRow}>
+            <Box
+              className={classes.progressBarBg}
+              sx={{
+                left: progressBarMetrics.inset,
+                right: progressBarMetrics.inset,
+              }}
+            />
+            <Box
+              className={classes.progressBarFill}
+              sx={{
+                left: progressBarMetrics.inset,
+                width: progressBarMetrics.fillWidth,
+              }}
+            />
+            {steps.map((step, index) => {
+              const done = isDone(step.status);
+              const active =
+                index === activeIndex ||
+                step.status === Status.NEXT ||
+                step.status === Status.WAITING;
+              const StepIcon = step.icon;
+
+              return (
+                <Box key={step.key} className={classes.stepColumn} sx={{ zIndex: 1 }}>
+                  <button
+                    className={classes.stepButton}
+                    disabled={step.disabled}
+                    onClick={step.onClick}
+                    type='button'
+                  >
+                    <Box className={classes.stepDot}>
+                      <Box
+                        className={`${classes.stepDotCircle} ${
+                          done ? classes.stepDotCircleDone : ''
+                        } ${active && !done ? classes.stepDotCircleActive : ''}`}
+                        sx={
+                          active && !done
+                            ? {
+                                borderColor: statusColor(step.status),
+                                color: statusColor(step.status),
+                              }
+                            : undefined
+                        }
+                      >
+                        {done ? (
+                          <Check className={classes.stepDotCheck} />
+                        ) : (
+                          <StepIcon className={classes.stepDotIcon} />
+                        )}
+                      </Box>
+                    </Box>
+                    <Typography
+                      className={`${classes.stepDotLabel} ${
+                        active ? classes.stepDotLabelActive : ''
+                      } ${done ? classes.stepDotLabelDone : ''}`}
+                      component='span'
+                      title={step.shortLabel}
+                    >
+                      {step.shortLabel}
+                    </Typography>
+                  </button>
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
+      </Box>
+
+      {hasFeature('loadShowFromCloud') ? (
+        <Box className={classes.footer}>
           <IconButton
             aria-label={t('show.fromCloud')}
             className={classes.addButton}
@@ -534,48 +430,28 @@ const MissionSetupStrip = ({
           >
             <Add fontSize='small' />
           </IconButton>
-        ) : null}
-      </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 };
 
 MissionSetupStrip.propTypes = {
-  environmentKey: PropTypes.string,
-  formattedStartTime: PropTypes.string,
-  hasLoadedFile: PropTypes.bool,
-  isUploading: PropTypes.bool,
-  maxDistance: PropTypes.number,
-  missionDroneCount: PropTypes.number,
   onEditEnvironment: PropTypes.func,
   onLoadFromCloud: PropTypes.func,
-  onOpenStartTime: PropTypes.func,
   onOpenTakeoffArea: PropTypes.func,
   onOpenUpload: PropTypes.func,
   onShowFileSelected: PropTypes.func,
-  showDescription: PropTypes.string,
-  showFilePath: PropTypes.string,
-  showTitle: PropTypes.string,
   stageStatuses: PropTypes.object,
 };
 
 export default connect(
   (state) => ({
-    environmentKey: getEnvironmentDescription(state),
-    formattedStartTime: getShowStartTimeAsString(state),
-    hasLoadedFile: hasLoadedShowFile(state),
-    isUploading: isUploadInProgress(state),
-    maxDistance: getFarthestDistanceFromHome(state),
-    missionDroneCount: getUAVIdsParticipatingInMission(state).length,
-    showDescription: getShowDescription(state),
-    showFilePath: getAbsolutePathOfShowFile(state),
-    showTitle: getShowTitle(state),
     stageStatuses: getSetupStageStatuses(state),
   }),
   {
     onEditEnvironment: openEnvironmentEditorDialog,
     onLoadFromCloud: openLoadShowFromCloudDialog,
-    onOpenStartTime: openStartTimeDialog,
     onOpenTakeoffArea: openTakeoffAreaSetupDialog,
     onOpenUpload: () => openUploadDialogForJob({ job: SHOW_UPLOAD_JOB }),
     onShowFileSelected: loadShowFromFile,

@@ -2,7 +2,6 @@ import AdsClick from '@mui/icons-material/AdsClick';
 import Cast from '@mui/icons-material/Cast';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Tooltip from '@mui/material/Tooltip';
 import PropTypes from 'prop-types';
 import React from 'react';
 import { withTranslation } from 'react-i18next';
@@ -35,8 +34,8 @@ const useStyles = makeStyles((theme) => ({
       gap: theme.spacing(0.375),
       letterSpacing: '0.02em',
       lineHeight: 1,
-      minHeight: 30,
-      padding: theme.spacing(0.45, 0.875),
+      minHeight: 28,
+      padding: theme.spacing(0.35, 0.625),
       textTransform: 'none',
 
       '&:hover': {
@@ -91,26 +90,22 @@ const FlightCommandTargetToggle = ({
       value={mode}
       onChange={onChangeBroadcastMode}
     >
-      <Tooltip placement='top' title={selectionTip}>
-        <ToggleButton
-          aria-label={t('largeControlButtonGroup.selectionOnly')}
-          className={classes.modeSelection}
-          value='selection'
-        >
-          <AdsClick className={classes.modeIcon} />
-          <span>{t('largeControlButtonGroup.modeSelection')}</span>
-        </ToggleButton>
-      </Tooltip>
-      <Tooltip placement='top' title={broadcastTip}>
-        <ToggleButton
-          aria-label={t('largeControlButtonGroup.broadcast')}
-          className={classes.modeBroadcast}
-          value='broadcast'
-        >
-          <Cast className={classes.modeIcon} />
-          <span>{t('largeControlButtonGroup.modeBroadcast')}</span>
-        </ToggleButton>
-      </Tooltip>
+      <ToggleButton
+        aria-label={t('largeControlButtonGroup.selectionOnly')}
+        className={classes.modeSelection}
+        title={selectionTip}
+        value='selection'
+      >
+        <AdsClick className={classes.modeIcon} />
+      </ToggleButton>
+      <ToggleButton
+        aria-label={t('largeControlButtonGroup.broadcast')}
+        className={classes.modeBroadcast}
+        title={broadcastTip}
+        value='broadcast'
+      >
+        <Cast className={classes.modeIcon} />
+      </ToggleButton>
     </ToggleButtonGroup>
   );
 };

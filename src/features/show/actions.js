@@ -111,6 +111,7 @@ export const clearLoadedShow = () => (dispatch) => {
 export const clearStartTime = () => (dispatch, getState) => {
   const clock = getShowClockReference(getState());
   dispatch(setStartTime({ clock, time: undefined }));
+  dispatch(setShowAuthorization(false));
   dispatch(synchronizeShowSettings('toServer'));
 };
 
@@ -371,6 +372,10 @@ function processShowInJSONFormatAndDispatchActions(spec, dispatch) {
 
   // Revoke the approval of the takeoff area in case it was approved
   dispatch(revokeTakeoffAreaApproval());
+
+  // Start authorization must be granted explicitly for each loaded show.
+  dispatch(setShowAuthorization(false));
+  dispatch(synchronizeShowSettings('toServer'));
 
   // For indoor shows we use automatic start by default, not using an RC
   if (environment.type === 'indoor') {
