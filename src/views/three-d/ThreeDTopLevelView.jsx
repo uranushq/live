@@ -17,10 +17,8 @@ import { IgnoreKeys } from 'react-hotkeys';
 import { connect } from 'react-redux';
 import useResizeObserver from 'use-resize-observer';
 
-import { isThemeDark, makeStyles } from '@skybrush/app-theme-mui';
-
+import { makeStyles } from '@skybrush/app-theme-mui';
 import DarkModeSwitch from '~/components/DarkModeSwitch';
-import ToolbarDivider from '~/components/ToolbarDivider';
 import NearestItemTooltip from '~/features/session/NearestItemTooltip';
 import {
   setAppSettingsDialogTab,
@@ -39,7 +37,6 @@ import { ThreeDInteractionMode } from '~/features/three-d/types';
 import { isMapCoordinateSystemSpecified } from '~/selectors/map';
 
 import NavigationButtonGroup from './NavigationButtonGroup';
-import NavigationInstructions from './NavigationInstructions';
 import Overlay from './Overlay';
 import ThreeDInteractionModeToggle from './ThreeDInteractionModeToggle';
 
@@ -47,37 +44,27 @@ const ThreeDView = loadable(
   () => import(/* webpackChunkName: "three-d" */ './ThreeDView')
 );
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles(() => ({
   appBar: {
-    backgroundColor: isThemeDark(theme)
-      ? '#424242'
-      : theme.palette.background.paper,
-    height: 48,
-  },
-
-  appBarCreateMode: {
+    position: 'relative',
+    zIndex: 10,
+    flexShrink: 0,
     backgroundColor: '#1a1a1e',
+    color: 'rgba(255,255,255,0.88)',
     height: 44,
     boxShadow: 'none',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
   },
 
   toolbar: {
-    position: 'absolute',
-    left: theme.spacing(1),
-    right: theme.spacing(1),
-    top: 0,
-  },
-
-  toolbarCreateMode: {
-    position: 'absolute',
-    left: theme.spacing(2),
-    right: theme.spacing(2),
-    top: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    width: '100%',
     minHeight: 44,
+    paddingLeft: 16,
+    paddingRight: 16,
+    boxSizing: 'border-box',
   },
 }));
 
@@ -192,19 +179,39 @@ const ThreeDTopLevelView = ({
   return (
     <IgnoreKeys style={{ height: '100%' }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <AppBar
-          color='default'
-          position='static'
-          className={isCreateMode ? classes.appBarCreateMode : classes.appBar}
-        >
-          {isCreateMode ? (
-            <Toolbar disableGutters variant='dense' className={classes.toolbarCreateMode}>
-              <NavigationButtonGroup
-                minimal
-                mode={navigation.mode}
-                parameters={navigation.parameters}
-                onChange={onSetNavigationMode}
-              />
+        <AppBar color='inherit' position='static' className={classes.appBar}>
+          <Toolbar disableGutters variant='dense' className={classes.toolbar}>
+            <NavigationButtonGroup
+              minimal
+              mode={navigation.mode}
+              parameters={navigation.parameters}
+              onChange={onSetNavigationMode}
+            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {!isCreateMode && (
+                <Box
+                  sx={{
+                    '& .MuiToggleButton-root': {
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: 'rgba(255,255,255,0.45)',
+                      padding: '6px',
+                      '&.Mui-selected': {
+                        backgroundColor: 'transparent',
+                        color: '#ffffff',
+                      },
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                      },
+                    },
+                  }}
+                >
+                  <DarkModeSwitch
+                    value={lighting === 'dark'}
+                    onChange={onToggleLightingConditions}
+                  />
+                </Box>
+              )}
               {!hideInteractionModeToggle && (
                 <ThreeDInteractionModeToggle
                   minimal
@@ -212,36 +219,13 @@ const ThreeDTopLevelView = ({
                   onChange={onSetInteractionMode}
                 />
               )}
-            </Toolbar>
-          ) : (
-            <Toolbar disableGutters variant='dense' className={classes.toolbar}>
-              <NavigationButtonGroup
-                mode={navigation.mode}
-                parameters={navigation.parameters}
-                onChange={onSetNavigationMode}
-                onResetZoom={onResetZoom}
-                onRotateCameraTowardsDrones={onRotateCameraTowardsDrones}
-              />
-              <ToolbarDivider orientation='vertical' />
-              <NavigationInstructions mode={navigation.mode} />
-              {!hideInteractionModeToggle && (
-                <>
-                  <ToolbarDivider orientation="vertical" />
-                  <ThreeDInteractionModeToggle
-                    mode={effectiveInteractionMode}
-                    onChange={onSetInteractionMode}
-                  />
-                </>
-              )}
-              <ToolbarDivider orientation="vertical" />
-              <DarkModeSwitch
-                value={lighting === 'dark'}
-                onChange={onToggleLightingConditions}
-              />
-            </Toolbar>
-          )}
+            </Box>
+          </Toolbar>
         </AppBar>
-        <Box ref={setSceneHostRef} sx={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        <Box
+          ref={setSceneHostRef}
+          sx={{ position: 'relative', flex: 1, minHeight: 0, zIndex: 0 }}
+        >
           <NearestItemTooltip>
             <ThreeDView
               ref={threeDViewRef}

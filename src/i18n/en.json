@@ -106,6 +106,7 @@
     "startTime": "Start time",
     "tapToUpload": "Tap to upload",
     "uploadData": "Upload data",
+    "stepOf": "Step {{current}} of {{total}}",
     "waiting": "Waiting"
   },
   "broadcastButton": {
@@ -169,6 +170,25 @@
     "tooltipBroadcast": "Sets FLTMODE5/6 on all connected MAVLink drones",
     "tooltipNoSelection": "Select drones to change FLTMODE5/6",
     "tooltipSelection": "Sets FLTMODE5/6 on {{count}} selected drone(s)"
+  },
+  "currentFlightModeControl": {
+    "apply": "Apply",
+    "applyFailed": "Failed to change current flight mode: {{message}}",
+    "applyFailedGeneric": "Failed to change current flight mode.",
+    "applyPartial": "Current flight mode was not changed on some drones{{detail}}",
+    "applySuccess": "Current flight mode updated.",
+    "label": "Current",
+    "modes": {
+      "guided": "Guided",
+      "land": "Land",
+      "loiter": "Loiter",
+      "posHold": "Pos Hold",
+      "show": "Show",
+      "stabilize": "Stabilize"
+    },
+    "tooltipBroadcast": "Immediately switches current flight mode on {{count}} mission drone(s) via OBJ-CMD (stabilize, loiter, etc.)",
+    "tooltipNoSelection": "Select drones to change current flight mode via OBJ-CMD",
+    "tooltipSelection": "Immediately switches current flight mode on {{count}} selected drone(s) via OBJ-CMD"
   },
   "fullScreen": {
     "exit": "Exit full screen mode",

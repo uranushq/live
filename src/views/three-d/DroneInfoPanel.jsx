@@ -657,13 +657,6 @@ export default function DroneInfoPanel({
           </div>
         )}
       </div>
-
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.6 }}>
-        입력값은 ThreeDView 로컬 좌표계 기준입니다.
-      </div>
-      <div style={{ marginTop: 4, fontSize: 11, opacity: 0.5 }}>
-        체크한 점은 3D 경로에서 빨간색으로 표시됩니다.
-      </div>
     </>
   );
 
