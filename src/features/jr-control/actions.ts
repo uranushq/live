@@ -6,6 +6,7 @@
 import ky from 'ky';
 
 import { showError, showSuccess } from '~/features/snackbar/actions';
+import { timelineDurationSec } from '~/features/led-editor/utils';
 import { type AppThunk, type RootState } from '~/store/reducers';
 
 import {
@@ -73,7 +74,16 @@ export const redownloadBoard =
 export const broadcastArm =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const state: RootState = getState();
-    const arm: ArmParams = state.jrControl.arm;
+    // FPS and frame count are properties of the authored LED show, so derive
+    // them from it rather than asking the user to keep them in sync by hand.
+    const { fps, boards: ledBoards } = state.ledEditor;
+    const frameCount = Math.max(1, Math.round(timelineDurationSec(ledBoards) * fps));
+    const arm: ArmParams = {
+      ...state.jrControl.arm,
+      fpsNum: fps,
+      fpsDen: 1,
+      frameCount,
+    };
     try {
       const summary = await ky
         .post(`${JR_BASE}/arm`, { json: arm, timeout: 15_000 })

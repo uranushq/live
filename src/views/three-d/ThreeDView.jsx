@@ -58,7 +58,12 @@ import {
 import {
   isMapCoordinateSystemLeftHanded,
 } from '~/selectors/map';
-import { setPlayhead, setPlaying, setThreeDSync } from '~/features/led-editor/slice';
+import {
+  setPlayhead,
+  setPlaying,
+  setThreeDSync,
+  setFormationSync,
+} from '~/features/led-editor/slice';
 import {
   getPlayheadSec,
   getPlaying,
@@ -84,6 +89,18 @@ const getNaturalLightingForThreeDView = (state) => {
 
 const DEFAULT_PATH_DELIVERY_URL = '/api/v1/path-planner/plan';
 const PATH_DELIVERY_PROXY_TARGET = 'http://localhost:5001/api/v1/path-planner/plan';
+
+// Distinct colours cycled across formation regions on the LED timeline.
+const FORMATION_COLORS = Object.freeze([
+  '#42a5f5',
+  '#66bb6a',
+  '#ffa726',
+  '#ab47bc',
+  '#ef5350',
+  '#26c6da',
+  '#d4e157',
+  '#ec407a',
+]);
 
 const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   step_size: 1.0,
@@ -1250,6 +1267,55 @@ const ThreeDView = React.forwardRef((props, ref) => {
     // applyProgressToAll closes over the latest effectiveConfig each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncActive, ledPlayheadSec, maxPathDurationMs]);
+
+  // Formation hold-windows on the shared timeline. The dance runs: optional
+  // takeoff, then for each phase a `duration_ms` move to the formation followed
+  // by its `holdMs` hold. Each region marks when a formation is held; the first
+  // region's start is the recommended LED-activation delay after dance start.
+  const formationTimeline = useMemo(() => {
+    if (!Array.isArray(formationPhases) || !formationPhases.length) return [];
+    const s = sanitizeFormationSettings(formationSettings);
+    const moveSec = Math.max(0, Number(s.duration_ms) || 0) / 1000;
+    let cursorSec = Math.max(0, Number(s.takeoff_time) || 0);
+    return formationPhases.map((phase, i) => {
+      cursorSec += moveSec; // travel to this formation
+      const startSec = cursorSec;
+      const holdSec = Math.max(0, Number(phase.holdMs) || 0) / 1000;
+      const endSec = startSec + holdSec;
+      cursorSec = endSec; // hold here, then the next move begins
+      return {
+        name: String(phase.name || '').trim() || `phase-${i + 1}`,
+        startSec,
+        endSec,
+        color: FORMATION_COLORS[i % FORMATION_COLORS.length],
+      };
+    });
+  }, [formationPhases, formationSettings]);
+
+  const ledStartDelaySec = formationTimeline.length
+    ? formationTimeline[0].startSec
+    : null;
+
+  // Mirror the formation windows + recommended delay into the LED editor store
+  // (read by the LED timeline, simulator and JR-control) while sync is on.
+  useEffect(() => {
+    if (syncActive) {
+      store.dispatch(
+        setFormationSync({ timeline: formationTimeline, delaySec: ledStartDelaySec })
+      );
+    } else {
+      store.dispatch(setFormationSync({ timeline: [], delaySec: null }));
+    }
+  }, [syncActive, formationTimeline, ledStartDelaySec]);
+
+  // Clear the mirrored formation data when the 3D view unmounts so stale
+  // regions don't linger on the LED timeline.
+  useEffect(
+    () => () => {
+      store.dispatch(setFormationSync({ timeline: [], delaySec: null }));
+    },
+    []
+  );
 
   useEffect(() => {
     const onGizmoDragState = (e) => {

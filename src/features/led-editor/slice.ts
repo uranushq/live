@@ -11,6 +11,7 @@ import { createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit';
 import {
   type Board,
   type Clipboard,
+  type FormationRegion,
   type LedEditorState,
   type LedsPerDrone,
   type RGB,
@@ -30,13 +31,13 @@ import {
   xyToIndex,
 } from './utils';
 
-const DEFAULT_LEDS_PER_DRONE: LedsPerDrone = 4;
-const DEFAULT_DRONE_COUNT = 21;
+const DEFAULT_LEDS_PER_DRONE: LedsPerDrone = 3;
+const DEFAULT_DRONE_COUNT = 4;
 
 const initialState: LedEditorState = {
   ledsPerDrone: DEFAULT_LEDS_PER_DRONE,
   droneCount: DEFAULT_DRONE_COUNT,
-  fps: 15,
+  fps: 30,
   boards: [],
   selectedBoardIds: [],
   selectedPixels: [],
@@ -46,6 +47,8 @@ const initialState: LedEditorState = {
   playheadSec: 0,
   playing: false,
   threeDSync: true,
+  formationTimeline: [],
+  ledStartDelaySec: null,
   upload: { state: 'idle' },
 };
 
@@ -396,6 +399,18 @@ const { actions, reducer } = createSlice({
       state.threeDSync = action.payload;
     },
 
+    /** Mirror the 3D view's formation hold-windows + LED start delay. */
+    setFormationSync(
+      state,
+      action: PayloadAction<{
+        timeline: FormationRegion[];
+        delaySec: number | null;
+      }>
+    ) {
+      state.formationTimeline = action.payload.timeline;
+      state.ledStartDelaySec = action.payload.delaySec;
+    },
+
     setUploadStatus(state, action: PayloadAction<UploadStatus>) {
       state.upload = action.payload;
     },
@@ -426,6 +441,7 @@ export const {
   setPlayhead,
   setPlaying,
   setThreeDSync,
+  setFormationSync,
   setUploadStatus,
 } = actions;
 

@@ -33,7 +33,7 @@ const normalizeLeds = (value) => (value === 3 || value === 4 ? value : 4);
 AFrame.registerComponent('drone-led-panel', {
   schema: {
     index: { type: 'int', default: 0 }, // matching LED-show drone index
-    size: { type: 'number', default: 0.4875 }, // panel edge length, metres (0.39 × 1.25)
+    size: { type: 'number', default: 0.6825 }, // panel edge length, metres (0.4875 × 1.4)
   },
 
   init() {
@@ -84,9 +84,9 @@ AFrame.registerComponent('drone-led-panel', {
     this.leds = leds;
     const { size } = this.data;
     const cell = size / leds;
-    // Fill ratio chosen so the absolute tile size is unchanged after the 1.25×
-    // grid growth (0.6 × 0.39 / 0.4875), so only the gaps between pixels widen.
-    const tile = cell * 0.48;
+    // Fill ratio chosen so the absolute tile size is unchanged after the 1.4×
+    // grid growth (0.48 × 0.4875 / 0.6825), so only the gaps between pixels widen.
+    const tile = cell * 0.342857;
     for (let local = 0; local < leds * leds; local++) {
       const lx = local % leds;
       const ly = Math.floor(local / leds);
