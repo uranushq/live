@@ -15,6 +15,8 @@ import PropTypes from 'prop-types';
 import {
   DRONE_PATH_FLUSH_REQUEST,
   getPathPointArrivalTimesMs,
+  mergeConsecutiveSamePositionPathPoints,
+  samePathPointPosition,
   toFiniteDurationMs,
   toFiniteHoldMs,
 } from './utils/threeDViewUtils';
@@ -151,11 +153,63 @@ export default function DroneInfoPanel({
   const [formationPositionDrafts, setFormationPositionDrafts] = useState({});
   const [formationSettingsDrafts, setFormationSettingsDrafts] = useState({});
 
+  const isPathPointRowValid = (p) => {
+    if (
+      p.x === undefined ||
+      p.y === undefined ||
+      p.z === undefined ||
+      String(p.x).trim() === '' ||
+      String(p.y).trim() === '' ||
+      String(p.z).trim() === ''
+    ) {
+      return false;
+    }
+
+    const nx = Number(p.x);
+    const ny = Number(p.y);
+    const nz = Number(p.z);
+
+    return Number.isFinite(nx) && Number.isFinite(ny) && Number.isFinite(nz);
+  };
+
+  const mergeConsecutivePathRows = useCallback((rows) => {
+    if (!Array.isArray(rows) || rows.length <= 1) return rows;
+
+    const merged = [];
+    rows.forEach((row) => {
+      const prev = merged[merged.length - 1];
+      if (
+        prev &&
+        isPathPointRowValid(prev) &&
+        isPathPointRowValid(row) &&
+        samePathPointPosition(
+          { x: Number(prev.x), y: Number(prev.y), z: Number(prev.z) },
+          { x: Number(row.x), y: Number(row.y), z: Number(row.z) }
+        )
+      ) {
+        const prevHold = Number(prev.holdMs);
+        const rowDur = Number(row.durationMs);
+        const rowHold = Number(row.holdMs);
+        prev.holdMs =
+          (Number.isFinite(prevHold) && prevHold >= 0 ? prevHold : 0) +
+          (Number.isFinite(rowDur) && rowDur >= 0 ? rowDur : 0) +
+          (Number.isFinite(rowHold) && rowHold >= 0 ? rowHold : 0);
+        if (row.highlighted) prev.highlighted = true;
+        if (row.yaw !== undefined && String(row.yaw).trim() !== '') {
+          prev.yaw = row.yaw;
+        }
+        return;
+      }
+      merged.push({ ...row });
+    });
+
+    return merged;
+  }, []);
+
   // 드론 바뀔 때 경로 초기화 / JSON에서 path가 오면 반영
   useEffect(() => {
     if (drone && Array.isArray(drone.path) && drone.path.length) {
-      setPathPoints(
-        drone.path.map((p, index) => {
+      const rows = drone.path.map((p, index) => {
           const row = {
             x: String(p.x ?? ''),
             y: String(p.y ?? ''),
@@ -168,12 +222,12 @@ export default function DroneInfoPanel({
             row.yaw = String(p.yaw);
           }
           return row;
-        })
-      );
+        });
+      setPathPoints(mergeConsecutivePathRows(rows));
     } else {
       setPathPoints([{ x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false }]);
     }
-  }, [drone?.id, drone?.path]);
+  }, [drone?.id, drone?.path, mergeConsecutivePathRows]);
 
   const initialPositionSyncKey = useMemo(() => {
     const ip = drone?.initialPosition;
@@ -222,25 +276,6 @@ export default function DroneInfoPanel({
     setFormationPositionDrafts({});
     setFormationSettingsDrafts({});
   }, [drone?.id]);
-
-  const isPathPointRowValid = (p) => {
-    if (
-      p.x === undefined ||
-      p.y === undefined ||
-      p.z === undefined ||
-      String(p.x).trim() === '' ||
-      String(p.y).trim() === '' ||
-      String(p.z).trim() === ''
-    ) {
-      return false;
-    }
-
-    const nx = Number(p.x);
-    const ny = Number(p.y);
-    const nz = Number(p.z);
-
-    return Number.isFinite(nx) && Number.isFinite(ny) && Number.isFinite(nz);
-  };
 
   const pathPointArrivalMsByRow = useMemo(() => {
     const rows = Array.isArray(pathPoints) ? pathPoints : [];
@@ -382,25 +417,27 @@ export default function DroneInfoPanel({
 
   const buildPathPointsForConfig = useCallback(
     (source = pathPoints) =>
-      source
-        .filter((p) => isPathPointRowValid(p))
-        .map((p, index) => {
-          const point = {
-            x: Number(p.x),
-            y: Number(p.y),
-            z: Number(p.z),
-            durationMs: toFiniteDurationMs(p.durationMs, index === 0 ? 0 : 1000),
-            holdMs: toFiniteHoldMs(p.holdMs, 0),
-          };
-          const yaw = Number(p.yaw);
-          if (Number.isFinite(yaw)) {
-            point.yaw = yaw;
-          }
-          if (p.highlighted) {
-            point.highlighted = true;
-          }
-          return point;
-        }),
+      mergeConsecutiveSamePositionPathPoints(
+        source
+          .filter((p) => isPathPointRowValid(p))
+          .map((p, index) => {
+            const point = {
+              x: Number(p.x),
+              y: Number(p.y),
+              z: Number(p.z),
+              durationMs: toFiniteDurationMs(p.durationMs, index === 0 ? 0 : 1000),
+              holdMs: toFiniteHoldMs(p.holdMs, 0),
+            };
+            const yaw = Number(p.yaw);
+            if (Number.isFinite(yaw)) {
+              point.yaw = yaw;
+            }
+            if (p.highlighted) {
+              point.highlighted = true;
+            }
+            return point;
+          })
+      ),
     [pathPoints]
   );
 
@@ -408,7 +445,12 @@ export default function DroneInfoPanel({
     (source = pathPoints) => {
       if (!drone?.id) return;
 
-      const points = buildPathPointsForConfig(source);
+      const mergedRows = mergeConsecutivePathRows(source);
+      if (mergedRows.length !== source.length) {
+        setPathPoints(mergedRows);
+      }
+
+      const points = buildPathPointsForConfig(mergedRows);
       if (!points.length) return;
 
       window.dispatchEvent(
@@ -420,7 +462,7 @@ export default function DroneInfoPanel({
         })
       );
     },
-    [buildPathPointsForConfig, drone?.id, pathPoints]
+    [buildPathPointsForConfig, drone?.id, mergeConsecutivePathRows, pathPoints]
   );
 
   useEffect(() => {
@@ -687,10 +729,7 @@ export default function DroneInfoPanel({
         <button
           type="button"
           disabled={!canPlayPath || isDownloadingSkyc}
-          onClick={() => {
-            syncPathToConfig();
-            onDownloadSkyc();
-          }}
+          onClick={() => onDownloadSkyc()}
           style={{
             marginTop: 10,
             width: '100%',

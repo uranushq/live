@@ -24,7 +24,6 @@ import PathGeneratorModal from './PathGeneratorModal';
 import useThreeDViewDroneEvents from './hooks/useThreeDViewDroneEvents';
 import {
   applyDronePathsToScene,
-  buildPathDeliveryPayloadFromConfig,
   buildSeekPathWithInitial,
   collectConfigFromScene as collectConfigFromSceneUtil,
   isDroneConfigState,
@@ -32,6 +31,7 @@ import {
   getEffectiveScenery as getEffectiveSceneryUtil,
   getPathTotalDurationMs,
   mergePathOverridesIntoDrones,
+  mergeDronePathsInConfig,
   normalizeDroneForConfigIO,
   normalizeDronesFromConfigImport,
   DEFAULT_DRONE_GROUND_POSITION,
@@ -508,6 +508,14 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const [formationDeliveryStatus, setFormationDeliveryStatus] = useState('');
 
   useEffect(() => {
+    if (!pathDeliveryStatus) return undefined;
+    const timerId = window.setTimeout(() => {
+      setPathDeliveryStatus('');
+    }, 5000);
+    return () => window.clearTimeout(timerId);
+  }, [pathDeliveryStatus]);
+
+  useEffect(() => {
     if (ignorePersistedDroneConfigRef.current) {
       return;
     }
@@ -916,14 +924,14 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const overrideList = Array.from(pathOverridesByIdRef.current.entries()).map(
       ([id, path]) => ({ id, path })
     );
-    if (!overrideList.length) {
-      return base;
-    }
+    const withOverrides = !overrideList.length
+      ? base
+      : {
+          ...base,
+          drones: mergePathOverridesIntoDrones(base.drones, overrideList),
+        };
 
-    return {
-      ...base,
-      drones: mergePathOverridesIntoDrones(base.drones, overrideList),
-    };
+    return mergeDronePathsInConfig(withOverrides);
   }, [collectConfigFromScene, effectiveConfig]);
 
   const flushPendingPathEdits = useCallback(
@@ -935,92 +943,51 @@ const ThreeDView = React.forwardRef((props, ref) => {
     []
   );
 
-  const handleSendPathsClick = useCallback(async () => {
+  const handleDownloadSkycLocally = useCallback(async () => {
     await flushPendingPathEdits();
 
     const baseConfig = getConfigForPathDelivery();
     const droneList = Array.isArray(baseConfig?.drones) ? baseConfig.drones : [];
 
     if (!droneList.length) {
-      setPathDeliveryStatus('전달할 드론 경로가 없습니다.');
+      setPathDeliveryStatus('저장할 드론 경로가 없습니다.');
+      return;
+    }
+
+    if (!base64ShowBlob) {
+      setPathDeliveryStatus(
+        '로컬 .skyc 저장을 위해 원본 .skyc 파일을 먼저 업로드해 주세요.\n(서버로 경로를 전달하지 않습니다.)'
+      );
+      return;
+    }
+
+    if (!Array.isArray(swarmSpecification) || !swarmSpecification.length) {
+      setPathDeliveryStatus('show swarm 정보가 없어 .skyc를 저장할 수 없습니다.');
       return;
     }
 
     setIsSendingPaths(true);
     setPathDeliveryStatus('');
 
-    const canExportLocally =
-      effectiveConfig?.source === 'showSpec' &&
-      Boolean(base64ShowBlob) &&
-      Array.isArray(swarmSpecification) &&
-      swarmSpecification.length > 0;
-
     try {
-      if (canExportLocally) {
-        await exportPatchedSkycFromShow({
-          base64Blob: base64ShowBlob,
-          swarmDrones: swarmSpecification,
-          editedDrones: droneList,
-          filename: 'updated-show.skyc',
-        });
-        setPathDeliveryStatus(
-          `로컬 SKYC 갱신 완료: ${droneList.length}대\n경로·타이밍만 반영했습니다. (lights/formation 등은 원본 유지)`
-        );
-        return;
-      }
-
-      const payload = buildPathDeliveryPayloadFromConfig(baseConfig);
-      if (!payload.drones.length) {
-        setPathDeliveryStatus('전달할 드론 경로가 없습니다.');
-        return;
-      }
-
-      const usedUrl = DEFAULT_PATH_DELIVERY_URL;
-      const response = await fetch(usedUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+      await exportPatchedSkycFromShow({
+        base64Blob: base64ShowBlob,
+        swarmDrones: swarmSpecification,
+        editedDrones: droneList,
+        filename: 'updated-show.skyc',
       });
-
-      if (!response.ok) {
-        const msg = await getPathDeliveryErrorMessage(response);
-        throw new Error(msg || `요청 실패: ${response.status}`);
-      }
-
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = 'path-planner.skyc';
-      document.body.appendChild(a);
-      a.click();
-      if (a.parentNode === document.body) {
-        try {
-          document.body.removeChild(a);
-        } catch (error) {
-          if (error?.name !== 'NotFoundError') throw error;
-        }
-      }
-      URL.revokeObjectURL(objectUrl);
-
       setPathDeliveryStatus(
-        `경로 전달 완료: ${payload.drones.length}대\npath-planner.skyc 다운로드가 시작되었습니다.\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}`
+        `.skyc 다운로드 완료: ${droneList.length}대\n브라우저에서 updated-show.skyc 파일이 저장됩니다.\n(경로·타이밍만 반영, lights/formation 등은 원본 유지)`
       );
     } catch (error) {
-      const usedUrl = DEFAULT_PATH_DELIVERY_URL;
       setPathDeliveryStatus(
-        canExportLocally
-          ? `SKYC 갱신 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`
-          : `경로 전달 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}`
+        `.skyc 저장 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`
       );
     } finally {
       setIsSendingPaths(false);
     }
   }, [
     base64ShowBlob,
-    effectiveConfig?.source,
     flushPendingPathEdits,
     getConfigForPathDelivery,
     swarmSpecification,
@@ -1655,11 +1622,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onResetPanelSettings={handleResetPanelSettings}
         onLoadConfigClick={handleLoadConfigClick}
         onSaveConfigClick={handleSaveConfigClick}
-        onSendPathsClick={handleSendPathsClick}
+        onDownloadSkycClick={handleDownloadSkycLocally}
         onFileChange={handleFileChange}
         onAddDroneClick={() => setAddDroneModalOpen(true)}
-        isSendingPaths={isSendingPaths}
-        pathDeliveryStatus={pathDeliveryStatus}
+        isDownloadingSkyc={isSendingPaths}
+        skycDownloadStatus={pathDeliveryStatus}
       />
       )}
       {isCreateMode && (
@@ -1801,7 +1768,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onApplyAllDronesInPhase={handleApplyAllDronesInPhase}
         onUpdateFormationSettings={handleUpdateFormationSettings}
         onSendFormationPlan={handleSendFormationPlan}
-        onDownloadSkyc={handleSendPathsClick}
+        onDownloadSkyc={handleDownloadSkycLocally}
         isDownloadingSkyc={isSendingPaths}
         skycDownloadStatus={pathDeliveryStatus}
       />

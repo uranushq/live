@@ -1,7 +1,12 @@
 import { Base64 } from 'js-base64';
 import JSZip from 'jszip';
 
-import { getPathPointArrivalTimesMs, toFiniteHoldMs } from './threeDViewUtils';
+import {
+  getPathPointArrivalTimesMs,
+  mergeConsecutiveSamePositionPathPoints,
+  samePathPointPosition,
+  toFiniteHoldMs,
+} from './threeDViewUtils';
 
 const MS_TO_SEC = 0.001;
 const TIME_ROUND_DECIMALS = 6;
@@ -107,26 +112,65 @@ export const patchTrajectoryFromPath = (originalTrajectory, path) => {
     return null;
   }
 
+  const mergedPath = mergeConsecutiveSamePositionPathPoints(
+    path.map((point) => ({
+      x: Number(point?.x),
+      y: Number(point?.y),
+      z: Number(point?.z),
+      durationMs: Number(point?.durationMs),
+      holdMs: Number(point?.holdMs),
+      ...(point?.yaw != null ? { yaw: point.yaw } : {}),
+      ...(point?.highlighted ? { highlighted: true } : {}),
+    })).filter((p) =>
+      Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)
+    )
+  );
+
+  if (!mergedPath.length) {
+    return null;
+  }
+
   const originalPoints = Array.isArray(originalTrajectory.points) ? originalTrajectory.points : [];
   const takeoffTime = Math.max(0, Number(originalTrajectory.takeoffTime) || 0);
   const takeoffTimeMs = takeoffTime * 1000;
-  const arrivalTimesMs = getPathPointArrivalTimesMs(path);
+  const arrivalTimesMs = getPathPointArrivalTimesMs(mergedPath);
   const positionTemplate = getPositionTemplate(originalTrajectory);
   const controlTemplate = getControlPointTemplate(originalTrajectory);
 
-  const lastIndex = path.length - 1;
-  const landingTimeSec = roundSeconds(toFiniteHoldMs(path[lastIndex]?.holdMs, 0) * MS_TO_SEC);
+  const lastIndex = mergedPath.length - 1;
+  const landingTimeSec = roundSeconds(toFiniteHoldMs(mergedPath[lastIndex]?.holdMs, 0) * MS_TO_SEC);
+
+  /** 대기(hold) 종료 시점에 동일 좌표 키프레임을 넣어야 로드 시 holdMs로 복원된다. */
+  const keyframeSchedule = [];
+  for (let i = 0; i < mergedPath.length; i += 1) {
+    const point = mergedPath[i];
+    const arriveMs = Number(arrivalTimesMs[i]) || 0;
+    keyframeSchedule.push({ point, timeMs: arriveMs });
+
+    const holdMs = toFiniteHoldMs(point.holdMs, 0);
+    const next = mergedPath[i + 1];
+    const isLast = i === lastIndex;
+    if (
+      holdMs > 0 &&
+      !isLast &&
+      next &&
+      !samePathPointPosition(point, next)
+    ) {
+      keyframeSchedule.push({ point, timeMs: arriveMs + holdMs });
+    }
+  }
 
   const points = [];
-  for (let i = 0; i < path.length; i += 1) {
-    const origKf = originalPoints[i];
+  for (let i = 0; i < keyframeSchedule.length; i += 1) {
+    const { point, timeMs } = keyframeSchedule[i];
+    const origKf = originalPoints[Math.min(i, originalPoints.length - 1)];
     const pointTemplate = origKf?.[1] ?? positionTemplate;
     const defaultZ = normalizeCoordinate(pointTemplate)?.z ?? 0;
-    const position = pathPointToCoordinate(path[i], pointTemplate, defaultZ);
+    const position = pathPointToCoordinate(point, pointTemplate, defaultZ);
     if (!position) continue;
 
     const timeSec = roundSeconds(
-      Math.max(0, ((Number(arrivalTimesMs[i]) || 0) - takeoffTimeMs) * MS_TO_SEC)
+      Math.max(0, (timeMs - takeoffTimeMs) * MS_TO_SEC)
     );
 
     const pointControlTemplate =

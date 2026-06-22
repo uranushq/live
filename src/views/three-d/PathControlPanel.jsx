@@ -83,11 +83,11 @@ export default function PathControlPanel({
   onResetPanelSettings,
   onLoadConfigClick,
   onSaveConfigClick,
-  onSendPathsClick,
+  onDownloadSkycClick,
   onFileChange,
   onAddDroneClick,
-  isSendingPaths,
-  pathDeliveryStatus,
+  isDownloadingSkyc,
+  skycDownloadStatus,
 }) {
   const progress = Math.min(100, Math.max(0, Number(pathProgress) || 0));
 
@@ -155,7 +155,7 @@ export default function PathControlPanel({
           width: 'min(860px, calc(100% - 32px))',
         }}
       >
-        {pathDeliveryStatus && (
+        {skycDownloadStatus && (
           <div
             style={{
               pointerEvents: 'auto',
@@ -169,7 +169,7 @@ export default function PathControlPanel({
               textAlign: 'center',
             }}
           >
-            {pathDeliveryStatus}
+            {skycDownloadStatus}
           </div>
         )}
 
@@ -281,9 +281,9 @@ export default function PathControlPanel({
               <Add />
             </ActionIconButton>
             <ActionIconButton
-              title={isSendingPaths ? '다운로드 중...' : '.skyc 저장 (로컬)'}
-              onClick={onSendPathsClick}
-              disabled={isSendingPaths}
+              title={isDownloadingSkyc ? '다운로드 중...' : '.skyc 저장 (로컬)'}
+              onClick={onDownloadSkycClick}
+              disabled={isDownloadingSkyc}
               background="transparent"
               iconColor="rgba(255,255,255,0.65)"
             >
@@ -319,9 +319,9 @@ PathControlPanel.propTypes = {
   onResetPanelSettings: PropTypes.func.isRequired,
   onLoadConfigClick: PropTypes.func.isRequired,
   onSaveConfigClick: PropTypes.func.isRequired,
-  onSendPathsClick: PropTypes.func.isRequired,
+  onDownloadSkycClick: PropTypes.func.isRequired,
   onFileChange: PropTypes.func.isRequired,
   onAddDroneClick: PropTypes.func.isRequired,
-  isSendingPaths: PropTypes.bool.isRequired,
-  pathDeliveryStatus: PropTypes.string.isRequired,
+  isDownloadingSkyc: PropTypes.bool.isRequired,
+  skycDownloadStatus: PropTypes.string.isRequired,
 };

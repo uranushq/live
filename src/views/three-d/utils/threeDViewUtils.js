@@ -225,7 +225,9 @@ export const convertTrajectoryToPlaybackPath = (
     };
   }
 
-  return { initialPos, path };
+  const mergedPath = mergeConsecutiveSamePositionPathPoints(path);
+
+  return { initialPos, path: mergedPath };
 };
 
 /** Accepts drones[] or path-planner style drones: { "drone-1": { trajectory, yawControl } }. */
@@ -412,6 +414,87 @@ export const toFinitePoint = (point, { isFirst = false } = {}) => {
     normalized.highlighted = true;
   }
   return normalized;
+};
+
+/** Same X/Y/Z within display precision (~1 mm). */
+export const samePathPointPosition = (a, b) => {
+  const ax = Number(a?.x);
+  const ay = Number(a?.y);
+  const az = Number(a?.z);
+  const bx = Number(b?.x);
+  const by = Number(b?.y);
+  const bz = Number(b?.z);
+  const tol = 1e-3;
+  return (
+    Number.isFinite(ax) &&
+    Number.isFinite(ay) &&
+    Number.isFinite(az) &&
+    Number.isFinite(bx) &&
+    Number.isFinite(by) &&
+    Number.isFinite(bz) &&
+    Math.abs(ax - bx) < tol &&
+    Math.abs(ay - by) < tol &&
+    Math.abs(az - bz) < tol
+  );
+};
+
+const pathPointDurationMsForMerge = (point) => {
+  const n = Number(point?.durationMs);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
+const pathPointHoldMsForMerge = (point) => toFiniteHoldMs(point?.holdMs, 0);
+
+/**
+ * Merge consecutive waypoints at the same position.
+ * Keep the first point's durationMs; add later duplicate durationMs + holdMs to holdMs.
+ */
+export const mergeConsecutiveSamePositionPathPoints = (points) => {
+  if (!Array.isArray(points) || points.length === 0) return [];
+
+  const merged = [];
+  points.forEach((point) => {
+    if (!point) return;
+    const last = merged[merged.length - 1];
+    if (last && samePathPointPosition(last, point)) {
+      const lastYaw = toFiniteYaw(last.yaw);
+      const pointYaw = toFiniteYaw(point.yaw);
+      const yawsEqual = lastYaw === pointYaw || (lastYaw == null && pointYaw == null);
+      // Yaw-only segments need separate waypoints so drone-move-bridge can animate rotation.
+      if (!yawsEqual) {
+        merged.push({ ...point });
+        return;
+      }
+
+      last.holdMs =
+        pathPointHoldMsForMerge(last) +
+        pathPointDurationMsForMerge(point) +
+        pathPointHoldMsForMerge(point);
+      if (point.highlighted) last.highlighted = true;
+      if (pointYaw != null) last.yaw = pointYaw;
+      return;
+    }
+    merged.push({ ...point });
+  });
+
+  return merged;
+};
+
+/** Apply same-position merge to every drone path in a config object. */
+export const mergeDronePathsInConfig = (config) => {
+  if (!config || !Array.isArray(config.drones)) return config;
+  return {
+    ...config,
+    drones: config.drones.map((d) => {
+      if (!Array.isArray(d?.path) || d.path.length <= 1) return d;
+      const mergedPath = mergeConsecutiveSamePositionPathPoints(
+        d.path
+          .map((point, index) => toFinitePoint(point, { isFirst: index === 0 }))
+          .filter(Boolean)
+      );
+      return mergedPath.length ? { ...d, path: mergedPath } : d;
+    }),
+  };
 };
 
 /** Scene Z=0 바닥에 드론 바닥면이 닿도록 하는 기본 위치 */
@@ -655,18 +738,20 @@ export const buildPathDeliveryPayloadFromConfig = (baseConfig) => {
       .map((d) => ({
         id: d.id,
         initial_position: getInitialPositionForPathDelivery(d),
-        path: d.path.map((point) => {
-          const nextPoint = {
-            x: point.x,
-            y: point.y,
-            z: point.z,
-            durationMs: point.durationMs,
-          };
-          if (Number(point.holdMs) > 0) {
-            nextPoint.holdMs = point.holdMs;
-          }
-          return nextPoint;
-        }),
+        path: mergeConsecutiveSamePositionPathPoints(
+          d.path.map((point) => {
+            const nextPoint = {
+              x: point.x,
+              y: point.y,
+              z: point.z,
+              durationMs: point.durationMs,
+            };
+            if (Number(point.holdMs) > 0) {
+              nextPoint.holdMs = point.holdMs;
+            }
+            return nextPoint;
+          })
+        ),
       })),
     output: 'skyc',
     download: true,

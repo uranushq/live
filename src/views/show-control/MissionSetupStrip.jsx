@@ -7,6 +7,7 @@ import UploadFile from '@mui/icons-material/UploadFile';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
+import { createSelector } from '@reduxjs/toolkit';
 import PropTypes from 'prop-types';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +16,16 @@ import { connect } from 'react-redux';
 import { makeStyles } from '@skybrush/app-theme-mui';
 
 import { Status } from '~/components/semantics';
+import { AltitudeReference } from '~/features/show/constants';
 import { loadShowFromFile } from '~/features/show/actions';
+import {
+  getOutdoorShowAltitudeReference,
+  getAbsolutePathOfShowFile,
+  getShowDescription,
+  getShowEnvironmentType,
+  getShowTitle,
+  hasLoadedShowFile,
+} from '~/features/show/selectors';
 import {
   openEnvironmentEditorDialog,
   openLoadShowFromCloudDialog,
@@ -23,11 +33,42 @@ import {
 } from '~/features/show/slice';
 import { getSetupStageStatuses } from '~/features/show/stages';
 import { SHOW_UPLOAD_JOB } from '~/features/show/constants';
+import { getUAVIdsParticipatingInMission } from '~/features/mission/selectors';
+import { getFarthestDistanceFromHome } from '~/features/uavs/selectors';
+import { isUploadInProgress } from '~/features/upload/selectors';
 import { openUploadDialogForJob } from '~/features/upload/slice';
 import { hasFeature } from '~/utils/configuration';
+import { formatDistance } from '~/utils/formatting';
 
 const EXTENSIONS = ['.skyc'];
 const isFile = (item) => item?.size > 0;
+
+const getFileNameFromPath = (path) => {
+  if (!path) return null;
+  const normalized = String(path).replace(/\\/g, '/');
+  const name = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return name || null;
+};
+
+const getEnvironmentDescription = createSelector(
+  getShowEnvironmentType,
+  getOutdoorShowAltitudeReference,
+  (environmentType, outdoorAltitudeReference) => {
+    switch (environmentType) {
+      case 'indoor':
+        return 'indoor';
+      case 'outdoor': {
+        const { type, value } = outdoorAltitudeReference;
+        if (type === AltitudeReference.AMSL && Number.isFinite(value)) {
+          return 'outdoorAMSL';
+        }
+        return 'outdoor';
+      }
+      default:
+        return 'unknown';
+    }
+  }
+);
 
 const isDone = (status) =>
   status === Status.SUCCESS || status === Status.SKIPPED;
@@ -79,7 +120,7 @@ const useStyles = makeStyles((theme) => ({
     lineHeight: 1,
   },
   progressWrap: {
-    alignItems: 'center',
+    alignItems: 'stretch',
     display: 'flex',
     flex: 1,
     minHeight: 0,
@@ -208,6 +249,33 @@ const useStyles = makeStyles((theme) => ({
   stepDotLabelDone: {
     color: '#3ecf6e',
   },
+  stepSubWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(0.25),
+    maxWidth: '100%',
+    minHeight: '2.4em',
+    paddingInline: theme.spacing(0.25),
+    width: '100%',
+  },
+  stepSub: {
+    color: theme.palette.text.disabled,
+    fontSize: '0.68rem',
+    lineHeight: 1.25,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textAlign: 'center',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  stepSubLine: {
+    color: theme.palette.text.disabled,
+    fontSize: '0.68rem',
+    lineHeight: 1.25,
+    textAlign: 'center',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+  },
   addButton: {
     backgroundColor: theme.palette.action.hover,
     border: `1px solid ${theme.palette.divider}`,
@@ -227,11 +295,19 @@ const useStyles = makeStyles((theme) => ({
 }));
 
 const MissionSetupStrip = ({
+  environmentKey,
+  hasLoadedFile,
+  isUploading,
+  maxDistance,
+  missionDroneCount,
   onEditEnvironment,
   onLoadFromCloud,
   onOpenTakeoffArea,
   onOpenUpload,
   onShowFileSelected,
+  showDescription,
+  showFilePath,
+  showTitle,
   stageStatuses,
 }) => {
   const classes = useStyles();
@@ -256,6 +332,81 @@ const MissionSetupStrip = ({
     [onShowFileSelected]
   );
 
+  const exportSubLines = useMemo(() => {
+    if (hasLoadedFile) {
+      const lines = [];
+      const fileName = getFileNameFromPath(showFilePath);
+      if (fileName) {
+        lines.push(fileName);
+      } else if (showTitle) {
+        lines.push(showTitle);
+      }
+      if (showDescription) {
+        lines.push(showDescription);
+      }
+      if (lines.length > 0) {
+        return lines;
+      }
+    }
+
+    if (missionDroneCount > 0) {
+      return [t('bottomBar.droneCount', { count: missionDroneCount })];
+    }
+
+    return [t('bottomBar.noShowLoaded')];
+  }, [
+    hasLoadedFile,
+    missionDroneCount,
+    showDescription,
+    showFilePath,
+    showTitle,
+    t,
+  ]);
+
+  const environmentSub = useMemo(() => {
+    switch (environmentKey) {
+      case 'indoor':
+        return t('show.indoor');
+      case 'outdoor':
+        return t('show.outdoor.relativeToHome');
+      case 'outdoorAMSL':
+        return t('show.outdoor.relativeToHome');
+      default:
+        return t('show.unknown');
+    }
+  }, [environmentKey, t]);
+
+  const placementSub = useMemo(() => {
+    const status = stageStatuses.setupTakeoffArea;
+    if (typeof maxDistance === 'number' && Number.isFinite(maxDistance)) {
+      return t('show.placementAccuracy', {
+        distance: formatDistance(maxDistance),
+      });
+    }
+    switch (status) {
+      case Status.SUCCESS:
+        return t('show.dronePlacementApproved');
+      case Status.SKIPPED:
+        return t('show.dronePlacementPartial');
+      default:
+        return t('show.takeOffPlace');
+    }
+  }, [maxDistance, stageStatuses.setupTakeoffArea, t]);
+
+  const uploadSub = useMemo(() => {
+    if (isUploading) {
+      return t('show.uploadShowDataLoading');
+    }
+    switch (stageStatuses.uploadShow) {
+      case Status.SUCCESS:
+        return t('bottomBar.ready');
+      case Status.ERROR:
+        return t('bottomBar.failed');
+      default:
+        return t('bottomBar.tapToUpload');
+    }
+  }, [isUploading, stageStatuses.uploadShow, t]);
+
   const steps = useMemo(
     () => [
       {
@@ -263,6 +414,7 @@ const MissionSetupStrip = ({
         shortLabel: t('bottomBar.exportPath'),
         icon: CloudDownload,
         status: stageStatuses.selectShowFile,
+        sublabelLines: exportSubLines,
         disabled: false,
         onClick: handleExportPathClick,
       },
@@ -271,7 +423,8 @@ const MissionSetupStrip = ({
         shortLabel: t('bottomBar.environmentSetup'),
         icon: Settings,
         status: stageStatuses.setupEnvironment,
-        disabled: false,
+        sublabel: environmentSub,
+        disabled: stageStatuses.setupEnvironment === Status.OFF,
         onClick: onEditEnvironment,
       },
       {
@@ -279,7 +432,8 @@ const MissionSetupStrip = ({
         shortLabel: t('bottomBar.dronePlacement'),
         icon: Flight,
         status: stageStatuses.setupTakeoffArea,
-        disabled: false,
+        sublabel: placementSub,
+        disabled: stageStatuses.setupTakeoffArea === Status.OFF,
         onClick: onOpenTakeoffArea,
       },
       {
@@ -287,17 +441,22 @@ const MissionSetupStrip = ({
         shortLabel: t('bottomBar.uploadData'),
         icon: UploadFile,
         status: stageStatuses.uploadShow,
-        disabled: false,
+        sublabel: uploadSub,
+        disabled: stageStatuses.uploadShow === Status.OFF,
         onClick: onOpenUpload,
       },
     ],
     [
+      environmentSub,
+      exportSubLines,
       handleExportPathClick,
       onEditEnvironment,
       onOpenTakeoffArea,
       onOpenUpload,
+      placementSub,
       stageStatuses,
       t,
+      uploadSub,
     ]
   );
 
@@ -413,6 +572,30 @@ const MissionSetupStrip = ({
                       {step.shortLabel}
                     </Typography>
                   </button>
+                  {Array.isArray(step.sublabelLines) && step.sublabelLines.length > 0 ? (
+                    <Box className={classes.stepSubWrap}>
+                      {step.sublabelLines.map((line) => (
+                        <Typography
+                          key={line}
+                          className={classes.stepSubLine}
+                          component='span'
+                          title={line}
+                        >
+                          {line}
+                        </Typography>
+                      ))}
+                    </Box>
+                  ) : step.sublabel ? (
+                    <Typography
+                      className={classes.stepSub}
+                      component='span'
+                      title={step.sublabel}
+                    >
+                      {step.sublabel}
+                    </Typography>
+                  ) : (
+                    <Box className={classes.stepSubWrap} />
+                  )}
                 </Box>
               );
             })}
@@ -437,16 +620,32 @@ const MissionSetupStrip = ({
 };
 
 MissionSetupStrip.propTypes = {
+  environmentKey: PropTypes.string,
+  hasLoadedFile: PropTypes.bool,
+  isUploading: PropTypes.bool,
+  maxDistance: PropTypes.number,
+  missionDroneCount: PropTypes.number,
   onEditEnvironment: PropTypes.func,
   onLoadFromCloud: PropTypes.func,
   onOpenTakeoffArea: PropTypes.func,
   onOpenUpload: PropTypes.func,
   onShowFileSelected: PropTypes.func,
+  showDescription: PropTypes.string,
+  showFilePath: PropTypes.string,
+  showTitle: PropTypes.string,
   stageStatuses: PropTypes.object,
 };
 
 export default connect(
   (state) => ({
+    environmentKey: getEnvironmentDescription(state),
+    hasLoadedFile: hasLoadedShowFile(state),
+    isUploading: isUploadInProgress(state),
+    maxDistance: getFarthestDistanceFromHome(state),
+    missionDroneCount: getUAVIdsParticipatingInMission(state).length,
+    showDescription: getShowDescription(state),
+    showFilePath: getAbsolutePathOfShowFile(state),
+    showTitle: getShowTitle(state),
     stageStatuses: getSetupStageStatuses(state),
   }),
   {

@@ -58,7 +58,7 @@ function normalizeDrones(drones) {
     .filter((d) => d.id);
 }
 
-const DroneShapeMarkers = ({ drones }) => {
+const DroneShapeMarkers = React.memo(({ drones }) => {
   const items = normalizeDrones(drones);
 
   return items.map((d, index) => (
@@ -78,7 +78,9 @@ const DroneShapeMarkers = ({ drones }) => {
       {ledShowEnabled && <a-entity drone-led-panel={`index: ${index}`} />}
     </a-entity>
   ));
-};
+});
+
+DroneShapeMarkers.displayName = 'DroneShapeMarkers';
 
 DroneShapeMarkers.propTypes = {
   drones: PropTypes.arrayOf(
