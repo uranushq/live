@@ -30,11 +30,27 @@ const useStyles = makeStyles((theme) => ({
     flexShrink: 0,
     gap: theme.spacing(0.375),
   },
+  rootBottomBar: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    gap: theme.spacing(0.5),
+    minWidth: 0,
+  },
   label: {
     color: theme.palette.text.secondary,
     fontSize: '0.72rem',
     fontWeight: 600,
     lineHeight: 1,
+    whiteSpace: 'nowrap',
+  },
+  labelBottomBar: {
+    color: theme.palette.text.primary,
+    flexShrink: 0,
+    fontSize: '0.78rem',
+    fontWeight: 500,
+    lineHeight: 1,
+    minWidth: 36,
     whiteSpace: 'nowrap',
   },
   select: {
@@ -66,6 +82,31 @@ const useStyles = makeStyles((theme) => ({
       color: theme.palette.text.secondary,
     },
   },
+  selectBottomBar: {
+    backgroundColor: theme.palette.common.white,
+    borderRadius: 4,
+    flex: 1,
+    fontSize: '0.8rem',
+    fontWeight: 500,
+    height: 32,
+    minWidth: 0,
+
+    '& .MuiSelect-select': {
+      padding: theme.spacing(0.625, 3, 0.625, 1.25),
+    },
+
+    '& .MuiOutlinedInput-notchedOutline': {
+      border: `1px solid ${theme.palette.divider}`,
+    },
+
+    '&:hover .MuiOutlinedInput-notchedOutline': {
+      borderColor: theme.palette.text.secondary,
+    },
+
+    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+      borderColor: theme.palette.text.primary,
+    },
+  },
   applyButton: {
     borderRadius: 6,
     fontSize: '0.72rem',
@@ -76,6 +117,28 @@ const useStyles = makeStyles((theme) => ({
     padding: theme.spacing(0.5, 1),
     textTransform: 'none',
   },
+  applyButtonBottomBar: {
+    backgroundColor: theme.palette.common.black,
+    borderRadius: 4,
+    color: theme.palette.common.white,
+    flexShrink: 0,
+    fontSize: '0.76rem',
+    fontWeight: 600,
+    lineHeight: 1,
+    minHeight: 32,
+    minWidth: 56,
+    padding: theme.spacing(0.625, 1.25),
+    textTransform: 'none',
+
+    '&:hover': {
+      backgroundColor: '#333',
+    },
+
+    '&.Mui-disabled': {
+      backgroundColor: theme.palette.action.disabledBackground,
+      color: theme.palette.action.disabled,
+    },
+  },
 }));
 
 const FlightModeControl = ({
@@ -85,8 +148,10 @@ const FlightModeControl = ({
   onNotifySuccess,
   selectedUAVIds,
   t,
+  variant = 'default',
 }) => {
   const classes = useStyles();
+  const isBottomBar = variant === 'bottomBar';
   const [mode, setMode] = useState(getDefaultFlightModeValue);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -175,10 +240,14 @@ const FlightModeControl = ({
   ]);
 
   return (
-    <Box className={classes.root}>
-      <span className={classes.label}>{t('flightModeControl.label')}</span>
+    <Box className={isBottomBar ? classes.rootBottomBar : classes.root}>
+      <span
+        className={isBottomBar ? classes.labelBottomBar : classes.label}
+      >
+        {t('flightModeControl.label')}
+      </span>
       <Select
-        className={classes.select}
+        className={isBottomBar ? classes.selectBottomBar : classes.select}
         disabled={!canApply || loading || applying}
         displayEmpty
         size='small'
@@ -192,8 +261,10 @@ const FlightModeControl = ({
         ))}
       </Select>
       <Button
-        className={classes.applyButton}
-        color='primary'
+        className={
+          isBottomBar ? classes.applyButtonBottomBar : classes.applyButton
+        }
+        color={isBottomBar ? 'inherit' : 'primary'}
         disabled={!canApply || applying}
         size='small'
         variant='contained'
@@ -216,6 +287,7 @@ FlightModeControl.propTypes = {
   onNotifySuccess: PropTypes.func,
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
   t: PropTypes.func,
+  variant: PropTypes.oneOf(['default', 'bottomBar']),
 };
 
 export default connect(

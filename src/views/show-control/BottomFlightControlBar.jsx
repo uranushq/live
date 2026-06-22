@@ -34,14 +34,16 @@ const useStyles = makeStyles((theme) => ({
     width: '100%',
   },
   root: {
-    backgroundColor: theme.palette.background.paper,
+    backgroundColor:
+      theme.palette.mode === 'dark'
+        ? theme.palette.background.default
+        : theme.palette.grey[100],
     borderTop: `1px solid ${theme.palette.divider}`,
-    boxShadow: '0 -2px 8px rgba(0,0,0,0.18)',
     boxSizing: 'border-box',
     maxHeight: 'calc(100vh - 52px)',
     overflowX: 'hidden',
     overflowY: 'auto',
-    padding: theme.spacing(2.75, 1.25, 1, 1.25),
+    padding: theme.spacing(1.25, 1.25, 1, 1.25),
     pointerEvents: 'auto',
     position: 'relative',
     width: '100%',
@@ -63,7 +65,10 @@ const useStyles = makeStyles((theme) => ({
   },
   collapsedBar: {
     alignItems: 'center',
-    backgroundColor: theme.palette.background.paper,
+    backgroundColor:
+      theme.palette.mode === 'dark'
+        ? theme.palette.background.default
+        : theme.palette.grey[100],
     borderTop: `1px solid ${theme.palette.divider}`,
     boxSizing: 'border-box',
     display: 'flex',
@@ -95,9 +100,13 @@ const useStyles = makeStyles((theme) => ({
     zIndex: 2,
   },
   panel: {
-    backgroundColor: 'transparent',
+    backgroundColor:
+      theme.palette.mode === 'dark'
+        ? theme.palette.background.paper
+        : theme.palette.common.white,
     border: `1px solid ${theme.palette.divider}`,
-    borderRadius: 10,
+    borderRadius: 4,
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
@@ -126,9 +135,9 @@ const useStyles = makeStyles((theme) => ({
   modeControlsRow: {
     alignItems: 'center',
     display: 'flex',
-    flexWrap: 'wrap',
-    gap: theme.spacing(0.5),
+    gap: theme.spacing(1),
     padding: theme.spacing(0, 1.25, 0.625),
+    width: '100%',
   },
   panelHeaderControls: {
     alignItems: 'center',
@@ -205,8 +214,8 @@ const BottomFlightControlBar = () => {
                   <FlightCommandTargetToggle />
                 </Box>
                 <Box className={classes.modeControlsRow}>
-                  <CurrentFlightModeControl />
-                  <FlightModeControl />
+                  <CurrentFlightModeControl variant='bottomBar' />
+                  <FlightModeControl variant='bottomBar' />
                 </Box>
                 <LargeControlButtonGroup variant='bottomBar' />
               </Box>

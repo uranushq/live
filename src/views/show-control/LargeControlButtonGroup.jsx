@@ -20,8 +20,6 @@ import RocketLaunch from '@mui/icons-material/RocketLaunch';
 
 import Box from '@mui/material/Box';
 
-import Button from '@mui/material/Button';
-
 import ButtonBase from '@mui/material/ButtonBase';
 
 import ToggleButton from '@mui/material/ToggleButton';
@@ -315,16 +313,54 @@ const useStyles = makeStyles((theme) => ({
     flex: '0 0 auto',
     flexDirection: 'column',
     minWidth: 0,
-    padding: theme.spacing(0, 1, 0.875),
+    padding: theme.spacing(0, 1.25, 1),
   },
 
   bottomBarGrid: {
     display: 'grid',
     flex: '0 0 auto',
-    gap: 'clamp(3px, 0.4vw, 5px)',
+    gap: theme.spacing(0.625),
     gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
     gridTemplateRows: 'repeat(2, auto)',
     width: '100%',
+  },
+
+  bottomBarButton: {
+    alignItems: 'center',
+    borderRadius: 6,
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(0.5),
+    justifyContent: 'center',
+    minHeight: 58,
+    padding: theme.spacing(0.75, 0.5),
+    textAlign: 'center',
+    transition: theme.transitions.create(['filter', 'transform'], {
+      duration: theme.transitions.duration.short,
+    }),
+    width: '100%',
+
+    '&:hover': {
+      filter: 'brightness(1.06)',
+      transform: 'translateY(-1px)',
+    },
+
+    '&:active': {
+      transform: 'translateY(0)',
+    },
+  },
+
+  bottomBarButtonIcon: {
+    fontSize: '1.35rem',
+  },
+
+  bottomBarButtonLabel: {
+    fontSize: 'clamp(0.78rem, 1.05vw, 0.9rem)',
+    fontWeight: 700,
+    letterSpacing: '0.03em',
+    lineHeight: 1.15,
+    textTransform: 'uppercase',
   },
 
 }));
@@ -334,57 +370,49 @@ const useStyles = makeStyles((theme) => ({
 const BOTTOM_BAR_BUTTONS = Object.freeze([
   {
     key: 'turnMotorsOn',
-    muiColor: 'success',
-    muiVariant: 'contained',
+    color: Colors.success,
     icon: PlayArrow,
     labelKey: 'arm',
   },
   {
     key: 'turnMotorsOff',
-    muiColor: 'primary',
-    muiVariant: 'outlined',
+    color: '#5a5a5a',
     icon: Clear,
     labelKey: 'disarm',
   },
   {
     key: 'takeOff',
-    muiColor: 'success',
-    muiVariant: 'outlined',
+    color: '#5cb88a',
     icon: FlightTakeoff,
     labelKey: 'takeoff',
   },
   {
     key: 'startShow',
-    muiColor: 'secondary',
-    muiVariant: 'contained',
+    color: '#2f80ed',
     icon: RocketLaunch,
     labelKey: 'showStart',
   },
   {
     key: 'holdPosition',
-    muiColor: 'info',
-    muiVariant: 'outlined',
+    color: deepPurple[500],
     icon: PositionHold,
     labelKey: 'hold',
   },
   {
     key: 'returnToHome',
-    muiColor: 'warning',
-    muiVariant: 'outlined',
+    color: Colors.warning,
     icon: Home,
     labelKey: 'RTH',
   },
   {
     key: 'land',
-    muiColor: 'warning',
-    muiVariant: 'contained',
+    color: Colors.seriousWarning,
     icon: FlightLand,
     labelKey: 'land',
   },
   {
     key: 'shutdown',
-    muiColor: 'error',
-    muiVariant: 'contained',
+    color: Colors.error,
     icon: PowerSettingsNew,
     labelKey: 'shutdown',
   },
@@ -679,43 +707,42 @@ FlightDeckButton.propTypes = {
 
 
 
-const BottomBarCommandButton = ({ button, label, onClick }) => {
+const BottomBarCommandButton = ({ button, classes, label, onClick }) => {
   const Icon = button.icon;
+  const parsedColor = useMemo(() => createColor(button.color), [button.color]);
+  const foreground = parsedColor.isLight()
+    ? 'rgba(0, 0, 0, 0.87)'
+    : 'rgba(255, 255, 255, 0.95)';
+
   return (
-    <Button
+    <ButtonBase
       aria-label={label}
-      color={button.muiColor}
-      size='small'
-      startIcon={<Icon />}
-      variant={button.muiVariant}
+      className={classes.bottomBarButton}
       onClick={onClick}
       sx={{
-        fontSize: 'clamp(0.62rem, 0.8vw, 0.72rem)',
-        fontWeight: 700,
-        letterSpacing: '0.02em',
-        lineHeight: 1.1,
-        minWidth: 0,
-        overflow: 'hidden',
-        px: 'clamp(4px, 0.5vw, 8px)',
-        py: 0.625,
-        textOverflow: 'ellipsis',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-        '& .MuiButton-startIcon': { mr: 'clamp(2px, 0.3vw, 4px)' },
+        backgroundColor: button.color,
+        border: `1px solid ${parsedColor.darken(0.15).alpha(0.3).string()}`,
+        color: foreground,
+        '&:hover': {
+          backgroundColor: parsedColor.darken(0.06).string(),
+        },
       }}
     >
-      {label}
-    </Button>
+      <Icon className={classes.bottomBarButtonIcon} />
+      <Typography className={classes.bottomBarButtonLabel} component='span'>
+        {label}
+      </Typography>
+    </ButtonBase>
   );
 };
 
 BottomBarCommandButton.propTypes = {
   button: PropTypes.shape({
-    muiColor: PropTypes.string.isRequired,
-    muiVariant: PropTypes.string.isRequired,
+    color: PropTypes.string.isRequired,
     icon: PropTypes.elementType.isRequired,
     key: PropTypes.string.isRequired,
   }).isRequired,
+  classes: PropTypes.object.isRequired,
   label: PropTypes.string.isRequired,
   onClick: PropTypes.func.isRequired,
 };
@@ -812,6 +839,7 @@ const LargeControlButtonGroup = ({
             <BottomBarCommandButton
               key={button.key}
               button={button}
+              classes={classes}
               label={t(`largeControlButtonGroup.${button.labelKey}`)}
               onClick={() => requestCommand(button.key)}
             />

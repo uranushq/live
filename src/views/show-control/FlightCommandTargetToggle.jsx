@@ -1,7 +1,9 @@
 import AdsClick from '@mui/icons-material/AdsClick';
 import Cast from '@mui/icons-material/Cast';
+import Box from '@mui/material/Box';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Typography from '@mui/material/Typography';
 import PropTypes from 'prop-types';
 import React from 'react';
 import { withTranslation } from 'react-i18next';
@@ -13,11 +15,31 @@ import { areFlightCommandsBroadcast } from '~/features/mission/selectors';
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
 const useStyles = makeStyles((theme) => ({
-  group: {
-    backgroundColor: 'rgba(0, 0, 0, 0.38)',
-    border: '1px solid rgba(255, 255, 255, 0.22)',
-    borderRadius: 999,
+  wrapper: {
+    alignItems: 'center',
+    display: 'flex',
     flexShrink: 0,
+    gap: theme.spacing(0.75),
+  },
+  modeLabel: {
+    color: theme.palette.text.primary,
+    fontSize: '0.78rem',
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
+  },
+  modeLabelSelection: {
+    color: '#2f80ed',
+  },
+  modeLabelAll: {
+    color: '#d97b16',
+  },
+  group: {
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: 4,
+    flexShrink: 0,
+    gap: 2,
     padding: 2,
 
     '& .MuiToggleButtonGroup-grouped': {
@@ -26,25 +48,25 @@ const useStyles = makeStyles((theme) => ({
     },
 
     '& .MuiToggleButton-root': {
-      border: '1px solid transparent',
-      borderRadius: '999px !important',
-      color: 'rgba(255, 255, 255, 0.9)',
+      border: `1px solid transparent`,
+      borderRadius: '3px !important',
+      color: theme.palette.text.secondary,
       fontSize: '0.74rem',
       fontWeight: 600,
       gap: theme.spacing(0.375),
       letterSpacing: '0.02em',
       lineHeight: 1,
       minHeight: 28,
-      padding: theme.spacing(0.35, 0.625),
+      minWidth: 28,
+      padding: theme.spacing(0.5),
       textTransform: 'none',
 
       '&:hover': {
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: theme.palette.action.hover,
       },
 
       '&.Mui-selected': {
-        boxShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
-        color: '#fff',
+        color: theme.palette.common.white,
         fontWeight: 700,
       },
     },
@@ -52,17 +74,17 @@ const useStyles = makeStyles((theme) => ({
   modeSelection: {
     '&.Mui-selected': {
       backgroundColor: '#2f80ed !important',
-      borderColor: '#5ca0ff !important',
+      borderColor: '#2f80ed !important',
     },
   },
   modeBroadcast: {
     '&.Mui-selected': {
       backgroundColor: '#d97b16 !important',
-      borderColor: '#f0a04a !important',
+      borderColor: '#d97b16 !important',
     },
   },
   modeIcon: {
-    fontSize: '1.15rem',
+    fontSize: '1.05rem',
   },
 }));
 
@@ -82,31 +104,43 @@ const FlightCommandTargetToggle = ({
   )}`;
 
   return (
-    <ToggleButtonGroup
-      exclusive
-      aria-label={t('largeControlButtonGroup.modeToggleLabel')}
-      className={classes.group}
-      size='small'
-      value={mode}
-      onChange={onChangeBroadcastMode}
-    >
-      <ToggleButton
-        aria-label={t('largeControlButtonGroup.selectionOnly')}
-        className={classes.modeSelection}
-        title={selectionTip}
-        value='selection'
+    <Box className={classes.wrapper}>
+      <Typography
+        className={`${classes.modeLabel} ${
+          broadcast ? classes.modeLabelAll : classes.modeLabelSelection
+        }`}
+        component='span'
       >
-        <AdsClick className={classes.modeIcon} />
-      </ToggleButton>
-      <ToggleButton
-        aria-label={t('largeControlButtonGroup.broadcast')}
-        className={classes.modeBroadcast}
-        title={broadcastTip}
-        value='broadcast'
+        {broadcast
+          ? t('bottomBar.commandTargetAll')
+          : t('bottomBar.commandTargetSelection')}
+      </Typography>
+      <ToggleButtonGroup
+        exclusive
+        aria-label={t('largeControlButtonGroup.modeToggleLabel')}
+        className={classes.group}
+        size='small'
+        value={mode}
+        onChange={onChangeBroadcastMode}
       >
-        <Cast className={classes.modeIcon} />
-      </ToggleButton>
-    </ToggleButtonGroup>
+        <ToggleButton
+          aria-label={t('largeControlButtonGroup.selectionOnly')}
+          className={classes.modeSelection}
+          title={selectionTip}
+          value='selection'
+        >
+          <AdsClick className={classes.modeIcon} />
+        </ToggleButton>
+        <ToggleButton
+          aria-label={t('largeControlButtonGroup.broadcast')}
+          className={classes.modeBroadcast}
+          title={broadcastTip}
+          value='broadcast'
+        >
+          <Cast className={classes.modeIcon} />
+        </ToggleButton>
+      </ToggleButtonGroup>
+    </Box>
   );
 };
 

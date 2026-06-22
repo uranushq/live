@@ -87,6 +87,8 @@
   "bottomBar": {
     "aircraftPreflightCheck": "Aircraft preflight check",
     "collapse": "Collapse flight control panel",
+    "commandTargetAll": "All",
+    "commandTargetSelection": "Selection",
     "detachedPanelHint": "Show controls are available in the bottom bar.",
     "droneControl": "Drone control",
     "droneCount": "{{count}} drones",
@@ -148,21 +150,16 @@
   },
   "featureEditorDialog": {
     "attributes": {
-      "exclusionZone": "Exclusion zone",
-      "exclusionZoneHelper": "Treat this polygon as an obstacle marker that should be excluded from the mission zone during planning and avoided while flying.",
-      "geofence": "Geofence",
-      "geofenceHelper": "Treat this polygon as the primary geofence boundary. UAVs should stay inside this area while flying.",
-      "maxAltitude": "Max AGL altitude",
-      "maxAltitudeHelper": "Distance of the bottom of the obstacle measured from the ground. UAVs should fly below this altitude limit to avoid collision.",
-      "minAltitude": "Min AGL altitude",
-      "minAltitudeHelper": "Distance of the top of the obstacle measured from the ground. UAVs should fly above this altitude limit to avoid collision.",
-      "unsupportedFeatureType": "This feature type doesn't support attributes."
-    },
-    "close": "Close",
-    "featureMissing": "Feature does not exist",
-    "remove": "Remove",
-    "uploadGeofence": "Upload to vehicle",
-    "uploadGeofenceDisabled": "Set a geofence polygon first"
+      "exclusionZone": "",
+      "exclusionZoneHelper": "",
+      "geofence": "",
+      "geofenceHelper": "",
+      "maxAltitude": "",
+      "maxAltitudeHelper": "",
+      "minAltitude": "",
+      "minAltitudeHelper": "",
+      "unsupportedFeatureType": ""
+    }
   },
   "fieldNotesPanel": {
     "exportNotesAsFile": "Export notes as Markdown file"

@@ -71,6 +71,8 @@
     "aircraftPreflightCheck": "기체 프리플라이트 체크",
     "detachedPanelHint": "쇼 제어는 화면 하단 바에서 사용할 수 있습니다.",
     "collapse": "비행 제어 패널 접기",
+    "commandTargetAll": "전체",
+    "commandTargetSelection": "선택",
     "droneControl": "드론 제어",
     "expand": "비행 제어 패널 펼치기",
     "flightControls": "비행 제어",
