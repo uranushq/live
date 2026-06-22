@@ -807,16 +807,19 @@ const ThreeDView = React.forwardRef((props, ref) => {
     URL.revokeObjectURL(url);
   };
 
-  const handleAddDrone = (newDrone) => {
+  const handleAddDrones = (newDrones) => {
+    const batch = Array.isArray(newDrones) ? newDrones.filter(Boolean) : [];
+    if (!batch.length) return;
+
     setDroneConfig((prev) => {
       const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
 
       const existingDrones =
         base && Array.isArray(base.drones) ? base.drones : [];
 
-      return { ...base, drones: [...existingDrones, newDrone] };
+      return { ...base, drones: [...existingDrones, ...batch] };
     });
-    setPendingAutoSelectDrone(newDrone);
+    setPendingAutoSelectDrone(batch[batch.length - 1]);
   };
 
   useEffect(() => {
@@ -1663,7 +1666,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       <AddDroneModal
         open={addDroneModalOpen}
         onClose={() => setAddDroneModalOpen(false)}
-        onAdd={handleAddDrone}
+        onAdd={handleAddDrones}
         existingIds={
           effectiveConfig && Array.isArray(effectiveConfig.drones)
             ? effectiveConfig.drones.map((d) => d.id)
