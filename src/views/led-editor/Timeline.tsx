@@ -32,6 +32,7 @@ import {
   getActiveBoard,
   getBoardClipboard,
   getBoards,
+  getFormationTimeline,
   getPlayheadSec,
   getSelectedBoardIds,
   getTimelineDuration,
@@ -100,6 +101,7 @@ const Timeline = (): JSX.Element => {
   const activeBoard = useSelector(getActiveBoard);
   const duration = useSelector(getTimelineDuration);
   const playheadSec = useSelector(getPlayheadSec);
+  const formationTimeline = useSelector(getFormationTimeline);
   const overlap = useSelector(hasTimelineOverlap);
   const upload = useSelector(getUploadStatus);
   const exportable = useSelector(canExport);
@@ -445,6 +447,48 @@ const Timeline = (): JSX.Element => {
               );
             })}
           </Box>
+
+          {/* Formation hold-windows mirrored from the 3D view while sync is on.
+              Editing outside these windows is still allowed — they're a visual
+              guide to when each formation is held. */}
+          {formationTimeline.length > 0 && (
+            <Box sx={{ position: 'relative', height: 18 }}>
+              {formationTimeline.map((f, i) => {
+                const left = f.startSec * pxPerSec;
+                const width = Math.max(6, (f.endSec - f.startSec) * pxPerSec);
+                return (
+                  <Box
+                    key={`${f.name}-${i}`}
+                    title={`${f.name} · ${f.startSec.toFixed(1)}–${f.endSec.toFixed(1)}s`}
+                    sx={{
+                      position: 'absolute',
+                      left,
+                      top: 1,
+                      width,
+                      height: 16,
+                      borderRadius: 0.5,
+                      background: f.color,
+                      opacity: 0.85,
+                      border: '1px solid rgba(255,255,255,0.35)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      px: 0.5,
+                      overflow: 'hidden',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <Typography
+                      variant='caption'
+                      noWrap
+                      sx={{ fontSize: 10, lineHeight: 1, color: '#fff' }}
+                    >
+                      {f.name}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
 
           <Box
             sx={{

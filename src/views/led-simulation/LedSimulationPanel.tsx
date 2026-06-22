@@ -22,6 +22,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   getBoards,
   getDroneCount,
+  getFormationTimeline,
   getLedsPerDrone,
   getPlayheadSec,
   getPlaying,
@@ -70,6 +71,7 @@ const LedSimulationPanel = (): JSX.Element => {
   const playheadSec = useSelector(getPlayheadSec);
   const playing = useSelector(getPlaying);
   const duration = useSelector(getTimelineDuration);
+  const formationTimeline = useSelector(getFormationTimeline);
 
   const [gridRef, gridSize] = useElementSize();
 
@@ -157,6 +159,49 @@ const LedSimulationPanel = (): JSX.Element => {
           {formatTime(Math.min(playheadSec, duration))} / {formatTime(duration)}
         </Typography>
       </Stack>
+
+      {/* Formation hold-windows mirrored from the 3D view (sync on). Positioned
+          by time fraction so they line up with the scrub bar above. */}
+      {formationTimeline.length > 0 && duration > 0 && (
+        <Box sx={{ position: 'relative', height: 16, mx: 1, mb: 0.5 }}>
+          {formationTimeline.map((f, i) => {
+            const leftPct = Math.min(100, (f.startSec / duration) * 100);
+            const widthPct = Math.max(
+              1.5,
+              ((f.endSec - f.startSec) / duration) * 100
+            );
+            return (
+              <Box
+                key={`${f.name}-${i}`}
+                title={`${f.name} · ${f.startSec.toFixed(1)}–${f.endSec.toFixed(1)}s`}
+                sx={{
+                  position: 'absolute',
+                  left: `${leftPct}%`,
+                  width: `${widthPct}%`,
+                  top: 0,
+                  height: '100%',
+                  borderRadius: 0.5,
+                  background: f.color,
+                  opacity: 0.85,
+                  border: '1px solid rgba(255,255,255,0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  px: 0.5,
+                  overflow: 'hidden',
+                }}
+              >
+                <Typography
+                  variant='caption'
+                  noWrap
+                  sx={{ fontSize: 9, lineHeight: 1, color: '#fff' }}
+                >
+                  {f.name}
+                </Typography>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
 
       {/* Drone grid (read-only, fixed arrangement) */}
       <Box

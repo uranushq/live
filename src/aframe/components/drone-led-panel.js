@@ -13,6 +13,7 @@
 
 import AFrame from '@skybrush/aframe-components';
 
+import { UR9_TARGET_SIZE_M } from '~/aframe/components/fbx-model';
 import { computePlaybackFrame } from '~/features/led-editor/utils';
 import store from '~/store';
 
@@ -20,12 +21,19 @@ const { THREE } = AFrame;
 
 const OFF_COLOR = 0x060606;
 
+// Vertical offset (scene Z-up) that lifts the panel from the drone entity
+// origin (sitting on the ground at the model base) to mid-height.
+const PANEL_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
+// Push the panel just past the -Y model surface so the tiles sit on the body
+// instead of being buried (and occluded) inside the opaque mesh.
+const PANEL_SURFACE_Y = -(UR9_TARGET_SIZE_M.y / 2 + 0.02);
+
 const normalizeLeds = (value) => (value === 3 || value === 4 ? value : 4);
 
 AFrame.registerComponent('drone-led-panel', {
   schema: {
     index: { type: 'int', default: 0 }, // matching LED-show drone index
-    size: { type: 'number', default: 1.2 }, // panel edge length, metres
+    size: { type: 'number', default: 0.6825 }, // panel edge length, metres (0.4875 × 1.4)
   },
 
   init() {
@@ -34,7 +42,22 @@ AFrame.registerComponent('drone-led-panel', {
     this.geometry = new THREE.PlaneGeometry(1, 1);
     this.materials = [];
     this.leds = 0;
-    this._camPos = new THREE.Vector3();
+
+    // Glue the panel to the drone's -Y face so its LEDs emit outward along -Y.
+    // The grid is built in its own XY plane with normal +Z; reorient that plane
+    // so its normal points along drone-local -Y and its "up" follows the
+    // scene-up (+Z). Because this component is a child of the yaw-rotated drone
+    // entity, the emission direction tracks the drone heading automatically.
+    // Centre it on the face (x = 0, mid-height) and rest it on the surface
+    // along -Y.
+    const basis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(1, 0, 0), // grid right (+X) -> drone +X (non-mirrored)
+      new THREE.Vector3(0, 0, 1), // grid up    (+Y) -> drone +Z (scene up)
+      new THREE.Vector3(0, -1, 0) // grid normal (+Z) -> drone -Y (outward)
+    );
+    this.group.quaternion.setFromRotationMatrix(basis);
+    this.group.position.set(0, PANEL_SURFACE_Y, PANEL_CENTER_Z);
+
     this._build(normalizeLeds(store.getState().ledEditor?.ledsPerDrone));
   },
 
@@ -61,7 +84,9 @@ AFrame.registerComponent('drone-led-panel', {
     this.leds = leds;
     const { size } = this.data;
     const cell = size / leds;
-    const tile = cell * 0.82;
+    // Fill ratio chosen so the absolute tile size is unchanged after the 1.4×
+    // grid growth (0.48 × 0.4875 / 0.6825), so only the gaps between pixels widen.
+    const tile = cell * 0.342857;
     for (let local = 0; local < leds * leds; local++) {
       const lx = local % leds;
       const ly = Math.floor(local / leds);
@@ -88,22 +113,18 @@ AFrame.registerComponent('drone-led-panel', {
       return;
     }
     const { boards, droneCount, ledsPerDrone, playheadSec } = led;
+    // `threeDSync` off → hide the pixel panels entirely (default on; treat a
+    // missing value as on for states persisted before the flag existed).
+    const syncEnabled = led.threeDSync !== false;
     const hasShow = Array.isArray(boards) && boards.length > 0;
-    this.group.visible = hasShow;
-    if (!hasShow) {
+    this.group.visible = hasShow && syncEnabled;
+    if (!hasShow || !syncEnabled) {
       return;
     }
 
     const leds = normalizeLeds(ledsPerDrone);
     if (this.leds !== leds) {
       this._build(leds);
-    }
-
-    // Billboard the panel towards the camera so the colours are always visible.
-    const camera = this.el.sceneEl && this.el.sceneEl.camera;
-    if (camera) {
-      camera.getWorldPosition(this._camPos);
-      this.group.lookAt(this._camPos);
     }
 
     const frame = computePlaybackFrame(boards, droneCount, ledsPerDrone, playheadSec);

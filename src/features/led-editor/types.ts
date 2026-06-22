@@ -35,6 +35,18 @@ export type Board = {
   durationSec: number;
 };
 
+/**
+ * One formation's hold window on the shared timeline (seconds), mirrored from
+ * the 3D view's path so it can be drawn as a coloured region on the LED
+ * timeline / simulator.
+ */
+export type FormationRegion = {
+  name: string;
+  startSec: number;
+  endSec: number;
+  color: string;
+};
+
 /** A rectangular block of pixels held on the editor clipboard. */
 export type Clipboard = {
   width: number;
@@ -90,5 +102,23 @@ export type LedEditorState = {
   playheadSec: number;
   /** Whether the show is currently playing back. */
   playing: boolean;
+  /**
+   * Whether the 3D view mirrors LED-show playback. When on, the 3D drones and
+   * their pixel panels follow the shared playhead; when off, the pixel panels
+   * are hidden and the 3D view plays independently.
+   */
+  threeDSync: boolean;
+  /**
+   * Formation hold-windows mirrored from the 3D view while 3D sync is on, shown
+   * as coloured regions on the LED timeline/simulator. Empty when sync is off
+   * or there are no formations.
+   */
+  formationTimeline: FormationRegion[];
+  /**
+   * Recommended delay (seconds) from drone-dance start until the first
+   * formation is formed — used as the JR-Control ARM "start in" default. Null
+   * when unknown (no formations / sync off).
+   */
+  ledStartDelaySec: number | null;
   upload: UploadStatus;
 };
