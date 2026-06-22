@@ -283,7 +283,12 @@ const createShowLoaderThunkFactory = (
  */
 export const loadShowFromFile = createShowLoaderThunkFactory(
   async (file) => {
-    const url = file && file.path ? `file://${file.path}` : undefined;
+    const url =
+      file && file.path
+        ? `file://${file.path}`
+        : file?.name
+          ? `file://${file.name}`
+          : undefined;
     const { spec, blob } = await workers.loadShow(file, {
       returnBlob: true,
     });
