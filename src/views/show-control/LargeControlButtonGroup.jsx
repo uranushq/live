@@ -58,6 +58,8 @@ import {
 
   getPreferredCommunicationChannelIndex,
 
+  getReverseMissionMapping,
+
   getUAVIdsParticipatingInMission,
 
 } from '~/features/mission/selectors';
@@ -67,6 +69,8 @@ import { setCommandsAreBroadcast } from '~/features/mission/slice';
 import { getSelectedUAVIds } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
+
+import { formatCommandTargetDrones } from './formatCommandTargetDrones';
 
 
 
@@ -753,6 +757,10 @@ const LargeControlButtonGroup = ({
 
   onChangeBroadcastMode,
 
+  reverseMissionMapping,
+
+  selectedUAVIds,
+
   t,
 
   uavActions,
@@ -815,21 +823,29 @@ const LargeControlButtonGroup = ({
 
       : pendingCommand;
 
-    return broadcast
+    if (broadcast) {
+      return t('largeControlButtonGroup.confirmCommandMessageBroadcast', {
+        command: commandLabel,
+      });
+    }
 
-      ? t('largeControlButtonGroup.confirmCommandMessageBroadcast', {
+    const drones = formatCommandTargetDrones(
+      selectedUAVIds,
+      reverseMissionMapping
+    );
 
-          command: commandLabel,
+    if (!drones) {
+      return t('largeControlButtonGroup.confirmCommandMessageNoSelection', {
+        command: commandLabel,
+      });
+    }
 
-        })
+    return t('largeControlButtonGroup.confirmCommandMessage', {
+      command: commandLabel,
+      drones,
+    });
 
-      : t('largeControlButtonGroup.confirmCommandMessage', {
-
-          command: commandLabel,
-
-        });
-
-  }, [broadcast, pendingCommand, t]);
+  }, [broadcast, pendingCommand, reverseMissionMapping, selectedUAVIds, t]);
 
   if (variant === 'bottomBar') {
     return (
@@ -994,6 +1010,10 @@ LargeControlButtonGroup.propTypes = {
 
   onChangeBroadcastMode: PropTypes.func,
 
+  reverseMissionMapping: PropTypes.object,
+
+  selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
+
   t: PropTypes.func,
 
   uavActions: PropTypes.objectOf(PropTypes.func),
@@ -1015,6 +1035,8 @@ export default connect(
     broadcast: areFlightCommandsBroadcast(state),
 
     channel: getPreferredCommunicationChannelIndex(state),
+
+    reverseMissionMapping: getReverseMissionMapping(state),
 
     selectedUAVIds: getSelectedUAVIds(state),
 

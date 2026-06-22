@@ -11,8 +11,14 @@ import { connect } from 'react-redux';
 
 import { makeStyles } from '@skybrush/app-theme-mui';
 
-import { areFlightCommandsBroadcast } from '~/features/mission/selectors';
+import {
+  areFlightCommandsBroadcast,
+  getReverseMissionMapping,
+} from '~/features/mission/selectors';
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
+import { getSelectedUAVIds } from '~/features/uavs/selectors';
+
+import { formatCommandTargetDrones } from './formatCommandTargetDrones';
 
 const useStyles = makeStyles((theme) => ({
   wrapper: {
@@ -27,6 +33,9 @@ const useStyles = makeStyles((theme) => ({
     fontWeight: 600,
     letterSpacing: '0.02em',
     lineHeight: 1,
+    maxWidth: 160,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   modeLabelSelection: {
@@ -91,10 +100,17 @@ const useStyles = makeStyles((theme) => ({
 const FlightCommandTargetToggle = ({
   broadcast,
   onChangeBroadcastMode,
+  reverseMissionMapping,
+  selectedUAVIds,
   t,
 }) => {
   const classes = useStyles();
   const mode = broadcast ? 'broadcast' : 'selection';
+
+  const selectedDroneLabels = formatCommandTargetDrones(
+    selectedUAVIds,
+    reverseMissionMapping
+  );
 
   const selectionTip = `${t('largeControlButtonGroup.modeSelection')} — ${t(
     'largeControlButtonGroup.targetSelection'
@@ -110,10 +126,17 @@ const FlightCommandTargetToggle = ({
           broadcast ? classes.modeLabelAll : classes.modeLabelSelection
         }`}
         component='span'
+        title={
+          !broadcast && selectedDroneLabels ? selectedDroneLabels : undefined
+        }
       >
         {broadcast
           ? t('bottomBar.commandTargetAll')
-          : t('bottomBar.commandTargetSelection')}
+          : selectedDroneLabels
+            ? t('bottomBar.commandTargetSelectionWithDrones', {
+                drones: selectedDroneLabels,
+              })
+            : t('bottomBar.commandTargetSelection')}
       </Typography>
       <ToggleButtonGroup
         exclusive
@@ -147,12 +170,16 @@ const FlightCommandTargetToggle = ({
 FlightCommandTargetToggle.propTypes = {
   broadcast: PropTypes.bool,
   onChangeBroadcastMode: PropTypes.func,
+  reverseMissionMapping: PropTypes.object,
+  selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
   t: PropTypes.func,
 };
 
 export default connect(
   (state) => ({
     broadcast: areFlightCommandsBroadcast(state),
+    reverseMissionMapping: getReverseMissionMapping(state),
+    selectedUAVIds: getSelectedUAVIds(state),
   }),
   (dispatch) => ({
     onChangeBroadcastMode: (_event, value) => {

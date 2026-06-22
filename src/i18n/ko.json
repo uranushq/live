@@ -9,8 +9,9 @@
     }
   },
   "UAVOpButtonGrp": {
-    "confirmFlightCommandMessage": "선택한 UAV에 \"{{command}}\" 명령을 실행할까요?",
-    "confirmFlightCommandMessageBroadcast": "모든 UAV에 \"{{command}}\" 명령을 브로드캐스트할까요?"
+    "confirmFlightCommandMessage": "드론 {{drones}}에 \"{{command}}\" 명령을 실행할까요?",
+    "confirmFlightCommandMessageBroadcast": "모든 UAV에 \"{{command}}\" 명령을 브로드캐스트할까요?",
+    "confirmFlightCommandMessageNoSelection": "선택된 드론이 없습니다. \"{{command}}\" 명령을 실행할까요?"
   },
   "flightModeControl": {
     "apply": "적용",
@@ -73,6 +74,7 @@
     "collapse": "비행 제어 패널 접기",
     "commandTargetAll": "전체",
     "commandTargetSelection": "선택",
+    "commandTargetSelectionWithDrones": "선택 ({{drones}})",
     "droneControl": "드론 제어",
     "expand": "비행 제어 패널 펼치기",
     "flightControls": "비행 제어",
@@ -98,8 +100,9 @@
     "RTH": "홈으로 귀환",
     "arm": "시동",
     "collapseDeck": "비행 명령 패널 접기",
-    "confirmCommandMessage": "선택한 UAV에 \"{{command}}\" 명령을 실행할까요?",
+    "confirmCommandMessage": "드론 {{drones}}에 \"{{command}}\" 명령을 실행할까요?",
     "confirmCommandMessageBroadcast": "미션의 모든 UAV에 \"{{command}}\" 명령을 브로드캐스트할까요?",
+    "confirmCommandMessageNoSelection": "선택된 드론이 없습니다. \"{{command}}\" 명령을 실행할까요?",
     "dragDeck": "드래그하여 이동",
     "disarm": "시동 해제",
     "expandDeck": "비행 명령 패널 펼치기",

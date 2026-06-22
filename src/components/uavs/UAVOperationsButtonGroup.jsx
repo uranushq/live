@@ -26,6 +26,7 @@ import ConfirmationDialog from '~/components/dialogs/ConfirmationDialog';
 import ToolbarDivider from '~/components/ToolbarDivider';
 import { TooltipWithContainerFromContext as Tooltip } from '~/containerContext';
 import { getPreferredCommunicationChannelIndex } from '~/features/mission/selectors';
+import { getReverseMissionMapping } from '~/features/mission/selectors';
 import { UAV_SIGNAL_DURATION } from '~/features/settings/constants';
 import {
   requestRemovalOfUAVsByIds,
@@ -36,6 +37,8 @@ import { openUAVDetailsDialog } from '~/features/uavs/details';
 import { getUAVIdList } from '~/features/uavs/selectors';
 import Bolt from '~/icons/Bolt';
 import { createUAVOperationThunks } from '~/utils/messaging';
+
+import { formatCommandTargetDrones } from '~/views/show-control/formatCommandTargetDrones';
 
 /** Text + icon flight commands on the main toolbar (readable contrast & spacing). */
 const LABELED_OP_BUTTON_SX = {
@@ -120,6 +123,7 @@ const UAVOperationsButtonGroup = ({
   openUAVDetailsDialog,
   requestRemovalOfUAVsByIds,
   requestRemovalOfUAVsMarkedAsGone,
+  reverseMissionMapping,
   selectedUAVIds,
   size,
   startSeparator,
@@ -208,14 +212,28 @@ const UAVOperationsButtonGroup = ({
     const cmdKey = FLIGHT_COMMAND_LABEL_KEYS[pendingFlightCommand];
     const commandLabel = cmdKey ? t(cmdKey) : pendingFlightCommand;
 
-    return broadcast
-      ? t('UAVOpButtonGrp.confirmFlightCommandMessageBroadcast', {
-          command: commandLabel,
-        })
-      : t('UAVOpButtonGrp.confirmFlightCommandMessage', {
-          command: commandLabel,
-        });
-  }, [broadcast, pendingFlightCommand, t]);
+    if (broadcast) {
+      return t('UAVOpButtonGrp.confirmFlightCommandMessageBroadcast', {
+        command: commandLabel,
+      });
+    }
+
+    const drones = formatCommandTargetDrones(
+      selectedUAVIds,
+      reverseMissionMapping
+    );
+
+    if (!drones) {
+      return t('UAVOpButtonGrp.confirmFlightCommandMessageNoSelection', {
+        command: commandLabel,
+      });
+    }
+
+    return t('UAVOpButtonGrp.confirmFlightCommandMessage', {
+      command: commandLabel,
+      drones,
+    });
+  }, [broadcast, pendingFlightCommand, reverseMissionMapping, selectedUAVIds, t]);
 
   const [keepFlashing, setKeepFlashing] = useState(false);
   const flashLightsButtonOnClick = useCallback(
@@ -570,6 +588,7 @@ UAVOperationsButtonGroup.propTypes = {
   openUAVDetailsDialog: PropTypes.func,
   requestRemovalOfUAVsByIds: PropTypes.func,
   requestRemovalOfUAVsMarkedAsGone: PropTypes.func,
+  reverseMissionMapping: PropTypes.object,
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
   hideFlightCommands: PropTypes.bool,
   hideSeparators: PropTypes.bool,
@@ -579,8 +598,9 @@ UAVOperationsButtonGroup.propTypes = {
 };
 
 export default connect(
-  // mapStateToProps
-  () => ({}),
+  (state) => ({
+    reverseMissionMapping: getReverseMissionMapping(state),
+  }),
   // mapDispatchToProps
   (dispatch) => ({
     ...bindActionCreators(
