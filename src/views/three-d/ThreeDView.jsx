@@ -79,6 +79,7 @@ const getNaturalLightingForThreeDView = (state) => {
 
 const DEFAULT_PATH_DELIVERY_URL = '/api/v1/path-planner/plan';
 const PATH_DELIVERY_PROXY_TARGET = 'http://localhost:5001/api/v1/path-planner/plan';
+const PATH_DELIVERY_STATUS_DISMISS_MS = 5000;
 
 const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   step_size: 1.0,
@@ -496,6 +497,16 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const [pathGeneratorModalOpen, setPathGeneratorModalOpen] = useState(false);
   const [isSendingPaths, setIsSendingPaths] = useState(false);
   const [pathDeliveryStatus, setPathDeliveryStatus] = useState('');
+
+  useEffect(() => {
+    if (!pathDeliveryStatus) return undefined;
+    const timer = setTimeout(
+      () => setPathDeliveryStatus(''),
+      PATH_DELIVERY_STATUS_DISMISS_MS
+    );
+    return () => clearTimeout(timer);
+  }, [pathDeliveryStatus]);
+
   const [pathProgress, setPathProgress] = useState(persistedPathProgress);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const playbackClockRef = useRef({ startElapsedMs: 0, startedAt: 0 });
