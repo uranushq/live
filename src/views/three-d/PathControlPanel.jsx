@@ -76,6 +76,8 @@ export default function PathControlPanel({
   totalDurationMs,
   playbackSourceLabel,
   isPlaybackRunning,
+  ledSyncEnabled,
+  onLedSyncToggle,
   droneCount,
   onPlayAll,
   onPausePlayback,
@@ -185,6 +187,32 @@ export default function PathControlPanel({
             ...panelSurface,
           }}
         >
+          <Tooltip title="LED 시뮬레이션과 동기화" placement="top">
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexShrink: 0,
+                paddingRight: 8,
+                borderRight: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.75)',
+                cursor: 'pointer',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={ledSyncEnabled}
+                onChange={(e) => onLedSyncToggle(e.target.checked)}
+                style={{ accentColor: '#67b4ff', cursor: 'pointer' }}
+              />
+              LED 동기화
+            </label>
+          </Tooltip>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <Tooltip title={isPlaybackRunning ? '일시정지' : '재생'} placement="top">
               <button
@@ -312,6 +340,8 @@ PathControlPanel.propTypes = {
   totalDurationMs: PropTypes.number.isRequired,
   playbackSourceLabel: PropTypes.string.isRequired,
   isPlaybackRunning: PropTypes.bool.isRequired,
+  ledSyncEnabled: PropTypes.bool.isRequired,
+  onLedSyncToggle: PropTypes.func.isRequired,
   droneCount: PropTypes.number.isRequired,
   onPlayAll: PropTypes.func.isRequired,
   onPausePlayback: PropTypes.func.isRequired,

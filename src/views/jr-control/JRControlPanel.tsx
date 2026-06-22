@@ -21,7 +21,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import {
@@ -36,20 +36,24 @@ import {
   removeBoard,
   setArmParams,
 } from '~/features/jr-control/slice';
+import {
+  getFps,
+  getLedStartDelaySec,
+  getTimelineDuration,
+} from '~/features/led-editor/selectors';
 import { type RootState } from '~/store/reducers';
 import { type AppDispatch } from '~/store/reducers';
 
+// Only the fields a user must set are shown. FPS and frame count are derived
+// from the authored LED show at broadcast time (see broadcastArm), so they are
+// not editable here.
 const armFields: Array<{
   key: keyof RootState['jrControl']['arm'];
   label: string;
 }> = [
   { key: 'startIn', label: 'Start in (s)' },
-  { key: 'fpsNum', label: 'FPS num' },
-  { key: 'fpsDen', label: 'FPS den' },
-  { key: 'frameCount', label: 'Frames' },
-  { key: 'fileId', label: 'File id' },
   { key: 'showId', label: 'Show id' },
-  { key: 'repeat', label: 'Repeat' },
+  { key: 'fileId', label: 'File id' },
 ];
 
 const JRControlPanel = (): JSX.Element => {
@@ -59,7 +63,23 @@ const JRControlPanel = (): JSX.Element => {
   const lastArmSummary = useSelector(
     (state: RootState) => state.jrControl.lastArmSummary
   );
+  const fps = useSelector(getFps);
+  const showDuration = useSelector(getTimelineDuration);
+  const ledStartDelaySec = useSelector(getLedStartDelaySec);
+  const derivedFrameCount = Math.max(1, Math.round(showDuration * fps));
   const [ipInput, setIpInput] = useState('');
+
+  // When the 3D view reports how long it takes the drones to reach the first
+  // formation (sync on), use that as the recommended ARM "start in" delay.
+  const recommendedStartIn =
+    ledStartDelaySec != null && Number.isFinite(ledStartDelaySec)
+      ? Math.round(ledStartDelaySec * 10) / 10
+      : null;
+  useEffect(() => {
+    if (recommendedStartIn != null) {
+      dispatch(setArmParams({ startIn: recommendedStartIn }));
+    }
+  }, [recommendedStartIn, dispatch]);
 
   const handleAdd = () => {
     if (ipInput.trim()) {
@@ -179,6 +199,15 @@ const JRControlPanel = (): JSX.Element => {
       <Typography variant='subtitle2' sx={{ mb: 1 }}>
         Timer ARM broadcast (UDP 255.255.255.255:8765)
       </Typography>
+      {recommendedStartIn != null && (
+        <Typography
+          variant='caption'
+          color='primary'
+          sx={{ display: 'block', mb: 1 }}
+        >
+          드론 dance 시작 후 {recommendedStartIn}초 후 LED 가동 추천
+        </Typography>
+      )}
       <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
         {armFields.map((field) => (
           <TextField
@@ -197,6 +226,13 @@ const JRControlPanel = (): JSX.Element => {
           />
         ))}
       </Stack>
+      <Typography
+        variant='caption'
+        color='text.secondary'
+        sx={{ display: 'block', mt: 1 }}
+      >
+        FPS {fps} · Frames {derivedFrameCount} (LED 쇼에서 자동 계산)
+      </Typography>
       <Stack direction='row' spacing={1} alignItems='center' sx={{ mt: 1.5 }}>
         <Button
           variant='contained'
