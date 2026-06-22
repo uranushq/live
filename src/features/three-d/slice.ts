@@ -59,6 +59,7 @@ const initialState: ThreeDSliceState = {
       duration_ms: 1000,
       takeoff_time: 0,
       auto_upload: false,
+      return_to_initial: true,
       output: '',
     },
   },

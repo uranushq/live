@@ -85,6 +85,7 @@ const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   duration_ms: 1000,
   takeoff_time: 0,
   auto_upload: false,
+  return_to_initial: true,
   // 빈 문자열 = 백엔드 기본값(.skyc 다운로드) 사용. payload에서 output 키를 생략.
   output: '',
 });
@@ -197,6 +198,7 @@ const sanitizeFormationSettings = (settings) => {
       ? takeoffTime
       : DEFAULT_FORMATION_SETTINGS.takeoff_time,
     auto_upload: !!merged.auto_upload,
+    return_to_initial: merged.return_to_initial !== false,
     output,
   };
 };
@@ -1525,6 +1527,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       step_size: sanitized.step_size,
       duration_ms: sanitized.duration_ms,
       auto_upload: sanitized.auto_upload,
+      return_to_initial: sanitized.return_to_initial,
     };
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.
     if (sanitized.output) {

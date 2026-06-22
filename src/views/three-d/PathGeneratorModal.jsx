@@ -396,6 +396,7 @@ export default function PathGeneratorModal({ open, onClose }) {
                       target: payload.target,
                       step_size,
                       duration_ms,
+                      return_to_initial: true,
                       output: 'skyc',
                       download: true,
                     }),

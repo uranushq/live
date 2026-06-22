@@ -135,6 +135,7 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
       takeoff_time:
         Number.isFinite(Number(takeoffTime)) && Number(takeoffTime) >= 0 ? Number(takeoffTime) : 5,
       auto_upload: !!autoUpload,
+      return_to_initial: true,
       output,
     };
 

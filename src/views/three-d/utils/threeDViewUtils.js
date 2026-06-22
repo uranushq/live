@@ -668,6 +668,7 @@ export const buildPathDeliveryPayloadFromConfig = (baseConfig) => {
           return nextPoint;
         }),
       })),
+    return_to_initial: true,
     output: 'skyc',
     download: true,
   };
