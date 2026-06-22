@@ -747,6 +747,10 @@ export const normalizeDroneForConfigIO = (drone, index = 0) => {
   };
 };
 
+/** Explicit drone config in React state (empty drones list is valid). */
+export const isDroneConfigState = (config) =>
+  config != null && typeof config === 'object' && Array.isArray(config.drones);
+
 export const collectConfigFromScene = () => {
   if (typeof document === 'undefined') {
     return { drones: [] };

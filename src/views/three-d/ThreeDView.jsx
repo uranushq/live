@@ -27,6 +27,7 @@ import {
   buildPathDeliveryPayloadFromConfig,
   buildSeekPathWithInitial,
   collectConfigFromScene as collectConfigFromSceneUtil,
+  isDroneConfigState,
   DRONE_PATH_FLUSH_REQUEST,
   getEffectiveScenery as getEffectiveSceneryUtil,
   getPathTotalDurationMs,
@@ -738,10 +739,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
   };
 
   const handleSaveConfigClick = () => {
-    const baseConfig =
-      droneConfig && Array.isArray(droneConfig.drones) && droneConfig.drones.length
-        ? droneConfig
-        : collectConfigFromScene();
+    const baseConfig = isDroneConfigState(droneConfig)
+      ? droneConfig
+      : collectConfigFromScene();
 
     const droneRows =
       baseConfig && Array.isArray(baseConfig.drones)
@@ -809,10 +809,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   const handleAddDrone = (newDrone) => {
     setDroneConfig((prev) => {
-      const base =
-        prev && Array.isArray(prev.drones) && prev.drones.length
-          ? prev
-          : collectConfigFromScene();
+      const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
 
       const existingDrones =
         base && Array.isArray(base.drones) ? base.drones : [];
@@ -884,18 +881,19 @@ const ThreeDView = React.forwardRef((props, ref) => {
       showSpecDroneConfig &&
       Array.isArray(showSpecDroneConfig.drones) &&
       showSpecDroneConfig.drones.length > 0;
-    const hasDroneConfig =
-      droneConfig &&
-      Array.isArray(droneConfig.drones) &&
-      droneConfig.drones.length > 0;
+    const hasDroneConfig = isDroneConfigState(droneConfig);
 
     if (hasShowSpec) {
-      const mergedDrones = hasDroneConfig
-        ? mergePathOverridesIntoDrones(
-            showSpecDroneConfig.drones,
-            droneConfig.drones
-          )
-        : showSpecDroneConfig.drones;
+      const deletedIds = new Set(
+        (Array.isArray(droneConfig?.deletedIds) ? droneConfig.deletedIds : []).map(String)
+      );
+      const visibleDrones = showSpecDroneConfig.drones.filter(
+        (d) => d?.id == null || !deletedIds.has(String(d.id))
+      );
+      const mergedDrones =
+        hasDroneConfig && droneConfig.drones.length
+          ? mergePathOverridesIntoDrones(visibleDrones, droneConfig.drones)
+          : visibleDrones;
       return { ...showSpecDroneConfig, drones: mergedDrones };
     }
 
@@ -908,10 +906,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
   droneConfigRef.current = effectiveConfig;
 
   const getConfigForPathDelivery = useCallback(() => {
-    const base =
-      effectiveConfig && Array.isArray(effectiveConfig.drones) && effectiveConfig.drones.length
-        ? effectiveConfig
-        : collectConfigFromScene();
+    const base = isDroneConfigState(effectiveConfig)
+      ? effectiveConfig
+      : collectConfigFromScene();
 
     const overrideList = Array.from(pathOverridesByIdRef.current.entries()).map(
       ([id, path]) => ({ id, path })

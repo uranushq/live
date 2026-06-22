@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import {
   applyDronePathsToScene,
   DEFAULT_DRONE_GROUND_POSITION,
+  isDroneConfigState,
   normalizeDroneForConfigIO,
 } from '../utils/threeDViewUtils';
 
@@ -78,10 +79,7 @@ export default function useThreeDViewDroneEvents({
           return { ...(prev || {}), drones: overrides };
         }
 
-        const base =
-          prev && Array.isArray(prev.drones) && prev.drones.length
-            ? prev
-            : collectConfigFromScene();
+        const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
 
         if (!base || !Array.isArray(base.drones)) return base;
 
@@ -106,10 +104,7 @@ export default function useThreeDViewDroneEvents({
       if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nz)) return;
 
       setDroneConfig((prev) => {
-        const base =
-          prev && Array.isArray(prev.drones) && prev.drones.length
-            ? prev
-            : collectConfigFromScene();
+        const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
 
         if (!base || !Array.isArray(base.drones)) return base;
         const drones = base.drones.map((d) => {
@@ -177,13 +172,40 @@ export default function useThreeDViewDroneEvents({
       const raw = e.detail?.id;
       if (raw === undefined || raw === null || String(raw).trim() === '') return;
 
-      setDroneConfig((prev) => {
-        const base =
-          prev && Array.isArray(prev.drones) && prev.drones.length
-            ? prev
-            : collectConfigFromScene();
+      const hasShowSpec =
+        showSpecDroneConfig &&
+        Array.isArray(showSpecDroneConfig.drones) &&
+        showSpecDroneConfig.drones.length > 0;
 
-        if (!base || !Array.isArray(base.drones)) return base;
+      setDroneConfig((prev) => {
+        const rawId = String(raw);
+
+        if (hasShowSpec) {
+          const deletedIds = [
+            ...new Set([
+              ...(Array.isArray(prev?.deletedIds) ? prev.deletedIds : []),
+              rawId,
+            ]),
+          ];
+          return { ...(prev || {}), deletedIds };
+        }
+
+        const displayed = droneConfigRef.current;
+        let base = null;
+
+        if (displayed && Array.isArray(displayed.drones) && displayed.drones.length > 0) {
+          base = displayed;
+        } else if (isDroneConfigState(prev) && prev.drones.length > 0) {
+          base = prev;
+        } else if (isDroneConfigState(prev)) {
+          return prev;
+        } else {
+          base = collectConfigFromScene();
+        }
+
+        if (!base || !Array.isArray(base.drones)) {
+          return { drones: [] };
+        }
 
         const drones = base.drones.filter((d) => !sameDroneId(d.id, raw));
         return { ...base, drones };
