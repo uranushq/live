@@ -13,16 +13,21 @@ import type VectorSource from 'ol/source/Vector';
 import React from 'react';
 
 import { getSingleUAVStatusLevel } from '~/features/uavs/selectors';
+import { isPositionOutsideGeofencePolygon } from '~/features/safety/geofencePosition';
 import Flock from '~/model/flock';
 import { uavIdToGlobalId } from '~/model/identifiers';
 import { setLayerSelectable, setLayerTriggersTooltip } from '~/model/layers';
 import type UAV from '~/model/uav';
+import type { LonLat } from '~/utils/geography';
+
+import { Status } from '~/components/semantics';
 
 import FeatureManager from '../FeatureManager';
 import UAVFeature from '../features/UAVFeature';
 
 export type ActiveUAVsLayerSourceProps = {
   flock?: Flock;
+  geofencePoints?: LonLat[];
   labelColor: string;
   layer?: Layer;
   projection?: (coords: number[]) => number[];
@@ -76,6 +81,10 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
       this.props.labelColor
     );
     this._onScaleMaybeChanged(previousProps.scale, this.props.scale);
+    this._onGeofenceMaybeChanged(
+      previousProps.geofencePoints,
+      this.props.geofencePoints
+    );
     this._featureManager.projection = this.props.projection;
     if (this.props.labelHidden !== previousProps.labelHidden) {
       this._featureManager.featureFactory = this._createFeatureFactory();
@@ -260,6 +269,20 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     }
   };
 
+  _onGeofenceMaybeChanged = (
+    oldGeofencePoints: LonLat[] | undefined,
+    newGeofencePoints: LonLat[] | undefined
+  ) => {
+    if (oldGeofencePoints === newGeofencePoints) {
+      return;
+    }
+
+    const flock = this.props.flock;
+    if (flock) {
+      this._onUAVsUpdated(flock.getAllUAVs());
+    }
+  };
+
   /**
    * Event handler that is called when some UAVs were removed from the flock and
    * the layer should be re-drawn without these UAVs.
@@ -271,6 +294,24 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     for (const uav of uavs) {
       this._featureManager.removeFeatureById(uav.id);
     }
+  };
+
+  _isOutsideGeofence = (uav: UAV) => {
+    const { geofencePoints } = this.props;
+    if (
+      !geofencePoints?.length ||
+      uav.lon === undefined ||
+      uav.lat === undefined
+    ) {
+      return false;
+    }
+
+    return (
+      isPositionOutsideGeofencePolygon(
+        { lon: uav.lon, lat: uav.lat },
+        geofencePoints
+      ) ?? false
+    );
   };
 
   /**
@@ -300,7 +341,9 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
         feature.heading = uav.heading;
       }
 
-      feature.status = getSingleUAVStatusLevel(uav);
+      feature.status = this._isOutsideGeofence(uav)
+        ? Status.ERROR
+        : getSingleUAVStatusLevel(uav);
       feature.labelColor = this.props.labelColor;
       feature.scale = this.props.scale;
     }

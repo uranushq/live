@@ -18,7 +18,8 @@ import { colorForStatus } from '~/components/colors';
 import { Status as SemanticStatus } from '~/components/semantics';
 import { getBatteryFormatter } from '~/features/settings/selectors';
 import { getFltModeSlotLabelForUavId } from '~/features/mavlink/selectors';
-import { hasActiveGeofencePolygon } from '~/features/mission/selectors';
+import { getGeofencePolygonInWorldCoordinates, hasActiveGeofencePolygon } from '~/features/mission/selectors';
+import { isUavOutsideActiveGeofence } from '~/features/safety/selectors';
 import {
   hasScheduledStartTime,
   isExternalShowUploaded,
@@ -508,6 +509,13 @@ export default connect((state, { drone }) => {
     externalShowUploaded: isExternalShowUploaded(state),
     uploadJobType: state.upload.currentJob.type,
   };
+  const geofencePoints = getGeofencePolygonInWorldCoordinates(state);
+  const geofenceSet = hasActiveGeofencePolygon(state);
+  const uavOutsideGeofence = isUavOutsideActiveGeofence(
+    uav,
+    geofencePoints,
+    geofenceSet
+  );
   const batteryStatus = uav.battery;
   const batteryPercentage = resolveBatteryPercentage(
     batteryStatus?.percentage,
@@ -522,6 +530,7 @@ export default connect((state, { drone }) => {
     alert: getUavAlert(uav, {
       ...pathUploadContext,
       uploadStatus,
+      uavOutsideGeofence,
       batteryPercentage: resolveUavAlertBatteryPercentage({
         cellCount: batteryStatus?.cellCount,
         percentage: batteryStatus?.percentage,
@@ -529,7 +538,7 @@ export default connect((state, { drone }) => {
         estimatePercentageFromVoltage: batteryFormatter.estimatePercentageFromVoltage,
       }),
       geofenceRequired: isShowOutdoor(state),
-      geofenceSet: hasActiveGeofencePolygon(state),
+      geofenceSet,
       showStartTimeSet: hasScheduledStartTime(state),
     }),
     batteryStyle: getBatteryLevelStyle(batteryPercentage),

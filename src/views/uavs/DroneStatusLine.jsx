@@ -16,7 +16,8 @@ import {
   getBatteryFormatter,
   isShowingMissionIds,
 } from '~/features/settings/selectors';
-import { hasActiveGeofencePolygon } from '~/features/mission/selectors';
+import { getGeofencePolygonInWorldCoordinates, hasActiveGeofencePolygon } from '~/features/mission/selectors';
+import { isUavOutsideActiveGeofence } from '~/features/safety/selectors';
 import {
   hasScheduledStartTime,
   isExternalShowUploaded,
@@ -470,12 +471,20 @@ export default connect(
         externalShowUploaded: isExternalShowUploaded(state),
         uploadJobType: state.upload.currentJob.type,
       };
+      const geofencePoints = getGeofencePolygonInWorldCoordinates(state);
+      const geofenceSet = hasActiveGeofencePolygon(state);
+      const uavOutsideGeofence = isUavOutsideActiveGeofence(
+        uav,
+        geofencePoints,
+        geofenceSet
+      );
       const batteryStatus = uav?.battery;
 
       return {
         alert: getUavAlert(uav, {
           ...pathUploadContext,
           uploadStatus,
+          uavOutsideGeofence,
           batteryPercentage: resolveUavAlertBatteryPercentage({
             cellCount: batteryStatus?.cellCount,
             percentage: batteryStatus?.percentage,
@@ -484,7 +493,7 @@ export default connect(
               batteryFormatter.estimatePercentageFromVoltage,
           }),
           geofenceRequired: isShowOutdoor(state),
-          geofenceSet: hasActiveGeofencePolygon(state),
+          geofenceSet,
           showStartTimeSet: hasScheduledStartTime(state),
         }),
         batteryFormatter,

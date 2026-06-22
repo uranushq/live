@@ -2,6 +2,7 @@ import React from 'react';
 
 import { connect } from 'react-redux';
 
+import { Status } from '~/components/semantics';
 import {
   UAVsLayer as BaseUAVsLayerPresentation,
   UAVsLayerSettings as UAVsLayerSettingsPresentation,
@@ -9,6 +10,10 @@ import {
   type UAVsLayerSettingsProps,
 } from '~/components/map/layers/uavs';
 import { setLayerParametersById } from '~/features/map/layers';
+import {
+  getGeofencePolygonInWorldCoordinates,
+  hasActiveGeofencePolygon,
+} from '~/features/mission/selectors';
 import { getSelection } from '~/selectors/selection';
 import type { RootState } from '~/store/reducers';
 
@@ -28,7 +33,9 @@ export const UAVsLayerSettings = connect(
   })
 )(UAVsLayerSettingsPresentation);
 
-const UAVsLayerPresentation = (props: Omit<UAVsLayerProps, 'LayerSource'>) => (
+const UAVsLayerPresentation = (
+  props: Omit<UAVsLayerProps, 'LayerSource'>
+) => (
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   <BaseUAVsLayerPresentation {...props} LayerSource={ActiveUAVsLayerSource} />
 );
@@ -37,6 +44,9 @@ export const UAVsLayer = connect(
   // mapStateToProps
   (state: RootState) => ({
     selection: getSelection(state),
+    geofencePoints: hasActiveGeofencePolygon(state)
+      ? getGeofencePolygonInWorldCoordinates(state)
+      : undefined,
   }),
   // mapDispatchToProps
   {}

@@ -30,6 +30,7 @@ export type UavAlertContext = PathUploadContext &
     geofenceRequired?: boolean;
     geofenceSet?: boolean;
     showStartTimeSet?: boolean;
+    uavOutsideGeofence?: boolean;
     uploadStatus?: Status;
   }>;
 
@@ -47,6 +48,7 @@ const RED_REASON_ORDER = [
   'COMP',
   'CAL',
   'GEO',
+  'FENCE',
   'PATH',
   'GPS',
 ] as const;
@@ -57,6 +59,7 @@ const RED_REASON_TITLES: Record<(typeof RED_REASON_ORDER)[number], string> = {
   COMP: 'Compass error',
   CAL: 'Calibration required',
   GEO: 'Geofence not set',
+  FENCE: 'Outside geofence',
   PATH: 'Path not uploaded',
   GPS: 'No GPS',
 };
@@ -108,6 +111,14 @@ const collectRedReasons = (
 
   if (ctx.geofenceRequired && !ctx.geofenceSet) {
     reasons.push('GEO');
+  }
+
+  if (
+    ctx.uavOutsideGeofence ||
+    errors.includes(UAVErrorCode.GEOFENCE_VIOLATION) ||
+    errors.includes(UAVErrorCode.GEOFENCE_VIOLATION_WARNING)
+  ) {
+    reasons.push('FENCE');
   }
 
   if (!isPathUploadedForUav(uav, ctx.uploadStatus, ctx)) {

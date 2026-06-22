@@ -13,7 +13,9 @@ import {
   getMaximumHeightOfWaypoints,
   getMaximumHorizontalDistanceFromHomePositionInWaypointMission,
   getMissionType,
+  hasActiveGeofencePolygon,
 } from '~/features/mission/selectors';
+import { getUAVById } from '~/features/uavs/selectors';
 import {
   getConvexHullOfShow,
   getMaximumHeightInTrajectories,
@@ -31,6 +33,7 @@ import {
   turfDistanceInMeters,
 } from '~/utils/geography';
 
+import { isPositionOutsideGeofencePolygon } from './geofencePosition';
 import { type SafetyDialogTab } from './constants';
 import { type SafetySliceState } from './slice';
 import {
@@ -290,3 +293,33 @@ export const getUserDefinedHeightLimit: AppSelector<number> = (state) => {
   // based on the proposal
   return getProposedHeightLimit(state);
 };
+
+/**
+ * Returns whether the given UAV's GPS position is outside the active geofence
+ * polygon drawn on the map.
+ */
+export function isUavOutsideActiveGeofence(
+  uav: { position?: { lon?: number; lat?: number } } | undefined,
+  geofencePoints: LonLat[] | undefined,
+  hasGeofence: boolean
+): boolean {
+  if (!hasGeofence) {
+    return false;
+  }
+
+  return (
+    isPositionOutsideGeofencePolygon(uav?.position, geofencePoints) ?? false
+  );
+}
+
+/**
+ * Selector factory that returns whether a UAV is outside the active geofence.
+ */
+export const createIsUavOutsideActiveGeofenceSelector =
+  (uavId: string): AppSelector<boolean> =>
+  (state) =>
+    isUavOutsideActiveGeofence(
+      getUAVById(state, uavId),
+      getGeofencePolygonInWorldCoordinates(state),
+      hasActiveGeofencePolygon(state)
+    );

@@ -79,6 +79,7 @@ type UAVsLayerSourceProps = {
   selection: Identifier[];
   labelColor?: string;
   flock: FlockModel;
+  geofencePoints?: import('~/utils/geography').LonLat[];
   projection?: CoordinateTransformationFunction;
   labelHidden?: boolean;
   scale?: number;
@@ -87,6 +88,7 @@ type UAVsLayerSourceProps = {
 export type UAVsLayerProps = {
   layer: Layer;
   LayerSource: React.ComponentType<UAVsLayerSourceProps>;
+  geofencePoints?: import('~/utils/geography').LonLat[];
   selection: Identifier[];
   projection?: CoordinateTransformationFunction;
   zIndex?: number;
@@ -96,6 +98,7 @@ export type UAVsLayerProps = {
 export const UAVsLayer = ({
   layer,
   LayerSource,
+  geofencePoints,
   projection = mapViewCoordinateFromLonLat,
   selection,
   zIndex,
@@ -104,6 +107,7 @@ export const UAVsLayer = ({
   <olLayer.Vector updateWhileAnimating updateWhileInteracting zIndex={zIndex}>
     <LayerSource
       selection={selection}
+      geofencePoints={geofencePoints}
       labelColor={
         (layer.parameters['labelColor'] as string | undefined | null) ?? ''
       }
