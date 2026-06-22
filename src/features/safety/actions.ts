@@ -1,4 +1,5 @@
 import { getProposedIdForNewFeature } from '~/features/map-features/selectors';
+import { openUploadDialogForJob } from '~/features/upload/slice';
 import {
   addFeatureById,
   removeFeaturesByIds,
@@ -14,7 +15,9 @@ import { type Feature, FeatureType } from '~/model/features';
 import { type AppThunk } from '~/store/reducers';
 import { type LonLat } from '~/utils/geography';
 
+import { JOB_TYPE } from './constants';
 import { getAutomaticGeofencePolygonForCurrentMissionType } from './selectors';
+import { getGeofenceUploadJobPayload } from './upload';
 
 /**
  * Thunk that adds a geofence polygon with the given coordinates and owner.
@@ -61,6 +64,15 @@ export const removeGeofencePolygon = (): AppThunk => (dispatch, getState) => {
   if (geofencePolygonId !== undefined) {
     dispatch(removeFeaturesByIds([geofencePolygonId]));
   }
+};
+
+/**
+ * Opens the upload dialog to push the current geofence configuration to all
+ * drones in the mission mapping.
+ */
+export const uploadGeofenceToMissionUAVs = (): AppThunk => (dispatch, getState) => {
+  const payload = getGeofenceUploadJobPayload(getState());
+  dispatch(openUploadDialogForJob({ job: { type: JOB_TYPE, payload } }));
 };
 
 /**

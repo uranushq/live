@@ -104,9 +104,9 @@
     "selectStartTime": "Select start time",
     "showStartPermissionRequired": "SHOW START permission required",
     "startTime": "Start time",
+    "stepOf": "Step {{current}} of {{total}}",
     "tapToUpload": "Tap to upload",
     "uploadData": "Upload data",
-    "stepOf": "Step {{current}} of {{total}}",
     "waiting": "Waiting"
   },
   "broadcastButton": {
@@ -122,10 +122,47 @@
     "resumeMeasurement": "Resume measurement",
     "setCentroidAsMapOrigin": "Set centroid as map origin"
   },
+  "currentFlightModeControl": {
+    "apply": "Apply",
+    "applyFailed": "Failed to change current flight mode: {{message}}",
+    "applyFailedGeneric": "Failed to change current flight mode.",
+    "applyPartial": "Current flight mode was not changed on some drones{{detail}}",
+    "applySuccess": "Current flight mode updated.",
+    "label": "Current",
+    "modes": {
+      "guided": "Guided",
+      "land": "Land",
+      "loiter": "Loiter",
+      "posHold": "Pos Hold",
+      "show": "Show",
+      "stabilize": "Stabilize"
+    },
+    "tooltipBroadcast": "Immediately switches current flight mode on {{count}} mission drone(s) via OBJ-CMD (stabilize, loiter, etc.)",
+    "tooltipNoSelection": "Select drones to change current flight mode via OBJ-CMD",
+    "tooltipSelection": "Immediately switches current flight mode on {{count}} selected drone(s) via OBJ-CMD"
+  },
   "environmentEditorDialog": {
     "environmentSettings": "Environment settings",
     "indoor": "This show is an indoor show. You may specify the corners of the room in which the show is taking place (for visualisation purposes).",
     "outdoor": "This show is an outdoor show. You need to specify at least the origin and orientation of the coordinate system so Skybrush can map the show into GPS coordinates."
+  },
+  "featureEditorDialog": {
+    "attributes": {
+      "exclusionZone": "Exclusion zone",
+      "exclusionZoneHelper": "Treat this polygon as an obstacle marker that should be excluded from the mission zone during planning and avoided while flying.",
+      "geofence": "Geofence",
+      "geofenceHelper": "Treat this polygon as the primary geofence boundary. UAVs should stay inside this area while flying.",
+      "maxAltitude": "Max AGL altitude",
+      "maxAltitudeHelper": "Distance of the bottom of the obstacle measured from the ground. UAVs should fly below this altitude limit to avoid collision.",
+      "minAltitude": "Min AGL altitude",
+      "minAltitudeHelper": "Distance of the top of the obstacle measured from the ground. UAVs should fly above this altitude limit to avoid collision.",
+      "unsupportedFeatureType": "This feature type doesn't support attributes."
+    },
+    "close": "Close",
+    "featureMissing": "Feature does not exist",
+    "remove": "Remove",
+    "uploadGeofence": "Upload to vehicle",
+    "uploadGeofenceDisabled": "Set a geofence polygon first"
   },
   "fieldNotesPanel": {
     "exportNotesAsFile": "Export notes as Markdown file"
@@ -170,25 +207,6 @@
     "tooltipBroadcast": "Sets FLTMODE5/6 on all connected MAVLink drones",
     "tooltipNoSelection": "Select drones to change FLTMODE5/6",
     "tooltipSelection": "Sets FLTMODE5/6 on {{count}} selected drone(s)"
-  },
-  "currentFlightModeControl": {
-    "apply": "Apply",
-    "applyFailed": "Failed to change current flight mode: {{message}}",
-    "applyFailedGeneric": "Failed to change current flight mode.",
-    "applyPartial": "Current flight mode was not changed on some drones{{detail}}",
-    "applySuccess": "Current flight mode updated.",
-    "label": "Current",
-    "modes": {
-      "guided": "Guided",
-      "land": "Land",
-      "loiter": "Loiter",
-      "posHold": "Pos Hold",
-      "show": "Show",
-      "stabilize": "Stabilize"
-    },
-    "tooltipBroadcast": "Immediately switches current flight mode on {{count}} mission drone(s) via OBJ-CMD (stabilize, loiter, etc.)",
-    "tooltipNoSelection": "Select drones to change current flight mode via OBJ-CMD",
-    "tooltipSelection": "Immediately switches current flight mode on {{count}} selected drone(s) via OBJ-CMD"
   },
   "fullScreen": {
     "exit": "Exit full screen mode",
@@ -503,6 +521,7 @@
       "safetyMargins": "Safety margins",
       "simplifyGeometry": "Simplify geometry",
       "simplifyPolygon": "Simplify polygon",
+      "uploadToVehicle": "Upload to vehicle",
       "vertexCountReduction": "Vertex count reduction",
       "vertical": "Vertical"
     },

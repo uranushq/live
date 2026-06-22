@@ -1,51 +1,65 @@
-import Button from '@mui/material/Button';
 import FormHelperText from '@mui/material/FormHelperText';
 import InputAdornment from '@mui/material/InputAdornment';
 import { Checkboxes, TextField } from 'mui-rff';
 import PropTypes from 'prop-types';
 import React from 'react';
 import { Form, FormSpy } from 'react-final-form';
+import { withTranslation } from 'react-i18next';
 import { connect } from 'react-redux';
 
 import { BackgroundHint } from '@skybrush/mui-components';
 
 import { updateFeatureAttributes } from '~/features/map-features/slice';
 import { getGeofencePolygonId } from '~/features/mission/selectors';
-import { clearGeofencePolygonId } from '~/features/mission/slice';
-import Fence from '~/icons/PlacesFence';
+import {
+  clearGeofencePolygonId,
+  setGeofencePolygonId,
+} from '~/features/mission/slice';
 import { FeatureType } from '~/model/features';
+import { hasFeature } from '~/utils/configuration';
 import { createValidator, optional, positive } from '~/utils/validation';
+
+const hasGeofenceFeature = hasFeature('geofence');
 
 // PERF: Optimize this, it has lots of unnecessary recomputes
 const FeatureAttributesForm = ({
   clearGeofencePolygonId,
   feature,
+  featureId,
   isGeofence,
   onSetFeatureAttributes,
+  setGeofencePolygonId,
+  t,
 }) => {
   switch (feature.type) {
     case FeatureType.POLYGON: {
-      if (isGeofence) {
-        return (
-          <BackgroundHint
-            icon={<Fence />}
-            header='This feature is the current geofence'
-            text='It cannot be used as an exclusion zone at the same time'
-            button={<Button onClick={clearGeofencePolygonId}>Clear</Button>}
-          />
-        );
-      }
-
       return (
         <Form
-          initialValues={feature.attributes}
+          key={`${featureId}-${isGeofence}`}
+          initialValues={{
+            ...feature.attributes,
+            isGeofence,
+          }}
           validate={createValidator({
             minAltitude: optional(positive),
             maxAltitude: optional(positive),
           })}
-          onSubmit={({ isExclusionZone, minAltitude, maxAltitude }) => {
+          onSubmit={({
+            isExclusionZone,
+            isGeofence: useAsGeofence,
+            minAltitude,
+            maxAltitude,
+          }) => {
+            if (hasGeofenceFeature) {
+              if (useAsGeofence && !isGeofence) {
+                setGeofencePolygonId(featureId);
+              } else if (!useAsGeofence && isGeofence) {
+                clearGeofencePolygonId();
+              }
+            }
+
             onSetFeatureAttributes({
-              isExclusionZone,
+              isExclusionZone: useAsGeofence ? false : isExclusionZone,
               minAltitude: Number(minAltitude) || undefined,
               maxAltitude: Number(maxAltitude) || undefined,
             });
@@ -53,18 +67,35 @@ const FeatureAttributesForm = ({
         >
           {({ form, values }) => (
             <div>
+              {hasGeofenceFeature && (
+                <>
+                  <Checkboxes
+                    name='isGeofence'
+                    data={{
+                      label: t('featureEditorDialog.attributes.geofence'),
+                    }}
+                    disabled={values.isExclusionZone}
+                  />
+                  <FormHelperText style={{ marginTop: -8, marginBottom: 8 }}>
+                    {t('featureEditorDialog.attributes.geofenceHelper')}
+                  </FormHelperText>
+                </>
+              )}
+
               <Checkboxes
                 name='isExclusionZone'
-                data={{ label: 'Exclusion zone' }}
+                data={{
+                  label: t('featureEditorDialog.attributes.exclusionZone'),
+                }}
+                disabled={values.isGeofence}
               />
               <FormHelperText style={{ marginTop: -8, marginBottom: 8 }}>
-                Treat this polygon as an obstacle marker that should be excluded
-                from the mission zone during planning and avoided while flying.
+                {t('featureEditorDialog.attributes.exclusionZoneHelper')}
               </FormHelperText>
 
               <TextField
                 name='minAltitude'
-                label='Min AGL altitude'
+                label={t('featureEditorDialog.attributes.minAltitude')}
                 disabled={!values.isExclusionZone}
                 slotProps={{
                   input: {
@@ -78,13 +109,12 @@ const FeatureAttributesForm = ({
                 }}
               />
               <FormHelperText style={{ marginBottom: 8 }}>
-                Distance of the top of the obstacle measured from the ground.
-                UAVs should fly above this altitude limit to avoid collision.
+                {t('featureEditorDialog.attributes.minAltitudeHelper')}
               </FormHelperText>
 
               <TextField
                 name='maxAltitude'
-                label='Max AGL altitude'
+                label={t('featureEditorDialog.attributes.maxAltitude')}
                 disabled={!values.isExclusionZone}
                 slotProps={{
                   input: {
@@ -98,8 +128,7 @@ const FeatureAttributesForm = ({
                 }}
               />
               <FormHelperText style={{ marginBottom: 8 }}>
-                Distance of the bottom of the obstacle measured from the ground.
-                UAVs should fly below this altitude limit to avoid collision.
+                {t('featureEditorDialog.attributes.maxAltitudeHelper')}
               </FormHelperText>
 
               {/* HACK: Forms are not meant to be used like this... */}
@@ -115,7 +144,9 @@ const FeatureAttributesForm = ({
 
     default: {
       return (
-        <BackgroundHint text="This feature type doesn't support attributes." />
+        <BackgroundHint
+          text={t('featureEditorDialog.attributes.unsupportedFeatureType')}
+        />
       );
     }
   }
@@ -124,8 +155,11 @@ const FeatureAttributesForm = ({
 FeatureAttributesForm.propTypes = {
   clearGeofencePolygonId: PropTypes.func,
   feature: PropTypes.object.isRequired,
+  featureId: PropTypes.string,
   isGeofence: PropTypes.bool,
   onSetFeatureAttributes: PropTypes.func,
+  setGeofencePolygonId: PropTypes.func,
+  t: PropTypes.func,
 };
 
 export default connect(
@@ -139,5 +173,6 @@ export default connect(
     onSetFeatureAttributes(attributes) {
       dispatch(updateFeatureAttributes({ id: featureId, attributes }));
     },
+    setGeofencePolygonId: () => dispatch(setGeofencePolygonId(featureId)),
   })
-)(FeatureAttributesForm);
+)(withTranslation()(FeatureAttributesForm));

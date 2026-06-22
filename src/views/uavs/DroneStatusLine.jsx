@@ -468,6 +468,7 @@ export default connect(
       const batteryFormatter = getBatteryFormatter(state);
       const pathUploadContext = {
         externalShowUploaded: isExternalShowUploaded(state),
+        uploadJobType: state.upload.currentJob.type,
       };
       const batteryStatus = uav?.battery;
 

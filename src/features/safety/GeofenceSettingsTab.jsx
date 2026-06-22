@@ -34,7 +34,7 @@ import {
   clearGeofencePolygonId,
   setGeofenceAction,
 } from '~/features/mission/slice';
-import { updateGeofencePolygon } from '~/features/safety/actions';
+import { updateGeofencePolygon, uploadGeofenceToMissionUAVs } from '~/features/safety/actions';
 import useSelectorOnce from '~/hooks/useSelectorOnce';
 import { MissionType } from '~/model/missions';
 import { rejectNullish } from '~/utils/arrays';
@@ -414,9 +414,11 @@ const GeofenceSettingsForm = connect(
  * can use to edit the geofence settings.
  */
 const GeofenceSettingsTabPresentation = ({
+  canUploadGeofence,
   hasFence,
   onClose,
   onClearGeofence,
+  onUploadGeofence,
   t,
 }) => (
   <>
@@ -427,6 +429,13 @@ const GeofenceSettingsTabPresentation = ({
       <Button color='secondary' disabled={!hasFence} onClick={onClearGeofence}>
         {t('safetyDialog.geofenceTab.clear')}
       </Button>
+      <Button
+        color='primary'
+        disabled={!canUploadGeofence}
+        onClick={onUploadGeofence}
+      >
+        {t('safetyDialog.geofenceTab.uploadToVehicle')}
+      </Button>
       <Button form='geofenceSettings' type='submit' color='primary'>
         {t('general.action.apply')}
       </Button>
@@ -436,9 +445,11 @@ const GeofenceSettingsTabPresentation = ({
 );
 
 GeofenceSettingsTabPresentation.propTypes = {
+  canUploadGeofence: PropTypes.bool,
   hasFence: PropTypes.bool,
   onClearGeofence: PropTypes.func,
   onClose: PropTypes.func,
+  onUploadGeofence: PropTypes.func,
   t: PropTypes.func,
 };
 
@@ -449,6 +460,7 @@ GeofenceSettingsTabPresentation.propTypes = {
 const GeofenceSettingsTab = connect(
   // mapStateToProps
   (state) => ({
+    canUploadGeofence: hasActiveGeofencePolygon(state),
     hasFence: hasActiveGeofencePolygon(state),
   }),
   // mapDispatchToProps
@@ -460,6 +472,7 @@ const GeofenceSettingsTab = connect(
         dispatch(removeFeaturesByIds([geofencePolygonId]));
       }
     },
+    onUploadGeofence: uploadGeofenceToMissionUAVs,
   }
 )(withTranslation()(GeofenceSettingsTabPresentation));
 

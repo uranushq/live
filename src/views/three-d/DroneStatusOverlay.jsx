@@ -504,7 +504,10 @@ export default connect((state, { drone }) => {
   const summary = getSingleUAVStatusSummary(uav);
   const uploadStatus = getUploadStatusCodeMapping(state)[uavId];
   const batteryFormatter = getBatteryFormatter(state);
-  const pathUploadContext = { externalShowUploaded: isExternalShowUploaded(state) };
+  const pathUploadContext = {
+    externalShowUploaded: isExternalShowUploaded(state),
+    uploadJobType: state.upload.currentJob.type,
+  };
   const batteryStatus = uav.battery;
   const batteryPercentage = resolveBatteryPercentage(
     batteryStatus?.percentage,

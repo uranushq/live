@@ -3,8 +3,10 @@ import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import Tab from '@mui/material/Tab';
+import Tooltip from '@mui/material/Tooltip';
 import PropTypes from 'prop-types';
 import React from 'react';
+import { withTranslation } from 'react-i18next';
 import { connect } from 'react-redux';
 
 import { DialogTabs } from '@skybrush/mui-components';
@@ -20,6 +22,10 @@ import {
   getSelectedTab,
 } from '~/features/map-features/selectors';
 import { removeFeaturesByIds } from '~/features/map-features/slice';
+import { hasActiveGeofencePolygon } from '~/features/mission/selectors';
+import { uploadGeofenceToMissionUAVs } from '~/features/safety/actions';
+import { FeatureType } from '~/model/features';
+import { hasFeature } from '~/utils/configuration';
 
 import {
   FeatureEditorDialogTab,
@@ -31,15 +37,20 @@ import FeatureAttributesForm from './FeatureAttributesForm';
 import FeaturePointsForm from './FeaturePointsForm';
 import GeneralPropertiesForm from './GeneralPropertiesForm';
 
+const hasGeofenceFeature = hasFeature('geofence');
+
 const FeatureEditorDialogPresentation = (props) => {
   const {
+    canUploadGeofence,
     feature,
     featureId,
     onClose,
     onRemoveFeature,
     onTabSelected,
+    onUploadGeofence,
     open,
     selectedTab = FeatureEditorDialogTab.GENERAL,
+    t,
   } = props;
 
   const SelectedTab = {
@@ -51,8 +62,11 @@ const FeatureEditorDialogPresentation = (props) => {
   const content = feature ? (
     SelectedTab && <SelectedTab feature={feature} featureId={featureId} />
   ) : (
-    <p>Feature does not exist</p>
+    <p>{t('featureEditorDialog.featureMissing')}</p>
   );
+
+  const showUploadButton =
+    hasGeofenceFeature && feature?.type === FeatureType.POLYGON;
 
   const actions = [
     <Button
@@ -61,12 +75,33 @@ const FeatureEditorDialogPresentation = (props) => {
       disabled={!feature}
       onClick={onRemoveFeature}
     >
-      Remove
+      {t('featureEditorDialog.remove')}
     </Button>,
+    showUploadButton && (
+      <Tooltip
+        key='upload-tooltip'
+        title={
+          canUploadGeofence
+            ? ''
+            : t('featureEditorDialog.uploadGeofenceDisabled')
+        }
+      >
+        <span>
+          <Button
+            key='upload'
+            color='primary'
+            disabled={!canUploadGeofence}
+            onClick={onUploadGeofence}
+          >
+            {t('featureEditorDialog.uploadGeofence')}
+          </Button>
+        </span>
+      </Tooltip>
+    ),
     <Button key='close' onClick={onClose}>
-      Close
+      {t('featureEditorDialog.close')}
     </Button>,
-  ];
+  ].filter(Boolean);
 
   return (
     <Dialog fullWidth open={open} maxWidth='sm' onClose={onClose}>
@@ -93,13 +128,16 @@ const FeatureEditorDialogPresentation = (props) => {
 };
 
 FeatureEditorDialogPresentation.propTypes = {
+  canUploadGeofence: PropTypes.bool,
   feature: PropTypes.object,
   featureId: PropTypes.string,
   onClose: PropTypes.func,
   onRemoveFeature: PropTypes.func,
   onTabSelected: PropTypes.func,
+  onUploadGeofence: PropTypes.func,
   open: PropTypes.bool.isRequired,
   selectedTab: PropTypes.oneOf(Object.values(FeatureEditorDialogTab)),
+  t: PropTypes.func,
 };
 
 /**
@@ -111,6 +149,7 @@ const FeatureEditorDialog = connect(
   (state) => {
     const featureId = getEditedFeatureId(state);
     return {
+      canUploadGeofence: hasActiveGeofencePolygon(state),
       featureId,
       selectedTab: getSelectedTab(state),
       feature: getFeatureById(state, featureId),
@@ -129,6 +168,9 @@ const FeatureEditorDialog = connect(
     onTabSelected(_event, value) {
       dispatch(setFeatureEditorDialogTab(value));
     },
+    onUploadGeofence() {
+      dispatch(uploadGeofenceToMissionUAVs());
+    },
   }),
   // mergeProps
   (stateProps, dispatchProps) => ({
@@ -136,6 +178,6 @@ const FeatureEditorDialog = connect(
     ...dispatchProps,
     onRemoveFeature: () => dispatchProps.onRemoveFeature(stateProps.featureId),
   })
-)(FeatureEditorDialogPresentation);
+)(withTranslation()(FeatureEditorDialogPresentation));
 
 export default FeatureEditorDialog;

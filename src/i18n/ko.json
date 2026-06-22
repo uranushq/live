@@ -49,6 +49,24 @@
     "tooltipNoSelection": "드론을 선택하면 OBJ-CMD로 현재 비행 모드를 변경할 수 있습니다",
     "tooltipSelection": "OBJ-CMD로 선택한 {{count}}대 드론의 현재 비행 모드를 즉시 전환합니다"
   },
+  "featureEditorDialog": {
+    "attributes": {
+      "exclusionZone": "제외 구역",
+      "exclusionZoneHelper": "이 폴리곤을 장애물로 표시합니다. 미션 계획 시 미션 구역에서 제외되며, 비행 중 회피해야 합니다.",
+      "geofence": "지오펜스",
+      "geofenceHelper": "이 폴리곤을 주 지오펜스 경계로 사용합니다. UAV는 비행 중 이 구역 안에 머물러야 합니다.",
+      "maxAltitude": "최대 AGL 고도",
+      "maxAltitudeHelper": "지면에서 장애물 하단까지의 거리입니다. UAV는 충돌을 피하기 위해 이 고도 제한 아래로 비행해야 합니다.",
+      "minAltitude": "최소 AGL 고도",
+      "minAltitudeHelper": "지면에서 장애물 상단까지의 거리입니다. UAV는 충돌을 피하기 위해 이 고도 제한 위로 비행해야 합니다.",
+      "unsupportedFeatureType": "이 피처 유형은 속성을 지원하지 않습니다."
+    },
+    "close": "닫기",
+    "featureMissing": "피처가 존재하지 않습니다",
+    "remove": "삭제",
+    "uploadGeofence": "기체에 업로드",
+    "uploadGeofenceDisabled": "먼저 지오펜스 폴리곤을 설정하세요"
+  },
   "bottomBar": {
     "aircraftPreflightCheck": "기체 프리플라이트 체크",
     "detachedPanelHint": "쇼 제어는 화면 하단 바에서 사용할 수 있습니다.",
@@ -113,6 +131,11 @@
     "label": "지도 소스",
     "map": "지도",
     "satellite": "위성"
+  },
+  "safetyDialog": {
+    "geofenceTab": {
+      "uploadToVehicle": "기체에 업로드"
+    }
   },
   "navigationInstructions": {
     "altitude": "고도",

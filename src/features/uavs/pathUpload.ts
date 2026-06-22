@@ -2,6 +2,7 @@ import createColor from 'color';
 import type { CSSProperties } from 'react';
 
 import { Status } from '~/components/semantics';
+import { JOB_TYPE as SHOW_UPLOAD_JOB_TYPE } from '~/features/show/constants';
 import UAVErrorCode from '~/flockwave/UAVErrorCode';
 
 import {
@@ -13,6 +14,8 @@ import type { StoredUAV } from './types';
 export type PathUploadContext = Readonly<{
   /** Path-planner 등으로 드론에 직접 업로드된 경우 */
   externalShowUploaded?: boolean;
+  /** 현재(또는 직전) 업로드 job 유형. Path OK는 show 업로드일 때만 반영 */
+  uploadJobType?: string;
 }>;
 
 /**
@@ -20,11 +23,12 @@ export type PathUploadContext = Readonly<{
  *
  * OK only when this session's show upload succeeded for the UAV (or an
  * external upload was flagged). Telemetry alone does not imply upload.
+ * Other upload types (geofence, parameters, etc.) must not affect this.
  */
 export function isPathUploadedForUav(
   uav: StoredUAV | undefined,
   uploadStatus?: Status,
-  { externalShowUploaded = false }: PathUploadContext = {}
+  { externalShowUploaded = false, uploadJobType }: PathUploadContext = {}
 ): boolean {
   if (!uav) {
     return false;
@@ -34,8 +38,10 @@ export function isPathUploadedForUav(
     return true;
   }
 
+  const isShowUploadJob = uploadJobType === SHOW_UPLOAD_JOB_TYPE;
+
   if (uploadStatus === Status.SUCCESS) {
-    return true;
+    return isShowUploadJob;
   }
 
   if (uploadStatus === Status.ERROR) {
