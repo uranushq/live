@@ -9,6 +9,7 @@ import { createSelector } from '@reduxjs/toolkit';
 
 import { Status } from '~/components/semantics';
 import {
+  areFlightCommandsBroadcast,
   getGPSBasedHomePositionsInMission,
   getMissionMapping,
   getReverseMissionMapping,
@@ -38,6 +39,7 @@ import {
 } from '~/flockwave/errors';
 import { convertRGB565ToCSSNotation } from '~/flockwave/parsing';
 import UAVErrorCode from '~/flockwave/UAVErrorCode';
+import i18n from '~/i18n';
 import { isGPSPositionValid } from '~/model/geography';
 import { globalIdToUavId } from '~/model/identifiers';
 import { UAVAge } from '~/model/uav';
@@ -47,6 +49,12 @@ import { EMPTY_ARRAY } from '~/utils/redux';
 import { createDeepResultSelector } from '~/utils/selectors';
 import type { AppSelector, RootState } from '~/store/reducers';
 import type { StoredUAV } from './types';
+import {
+  getShowStageStatusLabelKey,
+  getShowStageStatusMessageKey,
+  summarizeShowStageFlightControlStatus,
+  uavHasShowStageError,
+} from './showStageStatus';
 import {
   getVehicleMode,
   getVehicleModePillStyle,
@@ -678,6 +686,22 @@ export const getErrorCodeSummaryForUAVsInMission = createSelector(
 );
 
 /**
+ * Summarizes SHOW stage status exposed by the server via UAV error codes for
+ * the current flight-command target (selection or broadcast).
+ */
+export const getShowStageFlightControlStatus = createSelector(
+  areFlightCommandsBroadcast,
+  getSelectedUAVIds,
+  getUAVIdsParticipatingInMission,
+  getUAVIdToStateMapping,
+  (broadcast, selectedUAVIds, missionUAVIds, uavStatesById) =>
+    summarizeShowStageFlightControlStatus(
+      broadcast ? missionUAVIds : selectedUAVIds,
+      uavStatesById
+    )
+);
+
+/**
  * Returns whether the given UAV state object contains an error code that is
  * worth reporting in the "Onboard preflight checks" dialog.
  */
@@ -689,7 +713,11 @@ const uavStateContainsSignificantErrorCode = (
     return false;
   }
 
-  if (errors.length === 1 && errors[0] === UAVErrorCode.ON_GROUND) {
+  if (
+    errors.length === 1 &&
+    (errors[0] === UAVErrorCode.ON_GROUND ||
+      errors[0] === UAVErrorCode.LANDED)
+  ) {
     // This is OK
     return false;
   }
@@ -771,21 +799,35 @@ export function getSingleUAVStatusSummary(uav?: StoredUAV) {
     text = 'missing';
     textSemantics = Status.WARNING;
   } else if (uav.errors && uav.errors.length > 0) {
-    // UAV has some status information that it wishes to report
-    maxError = Math.max(...uav.errors);
-    const severity = getSeverityOfErrorCode(maxError);
+    const showStageMessageKey = getShowStageStatusMessageKey(uav);
+    const showStageLabelKey = getShowStageStatusLabelKey(uav);
 
-    text = UAVErrorCode.abbreviate(maxError);
-
-    if (maxError === UAVErrorCode.RETURN_TO_HOME) {
-      // RTH is treated separately; it is always shown as the special RTH state
-      textSemantics = Status.RTH;
-    } else if (maxError === UAVErrorCode.ON_GROUND) {
-      // "on ground" is treated separately; it is always shown in green even
-      // though it's technically an info message
-      textSemantics = Status.SUCCESS;
+    if (showStageMessageKey && showStageLabelKey) {
+      maxError = uavHasShowStageError(uav)
+        ? UAVErrorCode.CONFIGURATION_ERROR
+        : UAVErrorCode.LANDED;
+      text = i18n.t(showStageLabelKey);
+      details = i18n.t(showStageMessageKey);
+      textSemantics = uavHasShowStageError(uav)
+        ? errorSeverityToSemantics(getSeverityOfErrorCode(maxError))
+        : Status.SUCCESS;
     } else {
-      textSemantics = errorSeverityToSemantics(severity);
+      // UAV has some status information that it wishes to report
+      maxError = Math.max(...uav.errors);
+      const severity = getSeverityOfErrorCode(maxError);
+
+      text = UAVErrorCode.abbreviate(maxError);
+
+      if (maxError === UAVErrorCode.RETURN_TO_HOME) {
+        // RTH is treated separately; it is always shown as the special RTH state
+        textSemantics = Status.RTH;
+      } else if (maxError === UAVErrorCode.ON_GROUND) {
+        // "on ground" is treated separately; it is always shown in green even
+        // though it's technically an info message
+        textSemantics = Status.SUCCESS;
+      } else {
+        textSemantics = errorSeverityToSemantics(severity);
+      }
     }
   } else if (uav.position && Math.abs(uav.position.ahl ?? 0) >= 0.3) {
     // UAV is in the air
@@ -813,7 +855,11 @@ export function getSingleUAVStatusSummary(uav?: StoredUAV) {
 
       textSemantics = Status.OFF;
     } else if (uav.age === UAVAge.INACTIVE) {
-      if (text === 'ready' || maxError === UAVErrorCode.ON_GROUND) {
+      if (
+        text === 'ready' ||
+        maxError === UAVErrorCode.ON_GROUND ||
+        maxError === UAVErrorCode.LANDED
+      ) {
         text = 'no telem'; // used to be 'inactive' in earlier versions
       }
 

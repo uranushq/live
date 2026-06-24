@@ -31,6 +31,14 @@
     "tooltipNoSelection": "드론을 선택하면 FLTMODE5/6을 변경할 수 있습니다",
     "tooltipSelection": "선택한 {{count}}대 드론의 FLTMODE5/6을 설정합니다"
   },
+  "showStageStatus": {
+    "error": "Reboot 또는 LOITER→SHOW",
+    "landed": "착륙 완료, Show start 필요"
+  },
+  "uavStatus": {
+    "landed": "LANDED",
+    "showError": "ERROR"
+  },
   "currentFlightModeControl": {
     "apply": "적용",
     "applyFailed": "현재 비행 모드 변경 실패: {{message}}",

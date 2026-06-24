@@ -39,6 +39,7 @@ const getDroneBodyColorFromUAV = (uav) =>
 
 const getDroneStatusTextFromUAV = (uav) => {
   if (uav.errors?.includes(UAVErrorCode.ON_GROUND)) return 'ground';
+  if (uav.errors?.includes(UAVErrorCode.LANDED)) return 'LANDED';
   if (uav.errors?.length > 0) return UAVErrorCode.abbreviate(Math.max(...uav.errors));
   if (uav.position && Math.abs(uav.position.ahl ?? 0) >= 0.3) {
     return `airborne ${(uav.position.ahl ?? 0).toFixed(2)}m`;
