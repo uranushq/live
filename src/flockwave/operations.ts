@@ -326,6 +326,38 @@ export async function uploadDroneShow(
 }
 
 /**
+ * Asks the server to upload a geofence specification to a given UAV.
+ */
+export async function uploadGeofence(
+  hub: MessageHub,
+  { uavId, data }: { uavId: string; data: Record<string, unknown> },
+  options: AsyncResponseHandlerOptions
+) {
+  validateObjectId(uavId);
+
+  try {
+    await hub.sendCommandRequest(
+      {
+        uavId,
+        command: '__geofence_upload',
+        kwds: data,
+      },
+      {
+        timeout: 300,
+        ...options,
+      }
+    );
+  } catch (error) {
+    throw new Error(
+      errorToString(
+        (error as any).message || error,
+        `Failed to upload geofence to UAV ${uavId}`
+      )
+    );
+  }
+}
+
+/**
  * Ask the server to update the firmware of a given component.
  */
 export async function uploadFirmware(
@@ -441,6 +473,7 @@ const _operations = {
   startRTKSurvey,
   uploadDroneShow,
   uploadFirmware,
+  uploadGeofence,
   uploadMission,
 };
 

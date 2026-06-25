@@ -1,6 +1,8 @@
 import delay from 'delay';
 import isNil from 'lodash-es/isNil';
 
+import { JOB_TYPE as GEOFENCE_UPLOAD_JOB_TYPE } from '~/features/safety/constants';
+import { getGeofenceUploadJobPayload } from '~/features/safety/upload';
 import type { AppThunk, RootState } from '~/store/reducers';
 
 import {
@@ -163,7 +165,11 @@ export function startUploadJobFromUploadDialog(): AppThunk<void> {
     // Process the state, extract the type of the job that the user selected,
     // and create the payload depending on the job type and the current state
     const state = getState();
-    const { type, payload } = getSelectedJobInUploadDialog(state);
+    const { type } = getSelectedJobInUploadDialog(state);
+    const payload =
+      type === GEOFENCE_UPLOAD_JOB_TYPE
+        ? getGeofenceUploadJobPayload(state)
+        : getSelectedJobInUploadDialog(state).payload;
     const targets = getUploadTargets(state);
 
     // Set up the next upload job and start it if at least one target was

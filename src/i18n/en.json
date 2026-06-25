@@ -662,14 +662,6 @@
       "warn": "Warn about drones not seen for at least"
     }
   },
-  "showStageStatus": {
-    "error": "Reboot or switch LOITER→SHOW",
-    "landed": "Landing complete; show start required"
-  },
-  "uavStatus": {
-    "landed": "LANDED",
-    "showError": "ERROR"
-  },
   "show": {
     "authorizationReq": "Authorization required before takeoff",
     "authorizeTheStart": "Authorize start of show",
@@ -830,6 +822,23 @@
     },
     "title": "Adapt show to venue"
   },
+  "showStageStatus": {
+    "error": "Reboot or switch LOITER→SHOW",
+    "landed": "Landing complete; show start required"
+  },
+  "showStartDelayDialog": {
+    "delayLabel": "Start delay (seconds)",
+    "description": "Set how many seconds from now the show should start. All drones in the mission will start automatically at the scheduled time.",
+    "presetSeconds": "+{{seconds}}s",
+    "title": "Schedule show start"
+  },
+  "showTimerOverlay": {
+    "elapsedTime": "Show elapsed",
+    "remainingTime": "Show remaining",
+    "showInProgress": "Show in progress",
+    "untilStart": "Until start",
+    "waitingToStart": "Waiting to start"
+  },
   "sidebar": {
     "missionType": "Mission type: ({{missionType}})"
   },
@@ -886,19 +895,6 @@
     "startTimeHms": "Start time (hours:minutes:seconds)",
     "suggestions": "Suggestions:"
   },
-  "showStartDelayDialog": {
-    "delayLabel": "Start delay (seconds)",
-    "description": "Set how many seconds from now the show should start. All drones in the mission will start automatically at the scheduled time.",
-    "presetSeconds": "+{{seconds}}s",
-    "title": "Schedule show start"
-  },
-  "showTimerOverlay": {
-    "elapsedTime": "Show elapsed",
-    "remainingTime": "Show remaining",
-    "showInProgress": "Show in progress",
-    "untilStart": "Until start",
-    "waitingToStart": "Waiting to start"
-  },
   "startTimeDisplay": {
     "noStartTimeIsSet": "No start time is set at the moment.",
     "startTimeIsSetTo": "Start time is set to <strong>{{formattedStartTime}}</strong>"
@@ -950,6 +946,10 @@
     "paramUpload": "Parameter upload",
     "tooltip": "Toolbox",
     "uploadInProgress": "Upload in progress"
+  },
+  "uavStatus": {
+    "landed": "LANDED",
+    "showError": "ERROR"
   },
   "uploadDialog": {
     "restrictToGlobalSelection": "Show global selection only"
