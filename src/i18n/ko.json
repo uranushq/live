@@ -146,6 +146,13 @@
     "presetSeconds": "+{{seconds}}초",
     "title": "쇼 시작 예약"
   },
+  "showTimerOverlay": {
+    "elapsedTime": "쇼 진행시간",
+    "remainingTime": "쇼 남은시간",
+    "showInProgress": "쇼 진행 중",
+    "untilStart": "시작까지",
+    "waitingToStart": "시작 대기"
+  },
   "mapSourceToggle": {
     "label": "지도 소스",
     "map": "지도",
