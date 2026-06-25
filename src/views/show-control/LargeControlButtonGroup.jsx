@@ -66,11 +66,15 @@ import {
 
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
+import { scheduleShowStartWithDelay } from '~/features/show/actions';
+
 import { getSelectedUAVIds, getShowStageFlightControlStatus } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
 
 import { formatCommandTargetDrones } from './formatCommandTargetDrones';
+
+import ShowStartDelayDialog from './ShowStartDelayDialog';
 
 
 
@@ -790,6 +794,8 @@ const LargeControlButtonGroup = ({
 
   reverseMissionMapping,
 
+  scheduleShowStartWithDelay,
+
   selectedUAVIds,
 
   showStageFlightControlStatus,
@@ -810,6 +816,8 @@ const LargeControlButtonGroup = ({
 
   const [pendingCommand, setPendingCommand] = useState(null);
 
+  const [showStartDelayOpen, setShowStartDelayOpen] = useState(false);
+
   const stageStatusMessage = showStageFlightControlStatus?.statusMessageKey
 
     ? t(showStageFlightControlStatus.statusMessageKey)
@@ -820,11 +828,33 @@ const LargeControlButtonGroup = ({
 
   const requestCommand = useCallback((commandKey) => {
 
+    if (commandKey === 'startShow') {
+
+      setShowStartDelayOpen(true);
+
+      return;
+
+    }
+
     setPendingCommand(commandKey);
 
     setConfirmOpen(true);
 
   }, []);
+
+  const handleShowStartDelayClose = useCallback(() => {
+
+    setShowStartDelayOpen(false);
+
+  }, []);
+
+  const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
+
+    scheduleShowStartWithDelay(delaySeconds);
+
+    setShowStartDelayOpen(false);
+
+  }, [scheduleShowStartWithDelay]);
 
   const handleConfirmClose = useCallback(() => {
 
@@ -915,6 +945,12 @@ const LargeControlButtonGroup = ({
           message={confirmMessage}
           onConfirm={handleConfirmAction}
           onCancel={handleConfirmClose}
+        />
+
+        <ShowStartDelayDialog
+          open={showStartDelayOpen}
+          onCancel={handleShowStartDelayClose}
+          onConfirm={handleShowStartDelayConfirm}
         />
       </Box>
     );
@@ -1061,6 +1097,12 @@ const LargeControlButtonGroup = ({
 
       />
 
+      <ShowStartDelayDialog
+        open={showStartDelayOpen}
+        onCancel={handleShowStartDelayClose}
+        onConfirm={handleShowStartDelayConfirm}
+      />
+
     </Box>
 
   );
@@ -1076,6 +1118,8 @@ LargeControlButtonGroup.propTypes = {
   onChangeBroadcastMode: PropTypes.func,
 
   reverseMissionMapping: PropTypes.object,
+
+  scheduleShowStartWithDelay: PropTypes.func.isRequired,
 
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
 
@@ -1132,6 +1176,14 @@ export default connect(
         dispatch(setCommandsAreBroadcast(value === 'broadcast'));
 
       }
+
+    },
+
+
+
+    scheduleShowStartWithDelay: (delaySeconds) => {
+
+      dispatch(scheduleShowStartWithDelay(delaySeconds));
 
     },
 

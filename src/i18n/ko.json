@@ -140,6 +140,12 @@
     "manualShowStart": "수동 쇼 시작",
     "manualShowStartAll": "전체 수동 쇼 시작"
   },
+  "showStartDelayDialog": {
+    "delayLabel": "시작 지연 (초)",
+    "description": "지금부터 몇 초 뒤에 쇼를 시작할지 설정하세요. 미션에 참여한 모든 드론이 예약된 시간에 자동으로 시작합니다.",
+    "presetSeconds": "+{{seconds}}초",
+    "title": "쇼 시작 예약"
+  },
   "mapSourceToggle": {
     "label": "지도 소스",
     "map": "지도",

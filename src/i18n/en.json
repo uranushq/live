@@ -886,6 +886,12 @@
     "startTimeHms": "Start time (hours:minutes:seconds)",
     "suggestions": "Suggestions:"
   },
+  "showStartDelayDialog": {
+    "delayLabel": "Start delay (seconds)",
+    "description": "Set how many seconds from now the show should start. All drones in the mission will start automatically at the scheduled time.",
+    "presetSeconds": "+{{seconds}}s",
+    "title": "Schedule show start"
+  },
   "startTimeDisplay": {
     "noStartTimeIsSet": "No start time is set at the moment.",
     "startTimeIsSetTo": "Start time is set to <strong>{{formattedStartTime}}</strong>"
