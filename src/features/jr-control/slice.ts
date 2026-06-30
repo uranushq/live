@@ -24,6 +24,11 @@ export type JRBoardEntry = {
 };
 
 export type ArmParams = {
+  /**
+   * 'auto'  -> startIn follows the authored show's LED start delay (path);
+   * 'manual' -> startIn is the hand-entered value below.
+   */
+  startInMode: 'auto' | 'manual';
   startIn: number;
   fpsNum: number;
   fpsDen: number;
@@ -43,6 +48,7 @@ type JRControlSliceState = {
 const initialState: JRControlSliceState = {
   boards: [],
   arm: {
+    startInMode: 'auto',
     startIn: 5,
     fpsNum: 30,
     fpsDen: 1,

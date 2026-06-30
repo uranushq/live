@@ -11,7 +11,9 @@ import RestartAlt from '@mui/icons-material/RestartAlt';
 import CloudDownload from '@mui/icons-material/CloudDownload';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import Divider from '@mui/material/Divider';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -21,7 +23,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import {
@@ -46,12 +48,11 @@ import { type AppDispatch } from '~/store/reducers';
 
 // Only the fields a user must set are shown. FPS and frame count are derived
 // from the authored LED show at broadcast time (see broadcastArm), so they are
-// not editable here.
+// not editable here. "Start in" has its own control (auto/manual) below.
 const armFields: Array<{
-  key: keyof RootState['jrControl']['arm'];
+  key: 'showId' | 'fileId';
   label: string;
 }> = [
-  { key: 'startIn', label: 'Start in (s)' },
   { key: 'showId', label: 'Show id' },
   { key: 'fileId', label: 'File id' },
 ];
@@ -69,17 +70,14 @@ const JRControlPanel = (): JSX.Element => {
   const derivedFrameCount = Math.max(1, Math.round(showDuration * fps));
   const [ipInput, setIpInput] = useState('');
 
-  // When the 3D view reports how long it takes the drones to reach the first
-  // formation (sync on), use that as the recommended ARM "start in" delay.
+  // The 3D view reports how long the drones take to reach the first formation
+  // (the "path" value). In auto mode this drives the ARM start-in; in manual
+  // mode the user types it. We no longer auto-overwrite the manual field.
   const recommendedStartIn =
     ledStartDelaySec != null && Number.isFinite(ledStartDelaySec)
       ? Math.round(ledStartDelaySec * 10) / 10
       : null;
-  useEffect(() => {
-    if (recommendedStartIn != null) {
-      dispatch(setArmParams({ startIn: recommendedStartIn }));
-    }
-  }, [recommendedStartIn, dispatch]);
+  const startInMode = arm.startInMode ?? 'auto';
 
   const handleAdd = () => {
     if (ipInput.trim()) {
@@ -208,7 +206,49 @@ const JRControlPanel = (): JSX.Element => {
           드론 dance 시작 후 {recommendedStartIn}초 후 LED 가동 추천
         </Typography>
       )}
-      <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+      <FormControlLabel
+        control={
+          <Checkbox
+            size='small'
+            checked={startInMode === 'auto'}
+            onChange={(event) =>
+              dispatch(
+                setArmParams({
+                  startInMode: event.target.checked ? 'auto' : 'manual',
+                })
+              )
+            }
+          />
+        }
+        label='Start-in 자동 (쇼 path 값 따라감)'
+      />
+      <Stack
+        direction='row'
+        spacing={1}
+        flexWrap='wrap'
+        useFlexGap
+        alignItems='flex-start'
+      >
+        <TextField
+          size='small'
+          type='number'
+          label='Start in (s)'
+          value={startInMode === 'auto' ? recommendedStartIn ?? '' : arm.startIn}
+          onChange={(event) =>
+            dispatch(setArmParams({ startIn: Number(event.target.value) }))
+          }
+          disabled={startInMode === 'auto'}
+          error={startInMode === 'auto' && recommendedStartIn == null}
+          helperText={
+            startInMode === 'auto'
+              ? recommendedStartIn == null
+                ? 'path 없음'
+                : `path: ${recommendedStartIn}s`
+              : '직접 입력'
+          }
+          sx={{ width: 130 }}
+          slotProps={{ inputLabel: { shrink: true } }}
+        />
         {armFields.map((field) => (
           <TextField
             key={field.key}
