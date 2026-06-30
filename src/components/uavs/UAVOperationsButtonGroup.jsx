@@ -34,7 +34,8 @@ import {
 } from '~/features/uavs/actions';
 import { COMPASS_CALIB_UAV_LIMIT } from '~/features/uavs/constants';
 import { openUAVDetailsDialog } from '~/features/uavs/details';
-import { getUAVIdList } from '~/features/uavs/selectors';
+import { getUAVIdList, getUAVIdToStateMapping } from '~/features/uavs/selectors';
+import { summarizeShowStageFlightControlStatus } from '~/features/uavs/showStageStatus';
 import Bolt from '~/icons/Bolt';
 import { createUAVOperationThunks } from '~/utils/messaging';
 
@@ -125,12 +126,17 @@ const UAVOperationsButtonGroup = ({
   requestRemovalOfUAVsMarkedAsGone,
   reverseMissionMapping,
   selectedUAVIds,
+  showStageFlightControlStatus,
   size,
   startSeparator,
   t,
 }) => {
   const isSelectionEmpty = isEmpty(selectedUAVIds) && !broadcast;
   const isSelectionSingle = selectedUAVIds.length === 1 && !broadcast;
+  const isArmDisabled = Boolean(showStageFlightControlStatus?.armDisabled);
+  const armTooltip = showStageFlightControlStatus?.statusMessageKey
+    ? t(showStageFlightControlStatus.statusMessageKey)
+    : t('UAVOpButtonGrp.armMotors');
 
   const {
     calibrateCompass,
@@ -456,18 +462,22 @@ const UAVOperationsButtonGroup = ({
 
       {!hideSeparators && <ToolbarDivider orientation='vertical' />}
 
-      <Tooltip content={t('UAVOpButtonGrp.armMotors')}>
-        <IconButton
-          disabled={isSelectionEmpty}
-          size={iconSize}
-          onClick={turnMotorsOn}
-          sx={{ color: 'text.primary' }}
-        >
-          <PlayArrow
-            fontSize={fontSize}
-            htmlColor={isSelectionEmpty ? undefined : Colors.warning}
-          />
-        </IconButton>
+      <Tooltip content={armTooltip}>
+        <span>
+          <IconButton
+            disabled={isSelectionEmpty || isArmDisabled}
+            size={iconSize}
+            onClick={turnMotorsOn}
+            sx={{ color: 'text.primary' }}
+          >
+            <PlayArrow
+              fontSize={fontSize}
+              htmlColor={
+                isSelectionEmpty || isArmDisabled ? undefined : Colors.warning
+              }
+            />
+          </IconButton>
+        </span>
       </Tooltip>
 
       <Tooltip content={t('UAVOpButtonGrp.disarmMotors')}>
@@ -590,6 +600,12 @@ UAVOperationsButtonGroup.propTypes = {
   requestRemovalOfUAVsMarkedAsGone: PropTypes.func,
   reverseMissionMapping: PropTypes.object,
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
+  showStageFlightControlStatus: PropTypes.shape({
+    armDisabled: PropTypes.bool,
+    errorCount: PropTypes.number,
+    landedCount: PropTypes.number,
+    statusMessageKey: PropTypes.string,
+  }),
   hideFlightCommands: PropTypes.bool,
   hideSeparators: PropTypes.bool,
   size: PropTypes.oneOf(['small', 'medium']),
@@ -598,9 +614,19 @@ UAVOperationsButtonGroup.propTypes = {
 };
 
 export default connect(
-  (state) => ({
-    reverseMissionMapping: getReverseMissionMapping(state),
-  }),
+  (state, ownProps) => {
+    const targetUAVIds = ownProps.broadcast
+      ? getUAVIdList(state)
+      : ownProps.selectedUAVIds ?? [];
+
+    return {
+      reverseMissionMapping: getReverseMissionMapping(state),
+      showStageFlightControlStatus: summarizeShowStageFlightControlStatus(
+        targetUAVIds,
+        getUAVIdToStateMapping(state)
+      ),
+    };
+  },
   // mapDispatchToProps
   (dispatch) => ({
     ...bindActionCreators(

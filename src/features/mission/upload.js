@@ -76,7 +76,7 @@ export function transformMissionItemBeforeUpload(item, state) {
       return produce(item, (draft) => {
         draft.parameters.coordinateSystem = 'geodetic';
         draft.parameters.geofence =
-          getGeofenceSpecificationForWaypointMission(state);
+          getWaypointMissionGeofenceSpecification(state);
       });
 
     case MissionItemType.UPDATE_SAFETY:
@@ -108,7 +108,7 @@ export const getMissionItemUploadJobPayload = (state) => ({
  * the mission description that is to be sent to the server during the upload
  * task.
  */
-const getGeofenceSpecificationForWaypointMission = (state) => {
+export const getWaypointMissionGeofenceSpecification = (state) => {
   const geofenceAction = getGeofenceActionWithValidation(state);
   const geofencePolygon = getGeofencePolygonInWorldCoordinates(state);
   const exclusionZonePolygons = getExclusionZonePolygons(state);

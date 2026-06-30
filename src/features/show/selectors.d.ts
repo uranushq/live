@@ -56,6 +56,9 @@ export const getOutdoorShowToWorldCoordinateSystemTransformationObject: (
 export const getShowSegments: AppSelector<
   Partial<Record<ShowSegmentId, ShowSegment>> | undefined
 >;
+export const getShowClockReference: (state: RootState) => string | null;
+export const getShowDuration: (state: RootState) => number;
+export const getShowStartTime: (state: RootState) => number | null;
 export const getShowStartTimeAsString: (state: RootState) => string;
 export const getShowToFlatEarthCoordinateSystemTransformation: AppSelector<
   ((coords: Coordinate3D) => Coordinate3D) | undefined

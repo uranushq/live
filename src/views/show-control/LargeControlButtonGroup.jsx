@@ -66,11 +66,15 @@ import {
 
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
-import { getSelectedUAVIds } from '~/features/uavs/selectors';
+import { scheduleShowStartWithDelay } from '~/features/show/actions';
+
+import { getSelectedUAVIds, getShowStageFlightControlStatus } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
 
 import { formatCommandTargetDrones } from './formatCommandTargetDrones';
+
+import ShowStartDelayDialog from './ShowStartDelayDialog';
 
 
 
@@ -99,6 +103,22 @@ const useStyles = makeStyles((theme) => ({
     lineHeight: 1.3,
 
     minHeight: '2.6em',
+
+    textAlign: 'center',
+
+  },
+
+  stageStatusHint: {
+
+    color: theme.palette.warning.dark,
+
+    fontSize: '0.72rem',
+
+    fontWeight: 600,
+
+    letterSpacing: '0.01em',
+
+    lineHeight: 1.35,
 
     textAlign: 'center',
 
@@ -599,7 +619,7 @@ const chunkButtons = (buttons) => {
 
 
 
-const FlightDeckButton = ({ button, classes, label, hint, onClick }) => {
+const FlightDeckButton = ({ button, classes, disabled = false, hint, label, onClick }) => {
 
   const Icon = button.icon;
 
@@ -627,7 +647,9 @@ const FlightDeckButton = ({ button, classes, label, hint, onClick }) => {
 
       className={classes.deckButton}
 
-      onClick={onClick}
+      disabled={disabled}
+
+      onClick={disabled ? undefined : onClick}
 
       sx={{
 
@@ -637,9 +659,15 @@ const FlightDeckButton = ({ button, classes, label, hint, onClick }) => {
 
         color: foreground,
 
+        opacity: disabled ? 0.45 : 1,
+
         '&:hover': {
 
-          backgroundColor: parsedColor.darken(0.08).string(),
+          backgroundColor: disabled
+
+            ? button.color
+
+            : parsedColor.darken(0.08).string(),
 
         },
 
@@ -701,6 +729,8 @@ FlightDeckButton.propTypes = {
 
   classes: PropTypes.object.isRequired,
 
+  disabled: PropTypes.bool,
+
   hint: PropTypes.string,
 
   label: PropTypes.string.isRequired,
@@ -711,7 +741,7 @@ FlightDeckButton.propTypes = {
 
 
 
-const BottomBarCommandButton = ({ button, classes, label, onClick }) => {
+const BottomBarCommandButton = ({ button, classes, disabled = false, label, onClick }) => {
   const Icon = button.icon;
   const parsedColor = useMemo(() => createColor(button.color), [button.color]);
   const foreground = parsedColor.isLight()
@@ -722,13 +752,17 @@ const BottomBarCommandButton = ({ button, classes, label, onClick }) => {
     <ButtonBase
       aria-label={label}
       className={classes.bottomBarButton}
-      onClick={onClick}
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
       sx={{
         backgroundColor: button.color,
         border: `1px solid ${parsedColor.darken(0.15).alpha(0.3).string()}`,
         color: foreground,
+        opacity: disabled ? 0.45 : 1,
         '&:hover': {
-          backgroundColor: parsedColor.darken(0.06).string(),
+          backgroundColor: disabled
+            ? button.color
+            : parsedColor.darken(0.06).string(),
         },
       }}
     >
@@ -747,6 +781,7 @@ BottomBarCommandButton.propTypes = {
     key: PropTypes.string.isRequired,
   }).isRequired,
   classes: PropTypes.object.isRequired,
+  disabled: PropTypes.bool,
   label: PropTypes.string.isRequired,
   onClick: PropTypes.func.isRequired,
 };
@@ -759,7 +794,11 @@ const LargeControlButtonGroup = ({
 
   reverseMissionMapping,
 
+  scheduleShowStartWithDelay,
+
   selectedUAVIds,
+
+  showStageFlightControlStatus,
 
   t,
 
@@ -777,13 +816,45 @@ const LargeControlButtonGroup = ({
 
   const [pendingCommand, setPendingCommand] = useState(null);
 
+  const [showStartDelayOpen, setShowStartDelayOpen] = useState(false);
+
+  const stageStatusMessage = showStageFlightControlStatus?.statusMessageKey
+
+    ? t(showStageFlightControlStatus.statusMessageKey)
+
+    : null;
+
+  const isArmDisabled = Boolean(showStageFlightControlStatus?.armDisabled);
+
   const requestCommand = useCallback((commandKey) => {
+
+    if (commandKey === 'startShow') {
+
+      setShowStartDelayOpen(true);
+
+      return;
+
+    }
 
     setPendingCommand(commandKey);
 
     setConfirmOpen(true);
 
   }, []);
+
+  const handleShowStartDelayClose = useCallback(() => {
+
+    setShowStartDelayOpen(false);
+
+  }, []);
+
+  const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
+
+    scheduleShowStartWithDelay(delaySeconds);
+
+    setShowStartDelayOpen(false);
+
+  }, [scheduleShowStartWithDelay]);
 
   const handleConfirmClose = useCallback(() => {
 
@@ -850,12 +921,19 @@ const LargeControlButtonGroup = ({
   if (variant === 'bottomBar') {
     return (
       <Box className={classes.bottomBarDeck}>
+        {stageStatusMessage ? (
+          <Typography className={classes.stageStatusHint} variant='caption'>
+            {stageStatusMessage}
+          </Typography>
+        ) : null}
+
         <Box className={classes.bottomBarGrid}>
           {BOTTOM_BAR_BUTTONS.map((button) => (
             <BottomBarCommandButton
               key={button.key}
               button={button}
               classes={classes}
+              disabled={button.key === 'turnMotorsOn' && isArmDisabled}
               label={t(`largeControlButtonGroup.${button.labelKey}`)}
               onClick={() => requestCommand(button.key)}
             />
@@ -867,6 +945,12 @@ const LargeControlButtonGroup = ({
           message={confirmMessage}
           onConfirm={handleConfirmAction}
           onCancel={handleConfirmClose}
+        />
+
+        <ShowStartDelayDialog
+          open={showStartDelayOpen}
+          onCancel={handleShowStartDelayClose}
+          onConfirm={handleShowStartDelayConfirm}
         />
       </Box>
     );
@@ -928,13 +1012,20 @@ const LargeControlButtonGroup = ({
 
 
 
-      <Typography className={classes.modeHint} variant='caption'>
+      <Typography
+        className={
+          stageStatusMessage ? classes.stageStatusHint : classes.modeHint
+        }
+        variant='caption'
+      >
 
-        {broadcast
+        {stageStatusMessage ??
 
-          ? t('largeControlButtonGroup.targetBroadcast')
+          (broadcast
 
-          : t('largeControlButtonGroup.targetSelection')}
+            ? t('largeControlButtonGroup.targetBroadcast')
+
+            : t('largeControlButtonGroup.targetSelection'))}
 
       </Typography>
 
@@ -966,7 +1057,17 @@ const LargeControlButtonGroup = ({
 
                   classes={classes}
 
-                  hint={t(`largeControlButtonGroup.${button.hintKey}`)}
+                  disabled={button.key === 'turnMotorsOn' && isArmDisabled}
+
+                  hint={
+
+                    button.key === 'turnMotorsOn' && stageStatusMessage
+
+                      ? stageStatusMessage
+
+                      : t(`largeControlButtonGroup.${button.hintKey}`)
+
+                  }
 
                   label={t(`largeControlButtonGroup.${button.labelKey}`)}
 
@@ -996,6 +1097,12 @@ const LargeControlButtonGroup = ({
 
       />
 
+      <ShowStartDelayDialog
+        open={showStartDelayOpen}
+        onCancel={handleShowStartDelayClose}
+        onConfirm={handleShowStartDelayConfirm}
+      />
+
     </Box>
 
   );
@@ -1012,7 +1119,21 @@ LargeControlButtonGroup.propTypes = {
 
   reverseMissionMapping: PropTypes.object,
 
+  scheduleShowStartWithDelay: PropTypes.func.isRequired,
+
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
+
+  showStageFlightControlStatus: PropTypes.shape({
+
+    armDisabled: PropTypes.bool,
+
+    errorCount: PropTypes.number,
+
+    landedCount: PropTypes.number,
+
+    statusMessageKey: PropTypes.string,
+
+  }),
 
   t: PropTypes.func,
 
@@ -1040,6 +1161,8 @@ export default connect(
 
     selectedUAVIds: getSelectedUAVIds(state),
 
+    showStageFlightControlStatus: getShowStageFlightControlStatus(state),
+
   }),
 
   // mapDispatchToProps
@@ -1053,6 +1176,14 @@ export default connect(
         dispatch(setCommandsAreBroadcast(value === 'broadcast'));
 
       }
+
+    },
+
+
+
+    scheduleShowStartWithDelay: (delaySeconds) => {
+
+      dispatch(scheduleShowStartWithDelay(delaySeconds));
 
     },
 

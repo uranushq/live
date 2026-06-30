@@ -8,7 +8,7 @@ import Replay from '@mui/icons-material/Replay';
 import Save from '@mui/icons-material/Save';
 import Tooltip from '@mui/material/Tooltip';
 import PropTypes from 'prop-types';
-import React, { useState } from 'react';
+import React from 'react';
 
 const formatMs = (ms) => {
   const safe = Math.max(0, Math.round(Number(ms) || 0));
@@ -37,18 +37,11 @@ const panelSurface = {
   backdropFilter: 'blur(10px)',
 };
 
-function ActionIconButton({
-  title,
-  onClick,
-  disabled,
-  background,
-  iconColor,
-  children,
-}) {
+function ActionIconButton({ title, onClick, disabled, background, iconColor, children }) {
   return (
-    <Tooltip title={title} placement='top'>
+    <Tooltip title={title} placement="top">
       <button
-        type='button'
+        type="button"
         onClick={onClick}
         disabled={disabled}
         style={{
@@ -98,8 +91,6 @@ export default function PathControlPanel({
   isSendingPaths,
   pathDeliveryStatus,
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-
   const progress = Math.min(100, Math.max(0, Number(pathProgress) || 0));
 
   return (
@@ -144,8 +135,8 @@ export default function PathControlPanel({
       `}</style>
 
       <input
-        type='file'
-        accept='application/json'
+        type="file"
+        accept="application/json"
         ref={fileInputRef}
         style={{ display: 'none' }}
         onChange={onFileChange}
@@ -186,183 +177,156 @@ export default function PathControlPanel({
 
         <div
           style={{
-            marginBottom: collapsed ? 0 : 12,
+            pointerEvents: 'auto',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
+            gap: 14,
+            width: '100%',
+            padding: '8px 12px',
+            borderRadius: 10,
+            ...panelSurface,
           }}
         >
-          <div
-            role='button'
-            tabIndex={0}
-            onClick={() => setCollapsed((v) => !v)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setCollapsed((v) => !v);
-              }
-            }}
-            style={{ cursor: 'pointer', userSelect: 'none', flex: 1 }}
-            title={collapsed ? '펼치기' : '접기'}
-          >
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 13,
-                letterSpacing: 0.2,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <span
-                style={{
-                  display: 'inline-block',
-                  transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.15s ease',
-                  fontSize: 10,
-                  opacity: 0.8,
-                }}
-              >
-                ▼
-              </span>
-              Path Control
-            </div>
-            <div style={{ opacity: 0.66, fontSize: 11, marginTop: 1 }}>
-              {playbackSourceLabel} · {droneCount}대
-            </div>
-          </div>
-          {!collapsed && (
-            <button
-              type='button'
-              onClick={onAddDroneClick}
-              style={{
-                padding: '6px 11px',
-                borderRadius: 8,
-                border: '1px solid rgba(96,173,255,0.72)',
-                background:
-                  'linear-gradient(140deg, rgba(56,141,255,0.32), rgba(40,104,194,0.34))',
-                color: '#d8ecff',
-                cursor: 'pointer',
-                fontSize: 11.5,
-                fontWeight: 600,
-                letterSpacing: 0.2,
-              }}
-            >
-              + 드론
-            </button>
-          )}
-        </div>
-        {!collapsed && (
-          <>
+          <Tooltip title="LED 시뮬레이션과 동기화" placement="top">
             <label
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
-                marginBottom: 10,
+                gap: 6,
+                flexShrink: 0,
+                paddingRight: 8,
+                borderRight: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.75)',
                 cursor: 'pointer',
                 userSelect: 'none',
-                fontSize: 11.5,
+                whiteSpace: 'nowrap',
               }}
             >
               <input
-                type='checkbox'
+                type="checkbox"
                 checked={ledSyncEnabled}
                 onChange={(e) => onLedSyncToggle(e.target.checked)}
                 style={{ accentColor: '#67b4ff', cursor: 'pointer' }}
               />
-              <span style={{ opacity: 0.9 }}>LED 시뮬레이션과 동기화</span>
+              LED 동기화
             </label>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ marginBottom: 4, fontSize: 11.5, opacity: 0.84 }}>
-                재생 위치
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input
-                  type='range'
-                  className='path-control-range'
-                  min='0'
-                  max='100'
-                  step='0.1'
-                  value={pathProgress}
-                  onChange={(e) => onPathProgressChange(e.target.value)}
-                />
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    fontSize: 10,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  <span>{formatMs(currentPositionMs)}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.65)' }}>
-                    {playbackSourceLabel} · {droneCount}대
-                  </span>
-                  <span>{formatMs(totalDurationMs)}</span>
-                </div>
-              </div>
+          </Tooltip>
 
-              <div
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <Tooltip title={isPlaybackRunning ? '일시정지' : '재생'} placement="top">
+              <button
+                type="button"
+                onClick={isPlaybackRunning ? onPausePlayback : onPlayAll}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  flexShrink: 0,
-                  paddingLeft: 8,
-                  borderLeft: '1px solid rgba(255,255,255,0.08)',
+                  ...iconButtonStyle,
+                  width: 34,
+                  height: 34,
+                  background: 'rgba(255, 255, 255, 0.14)',
                 }}
               >
-                <ActionIconButton
-                  title='불러오기'
-                  onClick={onLoadConfigClick}
-                  background='transparent'
-                  iconColor='rgba(255,255,255,0.65)'
-                >
-                  <FolderOpen />
-                </ActionIconButton>
-                <ActionIconButton
-                  title='저장'
-                  onClick={onSaveConfigClick}
-                  background='transparent'
-                  iconColor='rgba(255,255,255,0.65)'
-                >
-                  <Save />
-                </ActionIconButton>
-                <ActionIconButton
-                  title='드론 추가'
-                  onClick={onAddDroneClick}
-                  background='transparent'
-                  iconColor='rgba(255,255,255,0.65)'
-                >
-                  <Add />
-                </ActionIconButton>
-                <ActionIconButton
-                  title={
-                    isSendingPaths ? '다운로드 중...' : '.skyc 저장 (로컬)'
-                  }
-                  onClick={onSendPathsClick}
-                  disabled={isSendingPaths}
-                  background='transparent'
-                  iconColor='rgba(255,255,255,0.65)'
-                >
-                  <Download />
-                </ActionIconButton>
-                <ActionIconButton
-                  title='설정 초기화'
-                  onClick={onResetPanelSettings}
-                  background='transparent'
-                  iconColor='rgba(255,255,255,0.65)'
-                >
-                  <DeleteOutline />
-                </ActionIconButton>
-              </div>
+                {isPlaybackRunning ? (
+                  <Pause sx={{ fontSize: 18, color: '#fff' }} />
+                ) : (
+                  <PlayArrow sx={{ fontSize: 20, color: '#fff', ml: '1px' }} />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip title="원위치" placement="top">
+              <button
+                type="button"
+                onClick={onResetAll}
+                style={{
+                  ...iconButtonStyle,
+                  background: 'rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <Replay sx={{ fontSize: 17, color: 'rgba(255,255,255,0.7)' }} />
+              </button>
+            </Tooltip>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <input
+              type="range"
+              className="path-control-range"
+              min="0"
+              max="100"
+              step="0.1"
+              value={pathProgress}
+              onChange={(e) => onPathProgressChange(e.target.value)}
+            />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                color: 'rgba(255, 255, 255, 0.5)',
+                fontSize: 10,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              <span>{formatMs(currentPositionMs)}</span>
+              <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+                {playbackSourceLabel} · {droneCount}대
+              </span>
+              <span>{formatMs(totalDurationMs)}</span>
             </div>
-          </>
-        )}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              flexShrink: 0,
+              paddingLeft: 8,
+              borderLeft: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <ActionIconButton
+              title="불러오기"
+              onClick={onLoadConfigClick}
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
+            >
+              <FolderOpen />
+            </ActionIconButton>
+            <ActionIconButton
+              title="저장"
+              onClick={onSaveConfigClick}
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
+            >
+              <Save />
+            </ActionIconButton>
+            <ActionIconButton
+              title="드론 추가"
+              onClick={onAddDroneClick}
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
+            >
+              <Add />
+            </ActionIconButton>
+            <ActionIconButton
+              title={isSendingPaths ? '다운로드 중...' : '.skyc 저장 (로컬)'}
+              onClick={onSendPathsClick}
+              disabled={isSendingPaths}
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
+            >
+              <Download />
+            </ActionIconButton>
+            <ActionIconButton
+              title="설정 초기화"
+              onClick={onResetPanelSettings}
+              background="transparent"
+              iconColor="rgba(255,255,255,0.65)"
+            >
+              <DeleteOutline />
+            </ActionIconButton>
+          </div>
+        </div>
       </div>
     </>
   );
@@ -370,8 +334,7 @@ export default function PathControlPanel({
 
 PathControlPanel.propTypes = {
   fileInputRef: PropTypes.shape({ current: PropTypes.any }).isRequired,
-  pathProgress: PropTypes.oneOfType([PropTypes.number, PropTypes.string])
-    .isRequired,
+  pathProgress: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
   onPathProgressChange: PropTypes.func.isRequired,
   currentPositionMs: PropTypes.number.isRequired,
   totalDurationMs: PropTypes.number.isRequired,

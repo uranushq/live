@@ -1,3 +1,4 @@
+import { add, getUnixTime, startOfSecond } from 'date-fns';
 import { Base64 } from 'js-base64';
 import ky from 'ky';
 import get from 'lodash-es/get';
@@ -87,6 +88,24 @@ export const authorizeIfAndOnlyIfHasStartTime = () => (dispatch, getState) => {
   if (shouldAuthorize) {
     dispatch(setCommandsAreBroadcast(true));
   }
+};
+
+/**
+ * Schedules the show to start automatically after the given delay in seconds.
+ */
+export const scheduleShowStartWithDelay = (delaySeconds) => (dispatch) => {
+  const seconds = Math.max(0, Math.floor(Number(delaySeconds)) || 0);
+
+  dispatch(setStartMethod(StartMethod.AUTO));
+  dispatch(
+    setStartTime({
+      clock: undefined,
+      time: getUnixTime(startOfSecond(add(Date.now(), { seconds }))),
+    })
+  );
+  dispatch(setShowAuthorization(true));
+  dispatch(setCommandsAreBroadcast(true));
+  dispatch(synchronizeShowSettings('toServer'));
 };
 
 /**

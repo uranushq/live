@@ -148,7 +148,7 @@ const descriptions: Record<UAVErrorCode, string> = {
   [UAVErrorCode.AUTOPILOT_INITIALIZING]: 'Autopilot initializing',
   [UAVErrorCode.TAKEOFF]: 'Drone is taking off',
   [UAVErrorCode.LANDING]: 'Drone is landing',
-  [UAVErrorCode.LANDED]: 'Drone has landed successfully',
+  [UAVErrorCode.LANDED]: 'Landing complete; show start required',
   [UAVErrorCode.MOTORS_RUNNING_WHILE_ON_GROUND]:
     'Motors are running while on ground',
   [UAVErrorCode.SLEEPING]: 'Drone is in sleep mode',
@@ -181,7 +181,7 @@ const descriptions: Record<UAVErrorCode, string> = {
   [UAVErrorCode.BATTERY_LOW_ERROR]: 'Battery low',
   [UAVErrorCode.TARGET_NOT_FOUND]: 'Target not found',
   [UAVErrorCode.TARGET_TOO_FAR]: 'Target is too far',
-  [UAVErrorCode.CONFIGURATION_ERROR]: 'Configuration error',
+  [UAVErrorCode.CONFIGURATION_ERROR]: 'Reboot or switch LOITER→SHOW',
   [UAVErrorCode.RC_NOT_CALIBRATED]: 'RC not calibrated',
   [UAVErrorCode.WIND_SPEED_ERROR]: 'Wind speed is too high',
   [UAVErrorCode.PAYLOAD_ERROR]: 'Payload error',

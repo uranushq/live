@@ -248,11 +248,15 @@ export const getProposedDistanceLimit: AppSelector<number | undefined> = (
 
   switch (missionType) {
     case MissionType.SHOW:
-      return proposeDistanceLimit(maxDistance, margin);
     case MissionType.WAYPOINT:
-      return maxGeofence === undefined
-        ? proposeDistanceLimit(maxDistance, margin)
-        : proposeDistanceLimit(maxGeofence, 0);
+      if (maxGeofence !== undefined) {
+        return proposeDistanceLimit(
+          Math.max(maxGeofence, maxDistance ?? 0),
+          0
+        );
+      }
+
+      return proposeDistanceLimit(maxDistance, margin);
 
     default:
       console.warn(

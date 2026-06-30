@@ -33,6 +33,10 @@ import {
   getUAVById,
 } from '~/features/uavs/selectors';
 import {
+  getShowStageStatusLabelKey,
+  getShowStageStatusMessageKey,
+} from '~/features/uavs/showStageStatus';
+import {
   getUavAlert,
   getUavAlertPillStyle,
   resolveUavAlertBatteryPercentage,
@@ -292,6 +296,7 @@ const DroneStatusOverlayPresentation = ({
   linked,
   mode,
   pathUploaded,
+  statusHint,
   statusLabel,
   statusStyle,
 }) => {
@@ -411,6 +416,21 @@ const DroneStatusOverlayPresentation = ({
 
       <StatusBadge label={displayStatus} style={statusStyle} />
 
+      {statusHint ? (
+        <Box
+          sx={{
+            color: PANEL.muted,
+            fontSize: 10.5,
+            fontWeight: 600,
+            lineHeight: 1.35,
+            mb: 1,
+            textAlign: 'center',
+          }}
+        >
+          {statusHint}
+        </Box>
+      ) : null}
+
       <Box
         sx={{
           display: 'grid',
@@ -485,6 +505,7 @@ DroneStatusOverlayPresentation.propTypes = {
   linked: PropTypes.bool,
   mode: PropTypes.string,
   pathUploaded: PropTypes.bool,
+  statusHint: PropTypes.string,
   statusLabel: PropTypes.string,
   statusStyle: PropTypes.object,
 };
@@ -547,7 +568,10 @@ export default connect((state, { drone }) => {
     gpsNumSatellites: uav.gpsFix?.numSatellites,
     mode: uav.mode,
     pathUploaded: isPathUploadedForUav(uav, uploadStatus, pathUploadContext),
-    statusLabel: summary.details || summary.text,
+    statusHint: getShowStageStatusMessageKey(uav) ? summary.details : undefined,
+    statusLabel: getShowStageStatusLabelKey(uav)
+      ? summary.text
+      : summary.details || summary.text,
     statusStyle:
       summary.vehicleModePillStyle ?? pillStyleFromSemantics(summary.textSemantics),
   };

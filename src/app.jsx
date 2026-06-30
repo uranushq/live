@@ -46,6 +46,7 @@ import {
 } from './features/workbench/selectors';
 import BottomFlightControlBar from './views/show-control/BottomFlightControlBar';
 import ShowFileWatcher from './views/show-control/ShowFileWatcher';
+import ShowTimerOverlay from './views/show-control/ShowTimerOverlay';
 
 import { ErrorHandler } from './error-handling';
 import flock, { Flock } from './flock';
@@ -78,12 +79,22 @@ const rootStyle = {
   height: '100%',
 };
 
+const workbenchAreaStyle = {
+  display: 'flex',
+  flex: '1 1 auto',
+  flexDirection: 'column',
+  minHeight: 0,
+  position: 'relative',
+  width: '100%',
+};
+
 const rootInnerStyle = {
   alignItems: 'stretch',
   contain: 'size',
   display: 'flex',
   flex: '1 1 auto',
   minHeight: 0,
+  width: '100%',
 };
 
 /**
@@ -199,7 +210,10 @@ const App = ({ onFirstRender }) => (
 
       <div style={rootStyle}>
         <Header perspectives={perspectives} workbench={workbench} />
-        <WorkbenchContainer />
+        <div style={workbenchAreaStyle}>
+          <WorkbenchContainer />
+          <ShowTimerOverlay />
+        </div>
         <BottomFlightControlBar />
         {config?.ribbon?.label && <CornerRibbon {...config.ribbon} />}
         <PendingUAVIdOverlay />

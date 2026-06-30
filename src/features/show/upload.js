@@ -1,8 +1,10 @@
 import isNil from 'lodash-es/isNil';
 import { CANCEL } from 'redux-saga';
+import { COORDINATE_SYSTEM_TYPE } from '@skybrush/show-format';
 
 import {
   getGeofenceActionWithValidation,
+  getGeofencePolygonInWorldCoordinates,
   getReverseMissionMapping,
 } from '~/features/mission/selectors';
 import { GeofenceAction } from '~/features/safety/model';
@@ -12,6 +14,7 @@ import {
 } from '~/features/safety/selectors';
 import { JobScope } from '~/features/upload/jobs';
 import messageHub from '~/message-hub';
+import { FlatEarthCoordinateSystem } from '~/utils/geography';
 
 import { JOB_TYPE } from './constants';
 import {
@@ -24,14 +27,12 @@ import {
   isShowOutdoor,
 } from './selectors';
 
-/**
- * Retrieves a complete geofence specification object that is to be used in
- * the show specification that is to be sent to the server during the upload
- * task.
- */
-const getGeofenceSpecificationForShow = (state) => {
-  const geofenceAction = getGeofenceActionWithValidation(state);
-  const geofencePolygon = getGeofencePolygonInShowCoordinates(state);
+const buildGeofenceSpecification = ({
+  geofenceAction,
+  geofencePolygon,
+  maxAltitude,
+  maxDistance,
+}) => {
   const geofence = {
     version: 1,
     enabled: true,
@@ -44,8 +45,8 @@ const getGeofenceSpecificationForShow = (state) => {
         ]
       : [],
     rallyPoints: [],
-    maxAltitude: getUserDefinedHeightLimit(state),
-    maxDistance: getUserDefinedDistanceLimit(state),
+    maxAltitude,
+    maxDistance,
   };
 
   if (geofenceAction !== GeofenceAction.KEEP_CURRENT) {
@@ -54,6 +55,81 @@ const getGeofenceSpecificationForShow = (state) => {
 
   return geofence;
 };
+
+/**
+ * Resolves the flat Earth coordinate system to use for a geofence upload.
+ * Falls back to the map origin when the show origin has not been configured
+ * yet (for example, when no show file is loaded).
+ */
+function resolveCoordinateSystemForGeofenceUpload(state) {
+  const showCoordinateSystem = getOutdoorShowCoordinateSystem(state);
+  if (showCoordinateSystem?.origin) {
+    return showCoordinateSystem;
+  }
+
+  const { position, angle, type } = state.map.origin ?? {};
+  if (position) {
+    return {
+      type: type ?? COORDINATE_SYSTEM_TYPE,
+      origin: position,
+      orientation: String(angle ?? 0),
+    };
+  }
+
+  throw new Error(
+    'Set the show origin or map origin before uploading the geofence'
+  );
+}
+
+/**
+ * Retrieves a complete geofence specification object that is to be used in
+ * the show specification that is to be sent to the server during the upload
+ * task.
+ */
+const getGeofenceSpecificationForShow = (state) => {
+  const geofenceAction = getGeofenceActionWithValidation(state);
+  const geofencePolygon = getGeofencePolygonInShowCoordinates(state);
+
+  return buildGeofenceSpecification({
+    geofenceAction,
+    geofencePolygon,
+    maxAltitude: getUserDefinedHeightLimit(state),
+    maxDistance: getUserDefinedDistanceLimit(state),
+  });
+};
+
+const getGeofenceSpecificationForCoordinateSystem = (state, coordinateSystem) => {
+  const geofenceAction = getGeofenceActionWithValidation(state);
+  const geofencePolygon = getGeofencePolygonInWorldCoordinates(state);
+  const transform = new FlatEarthCoordinateSystem(coordinateSystem);
+
+  return buildGeofenceSpecification({
+    geofenceAction,
+    geofencePolygon: geofencePolygon?.map((point) => transform.fromLonLat(point)),
+    maxAltitude: getUserDefinedHeightLimit(state),
+    maxDistance: getUserDefinedDistanceLimit(state),
+  });
+};
+
+/**
+ * Builds the geofence-only upload payload for show missions.
+ */
+export function getShowMissionGeofenceUploadSpecification(state) {
+  if (!isShowOutdoor(state)) {
+    throw new Error('Geofence upload is supported for outdoor shows only');
+  }
+
+  const coordinateSystem = resolveCoordinateSystemForGeofenceUpload(state);
+
+  return {
+    version: 1,
+    coordinateSystem,
+    geofence: getGeofenceSpecificationForCoordinateSystem(
+      state,
+      coordinateSystem
+    ),
+  };
+}
 
 /**
  * Selector that constructs the show description to be uploaded to a
