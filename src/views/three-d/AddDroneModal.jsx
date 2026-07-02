@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ReactDOM from 'react-dom';
 import PropTypes from 'prop-types';
 
 const STATUS_OPTIONS = ['Idle', 'Flying', 'Charging', 'Returning'];
@@ -111,9 +112,10 @@ const modalStyle = {
   borderRadius: 16,
   color: '#f3f8ff',
   width: 'min(760px, 100%)',
+  maxHeight: 'calc(100vh - 32px)',
   border: '1px solid rgba(126, 200, 255, 0.22)',
   boxShadow: '0 20px 48px rgba(0, 0, 0, 0.48)',
-  overflow: 'hidden',
+  overflowY: 'auto',
 };
 
 const fieldLabelStyle = {
@@ -504,7 +506,7 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
     if (e.key === 'Escape') onClose();
   };
 
-  return (
+  return ReactDOM.createPortal(
     <div
       style={modalOverlayStyle}
       onClick={(e) => {
@@ -767,7 +769,8 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
