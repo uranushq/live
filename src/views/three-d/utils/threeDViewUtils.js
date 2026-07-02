@@ -1,3 +1,5 @@
+import { getVelocitySmoothing } from './pathSmoothing';
+
 export const getEffectiveScenery = (state, getSceneryForThreeDView, isShowIndoor) => {
   const scenery = getSceneryForThreeDView(state);
   if (scenery === 'auto') {
@@ -84,10 +86,35 @@ const findSegmentForTimestamp = (points, timestampMs) => {
   return { from: last, to: last, ratio: 0 };
 };
 
+// Evaluate a Bézier curve (control points including endpoints) at `ratio` via
+// de Casteljau. Used so the 3D preview follows the eased trajectory curve
+// instead of a straight constant-speed line between keyframes.
+const evaluateBezier = (controlPoints, ratio) => {
+  let pts = controlPoints.map((p) => [Number(p[0]), Number(p[1]), Number(p[2])]);
+  while (pts.length > 1) {
+    const next = [];
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      next.push([
+        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * ratio,
+        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * ratio,
+        pts[i][2] + (pts[i + 1][2] - pts[i][2]) * ratio,
+      ]);
+    }
+    pts = next;
+  }
+  return pts[0];
+};
+
 const getPositionAtTimestamp = (points, timestampMs) => {
   const segment = findSegmentForTimestamp(points, timestampMs);
   if (!segment) return null;
   const { from, to, ratio } = segment;
+  // Control points live on the *end* keyframe of the segment (Skybrush format).
+  // With them, the segment is a Bézier; without them it is a straight line.
+  const controls = Array.isArray(to.controls) ? to.controls : [];
+  if (controls.length > 0) {
+    return evaluateBezier([from.position, ...controls, to.position], ratio);
+  }
   return [
     Number(from.position[0]) + (Number(to.position[0]) - Number(from.position[0])) * ratio,
     Number(from.position[1]) + (Number(to.position[1]) - Number(from.position[1])) * ratio,
@@ -149,7 +176,12 @@ export const convertTrajectoryToPlaybackPath = (
       const timestampMs = Math.max(0, Number(keyframe[0]) || 0) * 1000;
       const position = transform(keyframe[1]);
       if (!position) return null;
-      return { timestampMs: takeoffTimeMs + timestampMs, position };
+      // Carry Bézier control points (if any) so playback follows the eased
+      // curve rather than a straight line between keyframes.
+      const controls = Array.isArray(keyframe[2])
+        ? keyframe[2].map((c) => transform(c)).filter(Boolean)
+        : [];
+      return { timestampMs: takeoffTimeMs + timestampMs, position, controls };
     })
     .filter(Boolean)
     .sort((a, b) => a.timestampMs - b.timestampMs);
@@ -668,6 +700,7 @@ export const buildPathDeliveryPayloadFromConfig = (baseConfig) => {
           return nextPoint;
         }),
       })),
+    velocity_smoothing: getVelocitySmoothing(),
     output: 'skyc',
     download: true,
   };

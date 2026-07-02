@@ -7,6 +7,7 @@ if (!AFrame.components['drone-move-bridge']) {
     init() {
       this._onMove = this._onMove.bind(this);
       this._onPath = this._onPath.bind(this);
+      this._onStop = this._onStop.bind(this);
       this._onInitialPosSet = this._onInitialPosSet.bind(this);
       this._onYawSet = this._onYawSet.bind(this);
       // 드론별로 경로 애니메이션 취소 함수를 따로 관리
@@ -14,6 +15,7 @@ if (!AFrame.components['drone-move-bridge']) {
       this._currentYawAnimationFrames = {};
       window.addEventListener('drone-move-request', this._onMove);
       window.addEventListener('drone-path-request', this._onPath);
+      window.addEventListener('drone-path-stop', this._onStop);
       window.addEventListener('drone-initial-pos-set', this._onInitialPosSet);
       window.addEventListener('drone-yaw-set', this._onYawSet);
     },
@@ -21,6 +23,7 @@ if (!AFrame.components['drone-move-bridge']) {
     remove() {
       window.removeEventListener('drone-move-request', this._onMove);
       window.removeEventListener('drone-path-request', this._onPath);
+      window.removeEventListener('drone-path-stop', this._onStop);
       window.removeEventListener('drone-initial-pos-set', this._onInitialPosSet);
       window.removeEventListener('drone-yaw-set', this._onYawSet);
 
@@ -42,6 +45,30 @@ if (!AFrame.components['drone-move-bridge']) {
         });
         this._currentYawAnimationFrames = {};
       }
+    },
+
+    // Freeze drones where they currently are by cancelling any running path
+    // animation (and yaw ramp). Used for pause: the React progress-bar clock
+    // stops separately, so without this the A-Frame motion would keep going and
+    // the drones would drift on to the next waypoint despite the "paused" bar.
+    _onStop(event) {
+      const ids = event?.detail?.ids;
+      const targetIds =
+        Array.isArray(ids) && ids.length
+          ? ids.map(String)
+          : Object.keys(this._currentPathCancels || {});
+      targetIds.forEach((id) => {
+        const cancel = this._currentPathCancels && this._currentPathCancels[id];
+        if (typeof cancel === 'function') {
+          try {
+            cancel();
+          } catch {
+            // ignore
+          }
+        }
+        if (this._currentPathCancels) this._currentPathCancels[id] = undefined;
+        this._cancelYawAnimation(id);
+      });
     },
 
     _findDrone(id) {
@@ -417,7 +444,11 @@ if (!AFrame.components['drone-move-bridge']) {
           from,
           to,
           dur: segDur,
-          easing: 'easeInOutQuad',
+          // Linear per-segment: the trajectory's own speed profile (Bézier
+          // easing, sampled into the path points) already encodes accel/decel.
+          // Using easeInOutQuad here would re-ease every sub-segment and make
+          // the drone briefly stop at each sampled point (visible stutter).
+          easing: 'linear',
           loop: 0,
         });
         currentFrom = { x, y, z };

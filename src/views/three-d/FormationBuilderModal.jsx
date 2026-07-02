@@ -1,6 +1,11 @@
 import PropTypes from 'prop-types';
 import React, { useMemo, useState } from 'react';
 
+import {
+  getVelocitySmoothing,
+  setVelocitySmoothing,
+} from './utils/pathSmoothing';
+
 const DEFAULT_URL = '/api/v1/path-planner/plan';
 
 const round3 = (value) => Math.round(Number(value) * 1000) / 1000;
@@ -66,6 +71,12 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
   const [output, setOutput] = useState('path');
   const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
+  // Global default shared with PathGeneratorModal (persisted to localStorage).
+  const [smoothing, setSmoothing] = useState(getVelocitySmoothing());
+
+  const handleSmoothingChange = (value) => {
+    setSmoothing(setVelocitySmoothing(value));
+  };
 
   const droneCountLabel = `${droneIds.length}대`;
 
@@ -134,6 +145,7 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
         Number.isFinite(Number(durationMs)) && Number(durationMs) > 0 ? Number(durationMs) : 1000,
       takeoff_time:
         Number.isFinite(Number(takeoffTime)) && Number(takeoffTime) >= 0 ? Number(takeoffTime) : 5,
+      velocity_smoothing: smoothing,
       auto_upload: !!autoUpload,
       output,
     };
@@ -287,6 +299,37 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
             marginTop: 10,
             paddingTop: 10,
             borderTop: '1px solid rgba(255,255,255,0.16)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <span style={{ fontSize: 12, opacity: 0.82, whiteSpace: 'nowrap' }}>
+            속도 부드럽게 (공통 기본값)
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={smoothing}
+            onChange={(e) => handleSmoothingChange(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <input
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            value={smoothing}
+            onChange={(e) => handleSmoothingChange(e.target.value)}
+            style={{ ...inputStyle, width: 72, flex: 'none' }}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 8,
             display: 'grid',
             gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
             gap: 8,

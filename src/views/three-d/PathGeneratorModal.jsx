@@ -1,6 +1,11 @@
 import PropTypes from 'prop-types';
 import React, { useMemo, useState } from 'react';
 
+import {
+  getVelocitySmoothing,
+  setVelocitySmoothing,
+} from './utils/pathSmoothing';
+
 const DEFAULT_PATH_PLANNER_URL = 'http://localhost:5001/api/v1/path-planner/plan';
 
 const tryParseJsonResponse = async (response) => {
@@ -223,6 +228,13 @@ export default function PathGeneratorModal({ open, onClose }) {
   const [isRequesting, setIsRequesting] = useState(false);
   const [requestStatus, setRequestStatus] = useState('');
   const [previewData, setPreviewData] = useState({ initial: [], target: [] });
+  // Global default (shared with FormationBuilderModal, persisted to localStorage).
+  const [smoothing, setSmoothing] = useState(getVelocitySmoothing());
+
+  const handleSmoothingChange = (value) => {
+    const clamped = setVelocitySmoothing(value);
+    setSmoothing(clamped);
+  };
 
   const summary = useMemo(
     () => `initial ${previewData.initial.length}개 / target ${previewData.target.length}개`,
@@ -316,6 +328,56 @@ export default function PathGeneratorModal({ open, onClose }) {
             }}
           />
         </div>
+        <div style={{ marginTop: 10 }}>
+          <div
+            style={{
+              fontSize: 12,
+              opacity: 0.82,
+              marginBottom: 6,
+              display: 'flex',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>속도 부드럽게 (가감속) — 모든 경로 공통 기본값</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {smoothing.toFixed(2)}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type='range'
+              min={0}
+              max={1}
+              step={0.05}
+              value={smoothing}
+              onChange={(e) => handleSmoothingChange(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              type='number'
+              min={0}
+              max={1}
+              step={0.05}
+              value={smoothing}
+              onChange={(e) => handleSmoothingChange(e.target.value)}
+              style={{
+                width: 72,
+                background: 'rgba(245,250,255,0.08)',
+                border: '1px solid rgba(130,190,255,0.24)',
+                borderRadius: 8,
+                color: '#ecf5ff',
+                padding: '6px 8px',
+                fontSize: 12.5,
+                boxSizing: 'border-box',
+                outline: 'none',
+              }}
+            />
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11, opacity: 0.6 }}>
+            0 = 기존 등속(관성 있음) · 1 = 최대(코너 완전 정지). 출발·도착·정지 지점은
+            항상 부드럽게 가감속합니다.
+          </div>
+        </div>
         {error && (
           <div
             style={{
@@ -396,6 +458,7 @@ export default function PathGeneratorModal({ open, onClose }) {
                       target: payload.target,
                       step_size,
                       duration_ms,
+                      velocity_smoothing: smoothing,
                       output: 'skyc',
                       download: true,
                     }),

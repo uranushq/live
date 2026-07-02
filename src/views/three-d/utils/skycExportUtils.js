@@ -1,14 +1,176 @@
 import { Base64 } from 'js-base64';
 import JSZip from 'jszip';
 
+import { getVelocitySmoothing } from './pathSmoothing';
 import { getPathPointArrivalTimesMs, toFiniteHoldMs } from './threeDViewUtils';
 
 const MS_TO_SEC = 0.001;
 const TIME_ROUND_DECIMALS = 6;
 
+// Direction change above which a waypoint is treated as a "corner" where speed
+// must ramp down. Mirrors CORNER_ANGLE_THRESHOLD_DEG in the path-planner backend.
+const CORNER_ANGLE_THRESHOLD_DEG = 5.0;
+
 const roundSeconds = (value) => {
   const factor = 10 ** TIME_ROUND_DECIMALS;
   return Math.round(value * factor) / factor;
+};
+
+const round4 = (value) => Math.round(value * 10000) / 10000;
+
+const positionToXYZ = (pos) => {
+  if (Array.isArray(pos)) {
+    return [Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0];
+  }
+  if (isObjectCoordinate(pos)) {
+    return [Number(pos.x) || 0, Number(pos.y) || 0, Number(pos.z) || 0];
+  }
+  return [0, 0, 0];
+};
+
+// Build a control point in the same shape (array vs {x,y,z}) as the keyframe's
+// position, so the patched trajectory keeps the file's existing convention.
+const makeControlLike = (positionTemplate, xyz) => {
+  const rounded = [round4(xyz[0]), round4(xyz[1]), round4(xyz[2])];
+  if (isObjectCoordinate(positionTemplate)) {
+    return { x: rounded[0], y: rounded[1], z: rounded[2] };
+  }
+  return rounded;
+};
+
+/**
+ * Merge consecutive same-direction (collinear) segments into one. When A, B, C
+ * are collinear and travelled the same way, the middle keyframe B is dropped so
+ * A→C becomes a single straight segment (kept keyframes keep their timestamps,
+ * so the run still spans the full A→C duration). This lets the smoothing ease
+ * once over the whole straight run instead of per short sub-segment. Corners,
+ * holds (zero-length segments) and the ends always break a run.
+ */
+const mergeCollinearRuns = (points, angleThresholdDeg = CORNER_ANGLE_THRESHOLD_DEG) => {
+  const n = points.length;
+  if (n < 3) return points;
+
+  const unit = (a, b) => {
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const L = Math.hypot(d[0], d[1], d[2]);
+    if (L <= 1e-9) return null;
+    return [d[0] / L, d[1] / L, d[2] / L];
+  };
+  const cosThreshold = Math.cos((angleThresholdDeg * Math.PI) / 180);
+
+  const result = [points[0]];
+  for (let i = 1; i < n; i += 1) {
+    if (result.length >= 2) {
+      const a = positionToXYZ(result[result.length - 2][1]);
+      const b = positionToXYZ(result[result.length - 1][1]);
+      const c = positionToXYZ(points[i][1]);
+      const u1 = unit(a, b);
+      const u2 = unit(b, c);
+      if (u1 && u2) {
+        const dot = u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2];
+        if (dot >= cosThreshold) {
+          // collinear & same direction -> drop middle keyframe, extend run
+          result[result.length - 1] = points[i];
+          continue;
+        }
+      }
+    }
+    result.push(points[i]);
+  }
+
+  return result;
+};
+
+/**
+ * Give the trajectory a smooth speed profile by replacing each moving segment's
+ * control points with a cubic Bézier whose interior control points lie ON the
+ * straight line between the keyframes. Geometry is unchanged (the path is still
+ * the same straight dot-to-dot line); only the speed along it changes. This is a
+ * faithful port of `_apply_velocity_smoothing` in the path-planner backend so
+ * the local .skyc patch and the server-generated shows behave identically.
+ *
+ * Mutates and returns `points` (each entry is `[timeSec, position, controls]`).
+ * `smoothing` in [0, 1]: 0 clears controls (constant-velocity linear segments);
+ * >0 ramps speed to/from zero at the start, end and holds; larger values also
+ * slow down more at direction-change corners.
+ */
+const applyVelocitySmoothingToPoints = (points, smoothing) => {
+  if (!(smoothing > 0) || points.length < 2) {
+    // Disabled: make every segment linear (drop any stale control points).
+    for (const p of points) p[2] = [];
+    return points;
+  }
+  const s = Math.min(1, smoothing);
+
+  // Merge collinear runs so A→B→C (same direction) becomes one A→C segment;
+  // the ease then ramps up once at the run start and down once at its end.
+  const merged = mergeCollinearRuns(points);
+  const n = merged.length;
+
+  const pos = merged.map((p) => positionToXYZ(p[1]));
+  const time = merged.map((p) => Number(p[0]) || 0);
+
+  const segDir = new Array(n).fill(null);
+  const segLen = new Array(n).fill(0);
+  const segCruise = new Array(n).fill(0);
+  for (let k = 1; k < n; k += 1) {
+    const a = pos[k - 1];
+    const b = pos[k];
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const L = Math.hypot(d[0], d[1], d[2]);
+    const dt = time[k] - time[k - 1];
+    segLen[k] = L;
+    if (L > 1e-9 && dt > 1e-9) {
+      segDir[k] = [d[0] / L, d[1] / L, d[2] / L];
+      segCruise[k] = L / dt;
+    }
+  }
+
+  const speedAt = new Array(n).fill(0);
+  for (let i = 0; i < n; i += 1) {
+    const prevDir = i >= 1 ? segDir[i] : null;
+    const nextDir = i + 1 < n ? segDir[i + 1] : null;
+    if (!prevDir || !nextDir) {
+      speedAt[i] = 0; // start / end / next to a hold -> at rest
+      continue;
+    }
+    let dot =
+      prevDir[0] * nextDir[0] + prevDir[1] * nextDir[1] + prevDir[2] * nextDir[2];
+    dot = Math.max(-1, Math.min(1, dot));
+    const angleDeg = (Math.acos(dot) * 180) / Math.PI;
+    const passThrough = Math.min(segCruise[i], segCruise[i + 1]);
+    speedAt[i] =
+      angleDeg > CORNER_ANGLE_THRESHOLD_DEG ? (1 - s) * passThrough : passThrough;
+  }
+
+  for (let k = 0; k < n; k += 1) {
+    if (k === 0) {
+      merged[0][2] = []; // first keyframe must have no control points
+      continue;
+    }
+    const u = segDir[k];
+    if (!u) {
+      merged[k][2] = []; // hold / degenerate segment stays constant
+      continue;
+    }
+    const a = pos[k - 1];
+    const L = segLen[k];
+    const dt = time[k] - time[k - 1];
+    let d1 = (speedAt[k - 1] * dt) / 3;
+    let d2 = L - (speedAt[k] * dt) / 3;
+    d1 = Math.max(0, Math.min(d1, L));
+    d2 = Math.max(0, Math.min(d2, L));
+    if (d2 < d1) {
+      d1 = 0.5 * (d1 + d2);
+      d2 = d1;
+    }
+    const p1 = [a[0] + u[0] * d1, a[1] + u[1] * d1, a[2] + u[2] * d1];
+    const p2 = [a[0] + u[0] * d2, a[1] + u[1] * d2, a[2] + u[2] * d2];
+    const template = merged[k][1];
+    merged[k][2] = [makeControlLike(template, p1), makeControlLike(template, p2)];
+  }
+
+  return merged;
 };
 
 const isObjectCoordinate = (value) =>
@@ -148,10 +310,15 @@ export const patchTrajectoryFromPath = (originalTrajectory, path) => {
     }
   }
 
+  // Recompute control points so the edited (straight) path gets the same
+  // ease-in/ease-out speed profile as the server-generated shows. Collinear
+  // runs are merged into one segment, so this may return fewer keyframes.
+  const smoothedPoints = applyVelocitySmoothingToPoints(points, getVelocitySmoothing());
+
   const patched = {
     ...originalTrajectory,
     version: originalTrajectory.version ?? 1,
-    points,
+    points: smoothedPoints,
   };
 
   if (takeoffTime > 0 || originalTrajectory.takeoffTime !== undefined) {

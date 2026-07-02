@@ -10,6 +10,8 @@ import Tooltip from '@mui/material/Tooltip';
 import PropTypes from 'prop-types';
 import React from 'react';
 
+import { getVelocitySmoothing, setVelocitySmoothing } from './utils/pathSmoothing';
+
 const formatMs = (ms) => {
   const safe = Math.max(0, Math.round(Number(ms) || 0));
   const totalSec = Math.floor(safe / 1000);
@@ -92,6 +94,13 @@ export default function PathControlPanel({
   pathDeliveryStatus,
 }) {
   const progress = Math.min(100, Math.max(0, Number(pathProgress) || 0));
+
+  // Global velocity-smoothing default (shared, persisted to localStorage).
+  // Applied to every generated / delivered / locally-patched path.
+  const [smoothing, setSmoothing] = React.useState(getVelocitySmoothing());
+  const handleSmoothingChange = (value) => {
+    setSmoothing(setVelocitySmoothing(value));
+  };
 
   return (
     <>
@@ -273,6 +282,46 @@ export default function PathControlPanel({
               <span>{formatMs(totalDurationMs)}</span>
             </div>
           </div>
+
+          <Tooltip
+            title="속도 스무딩: 0 = 기존 등속(관성 있음), 1 = 최대(코너에서 정지). 출발·도착·정지 지점은 항상 부드럽게 가감속합니다. 모든 경로에 공통 적용."
+            placement="top"
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexShrink: 0,
+                paddingLeft: 8,
+                borderLeft: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.75)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span>스무딩</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={smoothing}
+                onChange={(e) => handleSmoothingChange(e.target.value)}
+                style={{ width: 84, accentColor: '#67b4ff', cursor: 'pointer' }}
+              />
+              <span
+                style={{
+                  fontVariantNumeric: 'tabular-nums',
+                  color: 'rgba(255,255,255,0.6)',
+                  width: 26,
+                  textAlign: 'right',
+                }}
+              >
+                {smoothing.toFixed(2)}
+              </span>
+            </div>
+          </Tooltip>
 
           <div
             style={{

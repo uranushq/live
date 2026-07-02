@@ -1393,6 +1393,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   const handlePausePlayback = () => {
     setIsPlaybackRunning(false);
+    // Stop the progress-bar clock AND freeze the actual drone motion. Without
+    // the event the A-Frame path animation keeps running to the next waypoint
+    // even though the bar looks paused. Resume (handlePlayAll) rebuilds the
+    // remaining path from the current progress, so freezing in place is safe.
+    window.dispatchEvent(new CustomEvent('drone-path-stop'));
   };
 
   const handleResetAll = () => {
