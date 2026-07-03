@@ -58,3 +58,6 @@ assets/shows/
 
 # Development stuff
 etc/dev/
+
+# Claude Code commit-report hook secrets
+.claude/commit-report.env
