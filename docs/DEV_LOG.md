@@ -7,6 +7,25 @@
 
 <!-- ENTRIES -->
 
+## 2026-07-03 17:02:30 +0900 — `0be314b2` commit report mailing 기능
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: git 커밋마다 diff를 Claude(Opus)로 분석하고 결과를 메일로 발송 + DEV_LOG.md에 누적하는 커밋 리포트 자동화 훅을 도입했다.
+
+**주요 변경점**:
+- `.claude/hooks/commit-report.py`(286줄) 신설 — post-commit(git-hook) 및 Claude Code hook 두 모드 지원, git으로 커밋한 모든 경우를 커버
+- SMTP로 커밋 요약 메일 발송, `COMMIT_ANALYZE` 옵션 시 Claude 헤드리스(`claude -p`)로 diff를 분석해 마크다운 리포트 생성
+- 비밀정보는 `.claude/commit-report.env`(gitignore 처리)에서 로드, 커밋 가능한 예시 파일 `commit-report.env.example` 제공
+- 분석 결과를 `docs/DEV_LOG.md`의 `<!-- ENTRIES -->` 마커 아래에 최신순으로 누적, 프로젝트 기준 문서 `docs/PROJECT_STATUS.md` 신설
+
+**의미/영향**: 제품 코드(src/)가 아닌 개발 프로세스·문서화 인프라를 강화한 커밋으로, 활발한 매일 커밋 흐름에서 진행 이력을 자동으로 기록·공유하는 체계를 마련했다. PROJECT_STATUS.md와 DEV_LOG.md 도입으로 프로젝트 현황 추적과 커밋별 맥락 파악이 표준화된다.
+
+**주의/리스크**: `__pycache__/*.pyc` 바이너리가 함께 커밋되어 gitignore 대상으로 정리하는 편이 좋다. 또한 훅이 커밋마다 Claude(Opus) 분석(최대 240초)과 외부 메일 발송을 수행하므로 지연·비용이 발생할 수 있으나, 모든 실패 경로에서 exit 0으로 커밋 흐름을 막지 않도록 안전하게 설계되어 있다.
+
+---
+
+
 ## 2026-07-02 18:10:06 +0900 — `ed34d35a` 관성 path
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
