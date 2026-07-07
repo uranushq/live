@@ -103,6 +103,238 @@ FormationIconButton.propTypes = {
   children: PropTypes.element.isRequired,
 };
 
+const formatHoldDuration = (ms) => {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return '0s';
+  if (n < 1000) return `${Math.round(n)}ms`;
+  const seconds = n / 1000;
+  return `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(1)}s`;
+};
+
+function PathGroupToggleButton({ expanded, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={expanded ? '정지 구간 접기' : '정지 구간 펼치기'}
+      style={{
+        width: 22,
+        height: 22,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 6,
+        border: '1px solid rgba(126,200,255,0.28)',
+        background: hover ? 'rgba(126,200,255,0.24)' : 'rgba(126,200,255,0.1)',
+        color: '#9fd6ff',
+        cursor: 'pointer',
+        fontSize: 10,
+        lineHeight: 1,
+        padding: 0,
+        transition: 'background 0.12s ease',
+      }}
+    >
+      {expanded ? '▾' : '▸'}
+    </button>
+  );
+}
+
+PathGroupToggleButton.propTypes = {
+  expanded: PropTypes.bool.isRequired,
+  onClick: PropTypes.func.isRequired,
+};
+
+function PathGroupDeleteButton({ onClick, title }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={title}
+      style={{
+        width: 22,
+        height: 22,
+        flexShrink: 0,
+        borderRadius: 6,
+        border: 'none',
+        background: hover ? 'rgba(255,90,90,0.22)' : 'rgba(255,255,255,0.06)',
+        color: hover ? '#ff9d9d' : 'rgba(255,255,255,0.45)',
+        cursor: 'pointer',
+        fontSize: 14,
+        lineHeight: 1,
+        padding: 0,
+        transition: 'background 0.12s ease, color 0.12s ease',
+      }}
+    >
+      −
+    </button>
+  );
+}
+
+PathGroupDeleteButton.propTypes = {
+  onClick: PropTypes.func.isRequired,
+  title: PropTypes.string.isRequired,
+};
+
+function PathGroupHeaderBar({ group, count, holdTotalMs, onToggle }) {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 4,
+        padding: '4px 10px 4px 12px',
+        borderRadius: 6,
+        background: 'rgba(126,200,255,0.06)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: 'rgba(126,200,255,0.4)',
+        }}
+      />
+      <PathGroupToggleButton expanded onClick={onToggle} />
+      <span style={{ fontSize: 11, opacity: 0.55 }}>
+        정지 구간 #{group.start + 1}-{group.end + 1} · {count}칸 · {formatHoldDuration(holdTotalMs)}
+      </span>
+    </div>
+  );
+}
+
+PathGroupHeaderBar.propTypes = {
+  group: PropTypes.shape({ start: PropTypes.number, end: PropTypes.number }).isRequired,
+  count: PropTypes.number.isRequired,
+  holdTotalMs: PropTypes.number.isRequired,
+  onToggle: PropTypes.func.isRequired,
+};
+
+function PathGroupSummaryRow({
+  group,
+  count,
+  holdTotalMs,
+  arrivalStart,
+  arrivalEnd,
+  first,
+  onToggle,
+  onDelete,
+}) {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 4,
+        padding: '6px 10px 6px 12px',
+        borderRadius: 8,
+        background: 'linear-gradient(90deg, rgba(126,200,255,0.09), rgba(126,200,255,0.02))',
+        border: '1px solid rgba(126,200,255,0.18)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: 'rgba(126,200,255,0.6)',
+        }}
+      />
+      <PathGroupToggleButton expanded={false} onClick={onToggle} />
+      <div
+        style={{
+          fontSize: 11,
+          opacity: 0.5,
+          fontVariantNumeric: 'tabular-nums',
+          flexShrink: 0,
+        }}
+      >
+        #{group.start + 1}-{group.end + 1}
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          color: 'rgba(230,240,255,0.92)',
+          flex: 1,
+          minWidth: 0,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        <span style={{ opacity: 0.5 }}>X</span> {first?.x}
+        <span style={{ opacity: 0.5, marginLeft: 8 }}>Y</span> {first?.y}
+        <span style={{ opacity: 0.5, marginLeft: 8 }}>Z</span> {first?.z}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: '#bfe6ff',
+          background: 'rgba(126,200,255,0.16)',
+          borderRadius: 999,
+          padding: '2px 9px',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+      >
+        ⏸ {count}칸 · {formatHoldDuration(holdTotalMs)}
+      </div>
+      <div
+        title="이 구간의 재생 시각 범위"
+        style={{
+          fontSize: 10,
+          color: 'rgba(255,255,255,0.4)',
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+      >
+        {formatPathPlaybackMs(arrivalStart)}~{formatPathPlaybackMs(arrivalEnd)}
+      </div>
+      <PathGroupDeleteButton onClick={onDelete} title="이 정지 구간 전체 삭제" />
+    </div>
+  );
+}
+
+PathGroupSummaryRow.propTypes = {
+  group: PropTypes.shape({ start: PropTypes.number, end: PropTypes.number }).isRequired,
+  count: PropTypes.number.isRequired,
+  holdTotalMs: PropTypes.number.isRequired,
+  arrivalStart: PropTypes.number,
+  arrivalEnd: PropTypes.number,
+  first: PropTypes.shape({
+    x: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    y: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    z: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
+  onToggle: PropTypes.func.isRequired,
+  onDelete: PropTypes.func.isRequired,
+};
+
+PathGroupSummaryRow.defaultProps = {
+  arrivalStart: null,
+  arrivalEnd: null,
+  first: null,
+};
+
 const resolveFormationDroneId = (drone, droneIds, formationPhases) => {
   const fromSelection =
     drone?.id != null && String(drone.id).trim() !== '' ? String(drone.id) : '';
@@ -147,6 +379,7 @@ export default function DroneInfoPanel({
   const [pathPoints, setPathPoints] = useState([
     { x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false },
   ]);
+  const [expandedPathGroups, setExpandedPathGroups] = useState(() => new Set());
   const [initialFields, setInitialFields] = useState({ ix: '', iy: '', iz: '' });
   const [formationPositionDrafts, setFormationPositionDrafts] = useState({});
   const [formationSettingsDrafts, setFormationSettingsDrafts] = useState({});
@@ -221,6 +454,7 @@ export default function DroneInfoPanel({
   useEffect(() => {
     setFormationPositionDrafts({});
     setFormationSettingsDrafts({});
+    setExpandedPathGroups(new Set());
   }, [drone?.id]);
 
   const isPathPointRowValid = (p) => {
@@ -240,6 +474,64 @@ export default function DroneInfoPanel({
     const nz = Number(p.z);
 
     return Number.isFinite(nx) && Number.isFinite(ny) && Number.isFinite(nz);
+  };
+
+  // 좌표가 동일한 연속 행을 하나의 "정지 구간"으로 묶는다. 데이터(durationMs/holdMs)는
+  // 건드리지 않고 표시만 접었다 펼 수 있게 해서, 병합 시 yaw 세트포인트와 어긋나는
+  // 문제를 피한다.
+  const pathPointGroups = useMemo(() => {
+    const groups = [];
+    let i = 0;
+    while (i < pathPoints.length) {
+      let j = i + 1;
+      while (
+        j < pathPoints.length &&
+        isPathPointRowValid(pathPoints[i]) &&
+        isPathPointRowValid(pathPoints[j]) &&
+        Number(pathPoints[i].x) === Number(pathPoints[j].x) &&
+        Number(pathPoints[i].y) === Number(pathPoints[j].y) &&
+        Number(pathPoints[i].z) === Number(pathPoints[j].z)
+      ) {
+        j += 1;
+      }
+      groups.push({ start: i, end: j - 1 });
+      i = j;
+    }
+    return groups;
+  }, [pathPoints]);
+
+  const togglePathGroupExpanded = (start) => {
+    setExpandedPathGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(start)) {
+        next.delete(start);
+      } else {
+        next.add(start);
+      }
+      return next;
+    });
+  };
+
+  const computeGroupHoldMs = (group) => {
+    let total = toFiniteHoldMs(pathPoints[group.start]?.holdMs, 0);
+    for (let k = group.start + 1; k <= group.end; k += 1) {
+      total +=
+        toFiniteDurationMs(pathPoints[k]?.durationMs, 1000) +
+        toFiniteHoldMs(pathPoints[k]?.holdMs, 0);
+    }
+    return total;
+  };
+
+  const removePathPointGroup = (group) => {
+    setPathPoints((prev) => {
+      if (!Array.isArray(prev) || !prev.length) return prev;
+      const next = prev.filter((_, i) => i < group.start || i > group.end);
+      const finalPoints = next.length
+        ? next
+        : [{ x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false }];
+      queueMicrotask(() => syncPathToConfig(finalPoints));
+      return finalPoints;
+    });
   };
 
   const pathPointArrivalMsByRow = useMemo(() => {
@@ -503,6 +795,122 @@ export default function DroneInfoPanel({
     }
   };
 
+  const renderPathPointRow = (idx) => {
+    const p = pathPoints[idx];
+    return (
+      <div
+        key={idx}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: PATH_ROW_GRID_COLUMNS,
+          gap: 4,
+          alignItems: 'center',
+          marginBottom: 4,
+          fontSize: 12,
+          padding: '2px 2px',
+        }}
+      >
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+          title="3D 경로에서 이 점을 빨간색으로 표시"
+        >
+          <input
+            type="checkbox"
+            checked={!!p.highlighted}
+            onChange={() => togglePathPointHighlight(idx)}
+            style={{ width: 14, height: 14, cursor: 'pointer' }}
+          />
+        </label>
+        <div style={{ fontSize: 11, opacity: 0.6, textAlign: 'center' }}>
+          {idx + 1}
+        </div>
+
+        <input
+          value={p.x}
+          onChange={(e) => updatePathPoint(idx, 'x', e.target.value)}
+          onBlur={() => queueMicrotask(() => syncPathToConfig())}
+          placeholder="X"
+          inputMode="decimal"
+          style={smallInputStyle}
+        />
+        <input
+          value={p.y}
+          onChange={(e) => updatePathPoint(idx, 'y', e.target.value)}
+          onBlur={() => queueMicrotask(() => syncPathToConfig())}
+          placeholder="Y"
+          inputMode="decimal"
+          style={smallInputStyle}
+        />
+        <input
+          value={p.z}
+          onChange={(e) => updatePathPoint(idx, 'z', e.target.value)}
+          onBlur={() => queueMicrotask(() => syncPathToConfig())}
+          placeholder="Z"
+          inputMode="decimal"
+          style={smallInputStyle}
+        />
+        <input
+          value={p.durationMs === '' || p.durationMs === undefined ? '' : String(p.durationMs)}
+          onChange={(e) => updatePathPointMs(idx, 'durationMs', e.target.value)}
+          onBlur={() => queueMicrotask(() => syncPathToConfig())}
+          placeholder={idx === 0 ? '0' : '1000'}
+          inputMode="numeric"
+          title={
+            idx === 0
+              ? '시작 위치에서 다음 점으로 이동하기 전 대기 시간(ms)'
+              : '이전 점에서 이 점까지 이동 시간(ms)'
+          }
+          style={pathTimingInputStyle}
+        />
+        <input
+          value={p.holdMs === '' || p.holdMs === undefined ? '' : String(p.holdMs)}
+          onChange={(e) => updatePathPointMs(idx, 'holdMs', e.target.value)}
+          onBlur={() => queueMicrotask(() => syncPathToConfig())}
+          placeholder="0"
+          inputMode="numeric"
+          title="이 점 도착 후 머무는 시간(ms)"
+          style={pathTimingInputStyle}
+        />
+        <div
+          title="이 점에 도달하는 재생 시각"
+          style={{
+            fontSize: 10,
+            textAlign: 'center',
+            color: 'rgba(255,255,255,0.45)',
+            fontVariantNumeric: 'tabular-nums',
+            opacity: pathPointArrivalMsByRow[idx] == null ? 0.3 : 1,
+          }}
+        >
+          {formatPathPlaybackMs(pathPointArrivalMsByRow[idx])}
+        </div>
+        <button
+          type="button"
+          onClick={() => removePathPoint(idx)}
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 4,
+            border: 'none',
+            background: 'rgba(255,255,255,0.06)',
+            color: 'rgba(255,255,255,0.45)',
+            cursor: 'pointer',
+            fontSize: 14,
+            lineHeight: 1,
+            padding: 0,
+          }}
+          title="이 점 삭제"
+        >
+          -
+        </button>
+      </div>
+    );
+  };
+
   const safeFormationSettings = formationSettings || {
     step_size: 1,
     duration_ms: 1000,
@@ -539,118 +947,43 @@ export default function DroneInfoPanel({
           <span />
         </div>
 
-        {pathPoints.map((p, idx) => (
-          <div
-            key={idx}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: PATH_ROW_GRID_COLUMNS,
-              gap: 4,
-              alignItems: 'center',
-              marginBottom: 4,
-              fontSize: 12,
-              padding: '2px 2px',
-            }}
-          >
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-              title="3D 경로에서 이 점을 빨간색으로 표시"
-            >
-              <input
-                type="checkbox"
-                checked={!!p.highlighted}
-                onChange={() => togglePathPointHighlight(idx)}
-                style={{ width: 14, height: 14, cursor: 'pointer' }}
-              />
-            </label>
-            <div style={{ fontSize: 11, opacity: 0.6, textAlign: 'center' }}>
-              {idx + 1}
-            </div>
+        {pathPointGroups.map((group) => {
+          if (group.end === group.start) {
+            return renderPathPointRow(group.start);
+          }
 
-            <input
-              value={p.x}
-              onChange={(e) => updatePathPoint(idx, 'x', e.target.value)}
-              onBlur={() => queueMicrotask(() => syncPathToConfig())}
-              placeholder="X"
-              inputMode="decimal"
-              style={smallInputStyle}
+          const count = group.end - group.start + 1;
+          const holdTotalMs = computeGroupHoldMs(group);
+          const expanded = expandedPathGroups.has(group.start);
+
+          if (expanded) {
+            return (
+              <div key={`group-${group.start}`}>
+                <PathGroupHeaderBar
+                  group={group}
+                  count={count}
+                  holdTotalMs={holdTotalMs}
+                  onToggle={() => togglePathGroupExpanded(group.start)}
+                />
+                {Array.from({ length: count }, (_, k) => renderPathPointRow(group.start + k))}
+              </div>
+            );
+          }
+
+          return (
+            <PathGroupSummaryRow
+              key={`group-${group.start}`}
+              group={group}
+              count={count}
+              holdTotalMs={holdTotalMs}
+              arrivalStart={pathPointArrivalMsByRow[group.start]}
+              arrivalEnd={pathPointArrivalMsByRow[group.end]}
+              first={pathPoints[group.start]}
+              onToggle={() => togglePathGroupExpanded(group.start)}
+              onDelete={() => removePathPointGroup(group)}
             />
-            <input
-              value={p.y}
-              onChange={(e) => updatePathPoint(idx, 'y', e.target.value)}
-              onBlur={() => queueMicrotask(() => syncPathToConfig())}
-              placeholder="Y"
-              inputMode="decimal"
-              style={smallInputStyle}
-            />
-            <input
-              value={p.z}
-              onChange={(e) => updatePathPoint(idx, 'z', e.target.value)}
-              onBlur={() => queueMicrotask(() => syncPathToConfig())}
-              placeholder="Z"
-              inputMode="decimal"
-              style={smallInputStyle}
-            />
-            <input
-              value={p.durationMs === '' || p.durationMs === undefined ? '' : String(p.durationMs)}
-              onChange={(e) => updatePathPointMs(idx, 'durationMs', e.target.value)}
-              onBlur={() => queueMicrotask(() => syncPathToConfig())}
-              placeholder={idx === 0 ? '0' : '1000'}
-              inputMode="numeric"
-              title={
-                idx === 0
-                  ? '시작 위치에서 다음 점으로 이동하기 전 대기 시간(ms)'
-                  : '이전 점에서 이 점까지 이동 시간(ms)'
-              }
-              style={pathTimingInputStyle}
-            />
-            <input
-              value={p.holdMs === '' || p.holdMs === undefined ? '' : String(p.holdMs)}
-              onChange={(e) => updatePathPointMs(idx, 'holdMs', e.target.value)}
-              onBlur={() => queueMicrotask(() => syncPathToConfig())}
-              placeholder="0"
-              inputMode="numeric"
-              title="이 점 도착 후 머무는 시간(ms)"
-              style={pathTimingInputStyle}
-            />
-            <div
-              title="이 점에 도달하는 재생 시각"
-              style={{
-                fontSize: 10,
-                textAlign: 'center',
-                color: 'rgba(255,255,255,0.45)',
-                fontVariantNumeric: 'tabular-nums',
-                opacity: pathPointArrivalMsByRow[idx] == null ? 0.3 : 1,
-              }}
-            >
-              {formatPathPlaybackMs(pathPointArrivalMsByRow[idx])}
-            </div>
-            <button
-              type="button"
-              onClick={() => removePathPoint(idx)}
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 4,
-                border: 'none',
-                background: 'rgba(255,255,255,0.06)',
-                color: 'rgba(255,255,255,0.45)',
-                cursor: 'pointer',
-                fontSize: 14,
-                lineHeight: 1,
-                padding: 0,
-              }}
-              title="이 점 삭제"
-            >
-              -
-            </button>
-          </div>
-        ))}
+          );
+        })}
 
         <div style={{ display: 'flex', marginTop: 8, gap: 8 }}>
           <button
