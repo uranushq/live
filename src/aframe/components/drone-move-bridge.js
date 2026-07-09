@@ -13,6 +13,7 @@ if (!AFrame.components['drone-move-bridge']) {
       // 드론별로 경로 애니메이션 취소 함수를 따로 관리
       this._currentPathCancels = {};
       this._currentYawAnimationFrames = {};
+      this._currentPositionAnimationFrames = {};
       window.addEventListener('drone-move-request', this._onMove);
       window.addEventListener('drone-path-request', this._onPath);
       window.addEventListener('drone-path-stop', this._onStop);
@@ -45,6 +46,13 @@ if (!AFrame.components['drone-move-bridge']) {
         });
         this._currentYawAnimationFrames = {};
       }
+
+      if (this._currentPositionAnimationFrames) {
+        Object.values(this._currentPositionAnimationFrames).forEach((frameId) => {
+          if (frameId) window.cancelAnimationFrame(frameId);
+        });
+        this._currentPositionAnimationFrames = {};
+      }
     },
 
     // Freeze drones where they currently are by cancelling any running path
@@ -68,6 +76,7 @@ if (!AFrame.components['drone-move-bridge']) {
         }
         if (this._currentPathCancels) this._currentPathCancels[id] = undefined;
         this._cancelYawAnimation(id);
+        this._cancelPositionAnimation(id);
       });
     },
 
@@ -150,6 +159,54 @@ if (!AFrame.components['drone-move-bridge']) {
       this._currentYawAnimationFrames[id] = window.requestAnimationFrame(step);
     },
 
+    _cancelPositionAnimation(id) {
+      const frameId = this._currentPositionAnimationFrames?.[id];
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+        this._currentPositionAnimationFrames[id] = undefined;
+      }
+    },
+
+    // 경로 재생 중 한 구간(segment)의 위치를 직접 requestAnimationFrame으로 보간한다.
+    // 예전에는 A-Frame의 `animation` 컴포넌트(setAttribute('animation__path', ...))를
+    // 사용했는데, PLAY 버튼으로 재생을 시작한 첫 구간에서만(진행바를 직접 스크럽할 때는
+    // 재현되지 않음) 순간적으로 반대 방향으로 튀었다가 정상 경로로 돌아오는 현상이
+    // 있었다. 원인을 A-Frame animation 컴포넌트 내부로 좁히기 어려워, 스크럽 때 이미
+    // 정상 동작이 검증된 것과 동일한 수동 선형 보간 방식으로 통일해 제거한다.
+    _animatePosition(id, target, fromPos, toPos, durationMs, onDone) {
+      this._cancelPositionAnimation(id);
+
+      const duration = Math.max(0, Number(durationMs) || 0);
+      const setPos = (x, y, z) => target.setAttribute('position', `${x} ${y} ${z}`);
+
+      if (duration <= 0) {
+        setPos(toPos.x, toPos.y, toPos.z);
+        if (onDone) onDone();
+        return;
+      }
+
+      const startedAt = performance.now();
+
+      const step = (now) => {
+        const ratio = Math.min(1, Math.max(0, (now - startedAt) / duration));
+        setPos(
+          fromPos.x + (toPos.x - fromPos.x) * ratio,
+          fromPos.y + (toPos.y - fromPos.y) * ratio,
+          fromPos.z + (toPos.z - fromPos.z) * ratio
+        );
+
+        if (ratio < 1) {
+          this._currentPositionAnimationFrames[id] = window.requestAnimationFrame(step);
+        } else {
+          this._currentPositionAnimationFrames[id] = undefined;
+          setPos(toPos.x, toPos.y, toPos.z);
+          if (onDone) onDone();
+        }
+      };
+
+      this._currentPositionAnimationFrames[id] = window.requestAnimationFrame(step);
+    },
+
     _onMove(e) {
       const { id, x, y, z, yaw } = e.detail || {};
       if (!id) return;
@@ -165,6 +222,7 @@ if (!AFrame.components['drone-move-bridge']) {
         this._currentPathCancels[id] = undefined;
       }
       this._cancelYawAnimation(id);
+      this._cancelPositionAnimation(id);
 
       // 단일 이동은 즉시 위치 변경
       target.setAttribute('position', `${x} ${y} ${z}`);
@@ -249,6 +307,13 @@ if (!AFrame.components['drone-move-bridge']) {
       // path[0]을 시작 위치로 사용할 때, 그 점의 durationMs/holdMs는 시작 후 대기 시간으로 사용한다.
       let initialWaitMs = 0;
       let currentYaw = this._getCurrentYaw(target);
+      // path[0]에 yaw가 없으면 currentYaw는 실제 값이 아니라 임의의 기본값(0 등)이다.
+      // 이 상태로 다음 점의 실제 yaw를 향해 애니메이션하면, 재생 시작과 동시에
+      // 의미 없는 큰 회전(스핀)이 발생해 마치 "뒤로 갔다가" 정상화되는 것처럼 보인다.
+      // (스크럽 이동은 _onMove가 항상 즉시 스냅하므로 이 문제가 없다.)
+      // 첫 번째로 확인되는 실제 yaw까지는 애니메이션 없이 즉시 스냅하고,
+      // 그 이후 구간부터만 정상적으로 회전 애니메이션을 적용한다.
+      let yawBaselineKnown = true;
 
       if (startFromInitial) {
         // 경로 재생은 path[0]을 곧 시작 위치로 사용한다.
@@ -256,6 +321,7 @@ if (!AFrame.components['drone-move-bridge']) {
         if (hasValidFirstPoint) {
           target.setAttribute('position', `${firstX} ${firstY} ${firstZ}`);
           const firstYaw = this._getPointYaw(firstPoint);
+          yawBaselineKnown = firstYaw != null;
           if (firstYaw != null) {
             this._setYaw(target, firstYaw);
             currentYaw = firstYaw;
@@ -295,6 +361,7 @@ if (!AFrame.components['drone-move-bridge']) {
       if (!startAnchor && hasValidFirstPoint) {
         target.setAttribute('position', `${firstX} ${firstY} ${firstZ}`);
         const firstYaw = this._getPointYaw(firstPoint);
+        yawBaselineKnown = firstYaw != null;
         if (firstYaw != null) {
           this._setYaw(target, firstYaw);
           currentYaw = firstYaw;
@@ -334,7 +401,7 @@ if (!AFrame.components['drone-move-bridge']) {
             window.clearTimeout(currentHoldTimer);
             currentHoldTimer = null;
           }
-          target.removeAttribute('animation__path');
+          this._cancelPositionAnimation(id);
           this._cancelYawAnimation(id);
         };
       };
@@ -353,8 +420,8 @@ if (!AFrame.components['drone-move-bridge']) {
         const point = points[index] || {};
         const { x, y, z, durationMs } = point;
         const targetYaw = this._getPointYaw(point);
-        const from = `${currentFrom.x} ${currentFrom.y} ${currentFrom.z}`;
-        const to = `${x} ${y} ${z}`;
+        const fromPos = { x: currentFrom.x, y: currentFrom.y, z: currentFrom.z };
+        const toPos = { x, y, z };
 
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
           index += 1;
@@ -362,9 +429,7 @@ if (!AFrame.components['drone-move-bridge']) {
           return;
         }
 
-        if (target.components['animation__path']) {
-          target.removeAttribute('animation__path');
-        }
+        this._cancelPositionAnimation(id);
 
         const parsedDuration = Number(durationMs);
         const hasDuration = Number.isFinite(parsedDuration) && parsedDuration >= 0;
@@ -376,7 +441,7 @@ if (!AFrame.components['drone-move-bridge']) {
 
         // 0ms 구간은 즉시 이동으로 처리해 다음 구간 계산 오차를 줄인다.
         if (segDur === 0) {
-          target.setAttribute('position', to);
+          target.setAttribute('position', `${x} ${y} ${z}`);
           currentFrom = { x, y, z };
           if (targetYaw != null) {
             this._setYaw(target, targetYaw);
@@ -389,7 +454,13 @@ if (!AFrame.components['drone-move-bridge']) {
         // 위치 변화 없이 yaw만 바뀌는 구간: A-Frame position 애니메이션은 즉시 끝나므로 타이머로 재생
         if (isStationarySegment) {
           if (targetYaw != null) {
-            this._animateYaw(id, target, currentYaw, targetYaw, segDur);
+            if (yawBaselineKnown) {
+              this._animateYaw(id, target, currentYaw, targetYaw, segDur);
+            } else {
+              this._setYaw(target, targetYaw);
+              currentYaw = targetYaw;
+              yawBaselineKnown = true;
+            }
           }
 
           currentHoldTimer = window.setTimeout(() => {
@@ -413,43 +484,37 @@ if (!AFrame.components['drone-move-bridge']) {
           return;
         }
 
-        const onComplete = () => {
-          target.removeEventListener('animationcomplete__path', onComplete);
+        this._currentPathCancels[id] = () => {
+          if (currentHoldTimer) {
+            window.clearTimeout(currentHoldTimer);
+            currentHoldTimer = null;
+          }
+          this._cancelPositionAnimation(id);
+          this._cancelYawAnimation(id);
+        };
+
+        if (targetYaw != null) {
+          if (yawBaselineKnown) {
+            this._animateYaw(id, target, currentYaw, targetYaw, segDur);
+          } else {
+            this._setYaw(target, targetYaw);
+            currentYaw = targetYaw;
+            yawBaselineKnown = true;
+          }
+        }
+
+        // Linear per-segment: the trajectory's own speed profile (Bézier
+        // easing, sampled into the path points) already encodes accel/decel.
+        // Using an eased interpolation here would re-ease every sub-segment
+        // and make the drone briefly stop at each sampled point (visible
+        // stutter).
+        this._animatePosition(id, target, fromPos, toPos, segDur, () => {
           if (targetYaw != null) {
             this._cancelYawAnimation(id);
             this._setYaw(target, targetYaw);
             currentYaw = targetYaw;
           }
           continueAfterHold(point);
-        };
-
-        this._currentPathCancels[id] = () => {
-          if (currentHoldTimer) {
-            window.clearTimeout(currentHoldTimer);
-            currentHoldTimer = null;
-          }
-          target.removeEventListener('animationcomplete__path', onComplete);
-          target.removeAttribute('animation__path');
-          this._cancelYawAnimation(id);
-        };
-
-        target.addEventListener('animationcomplete__path', onComplete);
-
-        if (targetYaw != null) {
-          this._animateYaw(id, target, currentYaw, targetYaw, segDur);
-        }
-
-        target.setAttribute('animation__path', {
-          property: 'position',
-          from,
-          to,
-          dur: segDur,
-          // Linear per-segment: the trajectory's own speed profile (Bézier
-          // easing, sampled into the path points) already encodes accel/decel.
-          // Using easeInOutQuad here would re-ease every sub-segment and make
-          // the drone briefly stop at each sampled point (visible stutter).
-          easing: 'linear',
-          loop: 0,
         });
         currentFrom = { x, y, z };
       };
@@ -465,7 +530,7 @@ if (!AFrame.components['drone-move-bridge']) {
             window.clearTimeout(currentHoldTimer);
             currentHoldTimer = null;
           }
-          target.removeAttribute('animation__path');
+          this._cancelPositionAnimation(id);
           this._cancelYawAnimation(id);
         };
       } else {

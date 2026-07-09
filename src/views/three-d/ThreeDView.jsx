@@ -773,6 +773,14 @@ const ThreeDView = React.forwardRef((props, ref) => {
           ...stripFormationFromDroneConfigRoot(parsed),
           drones: normalizedDrones,
         });
+        // 새 파일을 불러오면 이전 재생 진행률(pathProgress)이 남아있어, PLAY 시
+        // 그 stale progress를 새 경로의 duration에 적용해 중간 지점으로 순간 이동한 뒤
+        // (겉으로는 "뒤로 갔다가") 나머지 구간만 정상 재생되는 문제가 있었다.
+        // 새 파일 로드 시 재생 상태를 처음으로 리셋한다.
+        setPathProgress(0);
+        setIsPlaybackRunning(false);
+        playbackActiveDroneIdsRef.current = [];
+        playbackFinishedDroneIdsRef.current = new Set();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[ThreeDView] failed to parse drone config JSON', err);
@@ -1150,42 +1158,49 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const currentPositionMs =
     maxPathDurationMs * (Math.min(100, Math.max(0, Number(pathProgress) || 0)) / 100);
 
-  const applyProgressToAll = (progressPercent) => {
-    const base = effectiveConfig;
+  // Same pose driver as the playbar scrubber: sample the path at elapsed time and
+  // snap via drone-move-request. PLAY used to drive a separate segment animation
+  // (drone-path-request); that fought React re-renders from pathProgress updates
+  // and looked like a brief reverse jump before climbing. Scrub never had that
+  // bug, so playback now uses this path exclusively.
+  const applyProgressToAll = useCallback(
+    (progressPercent) => {
+      const base = effectiveConfig;
 
-    if (!base || !Array.isArray(base.drones) || !base.drones.length) return;
+      if (!base || !Array.isArray(base.drones) || !base.drones.length) return;
 
-    const progress = Math.min(100, Math.max(0, Number(progressPercent) || 0)) / 100;
-    const elapsedMs = maxPathDurationMs * progress;
+      const progress = Math.min(100, Math.max(0, Number(progressPercent) || 0)) / 100;
+      const elapsedMs = maxPathDurationMs * progress;
 
-    base.drones.forEach((d) => {
-      if (!Array.isArray(d.path) || !d.path.length || !d.id) return;
+      base.drones.forEach((d) => {
+        if (!Array.isArray(d.path) || !d.path.length || !d.id) return;
 
-      const seekPath = buildSeekPathWithInitial(d);
-      if (!seekPath.length) return;
-      const sliced = slicePathByElapsedMs(seekPath, elapsedMs);
-      if (!sliced.length) return;
+        const seekPath = buildSeekPathWithInitial(d);
+        if (!seekPath.length) return;
+        const sliced = slicePathByElapsedMs(seekPath, elapsedMs);
+        if (!sliced.length) return;
 
-      const point = sliced[0];
-      const x = Number(point.x);
-      const y = Number(point.y);
-      const z = Number(point.z);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+        const point = sliced[0];
+        const x = Number(point.x);
+        const y = Number(point.y);
+        const z = Number(point.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
 
-      const detail = { id: d.id, x, y, z };
-      const yaw = Number(point.yaw);
-      if (Number.isFinite(yaw)) {
-        detail.yaw = yaw;
-      }
+        const detail = { id: d.id, x, y, z };
+        const yaw = Number(point.yaw);
+        if (Number.isFinite(yaw)) {
+          detail.yaw = yaw;
+        }
 
-      // 슬라이더 이동 시 즉시 해당 진행 위치로 점프(기존 애니메이션은 브리지에서 취소)
-      window.dispatchEvent(
-        new CustomEvent('drone-move-request', {
-          detail,
-        })
-      );
-    });
-  };
+        window.dispatchEvent(
+          new CustomEvent('drone-move-request', {
+            detail,
+          })
+        );
+      });
+    },
+    [effectiveConfig, maxPathDurationMs]
+  );
 
   const handlePathProgressChange = (nextValue) => {
     if (syncActive) {
@@ -1208,23 +1223,6 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
     let rafId = null;
 
-    const onPathFinished = (e) => {
-      const id = e.detail?.id;
-      if (id === undefined || id === null) return;
-      playbackFinishedDroneIdsRef.current.add(String(id));
-
-      const activeIds = playbackActiveDroneIdsRef.current;
-      if (
-        activeIds.length > 0 &&
-        activeIds.every((activeId) => playbackFinishedDroneIdsRef.current.has(String(activeId)))
-      ) {
-        setPathProgress(100);
-        setIsPlaybackRunning(false);
-      }
-    };
-
-    window.addEventListener('drone-path-finished', onPathFinished);
-
     const tick = (now) => {
       const elapsedMs =
         playbackClockRef.current.startElapsedMs +
@@ -1232,22 +1230,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const nextProgress = Math.min(100, (elapsedMs / maxPathDurationMs) * 100);
 
       setPathProgress(nextProgress);
+      applyProgressToAll(nextProgress);
 
-      const allFinished =
-        playbackActiveDroneIdsRef.current.length > 0 &&
-        playbackActiveDroneIdsRef.current.every((activeId) =>
-          playbackFinishedDroneIdsRef.current.has(String(activeId))
-        );
-
-      if (allFinished) {
+      if (elapsedMs >= maxPathDurationMs) {
         setPathProgress(100);
-        setIsPlaybackRunning(false);
-        return;
-      }
-
-      // 안전 타임아웃: 계산된 최대 길이의 2배를 넘기면 강제 종료
-      if (elapsedMs >= maxPathDurationMs * 2) {
-        setPathProgress(100);
+        applyProgressToAll(100);
         setIsPlaybackRunning(false);
         return;
       }
@@ -1257,10 +1244,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
     rafId = requestAnimationFrame(tick);
     return () => {
-      window.removeEventListener('drone-path-finished', onPathFinished);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [isPlaybackRunning, maxPathDurationMs, syncActive]);
+  }, [isPlaybackRunning, maxPathDurationMs, syncActive, applyProgressToAll]);
 
   // Bidirectional playback sync. When enabled, the LED-show playhead is the
   // single source of truth: whether playback is started/seeked from the LED
@@ -1275,9 +1261,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const progress = Math.min(100, (absMs / maxPathDurationMs) * 100);
     setPathProgress(progress);
     applyProgressToAll(progress);
-    // applyProgressToAll closes over the latest effectiveConfig each render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncActive, ledPlayheadSec, maxPathDurationMs]);
+  }, [syncActive, ledPlayheadSec, maxPathDurationMs, applyProgressToAll]);
 
   // Formation hold-windows on the shared timeline. The dance runs: optional
   // takeoff, then for each phase a `duration_ms` move to the formation followed
@@ -1357,46 +1341,22 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const elapsedMs = maxPathDurationMs * progress;
     if (maxPathDurationMs <= 0 || elapsedMs >= maxPathDurationMs) return;
 
-    const activeDroneIds = [];
+    // Cancel any leftover segment animations (e.g. single-drone path play).
+    window.dispatchEvent(new CustomEvent('drone-path-stop'));
+
+    playbackActiveDroneIdsRef.current = [];
     playbackFinishedDroneIdsRef.current = new Set();
-
-    base.drones.forEach((d) => {
-      if (!Array.isArray(d.path) || !d.path.length || !d.id) return;
-      const playPathBase = buildSeekPathWithInitial(d);
-      if (!playPathBase.length) return;
-      const remainingPath = slicePathByElapsedMs(playPathBase, elapsedMs);
-      if (!remainingPath.length) return;
-
-      activeDroneIds.push(String(d.id));
-
-      window.dispatchEvent(
-        new CustomEvent('drone-path-request', {
-          detail: {
-            id: d.id,
-            points: remainingPath,
-            durationPerSegment: 1000,
-            startFromInitial: true,
-          },
-        })
-      );
-    });
-
-    if (!activeDroneIds.length) return;
-
-    playbackActiveDroneIdsRef.current = activeDroneIds;
     playbackClockRef.current = {
       startElapsedMs: elapsedMs,
       startedAt: performance.now(),
     };
+    applyProgressToAll(pathProgress);
     setIsPlaybackRunning(true);
   };
 
   const handlePausePlayback = () => {
     setIsPlaybackRunning(false);
-    // Stop the progress-bar clock AND freeze the actual drone motion. Without
-    // the event the A-Frame path animation keeps running to the next waypoint
-    // even though the bar looks paused. Resume (handlePlayAll) rebuilds the
-    // remaining path from the current progress, so freezing in place is safe.
+    // Freeze any leftover segment animations (single-drone path play, etc.).
     window.dispatchEvent(new CustomEvent('drone-path-stop'));
   };
 
