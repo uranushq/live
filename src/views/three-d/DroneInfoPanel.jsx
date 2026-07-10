@@ -182,7 +182,70 @@ PathGroupDeleteButton.propTypes = {
   title: PropTypes.string.isRequired,
 };
 
-function PathGroupHeaderBar({ group, count, holdTotalMs, onToggle }) {
+function PathGroupCoordInputs({ first, onChange, onBlur, compact }) {
+  const field = (axis, value) => (
+    <label
+      key={axis}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        flex: 1,
+        minWidth: 0,
+      }}
+      title={`정지 구간 전체 ${axis.toUpperCase()} 일괄 수정`}
+    >
+      <span style={{ fontSize: 10, opacity: 0.45, flexShrink: 0 }}>{axis.toUpperCase()}</span>
+      <input
+        value={value ?? ''}
+        onChange={(e) => onChange(axis, e.target.value)}
+        onBlur={onBlur}
+        placeholder={axis.toUpperCase()}
+        inputMode="decimal"
+        style={{
+          ...smallInputStyle,
+          padding: compact ? '4px 5px' : '6px 6px',
+          fontSize: compact ? 11 : 12,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        }}
+      />
+    </label>
+  );
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        flex: 1,
+        minWidth: 0,
+      }}
+    >
+      {field('x', first?.x)}
+      {field('y', first?.y)}
+      {field('z', first?.z)}
+    </div>
+  );
+}
+
+PathGroupCoordInputs.propTypes = {
+  first: PropTypes.shape({
+    x: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    y: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    z: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
+  onChange: PropTypes.func.isRequired,
+  onBlur: PropTypes.func.isRequired,
+  compact: PropTypes.bool,
+};
+
+PathGroupCoordInputs.defaultProps = {
+  first: null,
+  compact: false,
+};
+
+function PathGroupHeaderBar({ group, count, holdTotalMs, first, onToggle, onCoordChange, onCoordBlur }) {
   return (
     <div
       style={{
@@ -208,9 +271,15 @@ function PathGroupHeaderBar({ group, count, holdTotalMs, onToggle }) {
         }}
       />
       <PathGroupToggleButton expanded onClick={onToggle} />
-      <span style={{ fontSize: 11, opacity: 0.55 }}>
+      <span style={{ fontSize: 11, opacity: 0.55, flexShrink: 0 }}>
         정지 구간 #{group.start + 1}-{group.end + 1} · {count}칸 · {formatHoldDuration(holdTotalMs)}
       </span>
+      <PathGroupCoordInputs
+        first={first}
+        onChange={onCoordChange}
+        onBlur={onCoordBlur}
+        compact
+      />
     </div>
   );
 }
@@ -219,7 +288,18 @@ PathGroupHeaderBar.propTypes = {
   group: PropTypes.shape({ start: PropTypes.number, end: PropTypes.number }).isRequired,
   count: PropTypes.number.isRequired,
   holdTotalMs: PropTypes.number.isRequired,
+  first: PropTypes.shape({
+    x: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    y: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    z: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
   onToggle: PropTypes.func.isRequired,
+  onCoordChange: PropTypes.func.isRequired,
+  onCoordBlur: PropTypes.func.isRequired,
+};
+
+PathGroupHeaderBar.defaultProps = {
+  first: null,
 };
 
 function PathGroupSummaryRow({
@@ -231,6 +311,8 @@ function PathGroupSummaryRow({
   first,
   onToggle,
   onDelete,
+  onCoordChange,
+  onCoordBlur,
 }) {
   return (
     <div
@@ -268,22 +350,7 @@ function PathGroupSummaryRow({
       >
         #{group.start + 1}-{group.end + 1}
       </div>
-      <div
-        style={{
-          fontSize: 12,
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          color: 'rgba(230,240,255,0.92)',
-          flex: 1,
-          minWidth: 0,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        <span style={{ opacity: 0.5 }}>X</span> {first?.x}
-        <span style={{ opacity: 0.5, marginLeft: 8 }}>Y</span> {first?.y}
-        <span style={{ opacity: 0.5, marginLeft: 8 }}>Z</span> {first?.z}
-      </div>
+      <PathGroupCoordInputs first={first} onChange={onCoordChange} onBlur={onCoordBlur} />
       <div
         style={{
           fontSize: 11,
@@ -327,6 +394,8 @@ PathGroupSummaryRow.propTypes = {
   }),
   onToggle: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
+  onCoordChange: PropTypes.func.isRequired,
+  onCoordBlur: PropTypes.func.isRequired,
 };
 
 PathGroupSummaryRow.defaultProps = {
@@ -583,6 +652,12 @@ export default function DroneInfoPanel({
 
   const updatePathPoint = (index, key, value) => {
     setPathPoints((prev) => prev.map((p, i) => (i === index ? { ...p, [key]: value } : p)));
+  };
+
+  const updatePathPointGroupCoords = (group, key, value) => {
+    setPathPoints((prev) =>
+      prev.map((p, i) => (i >= group.start && i <= group.end ? { ...p, [key]: value } : p))
+    );
   };
 
   const updatePathPointMs = (index, key, raw) => {
@@ -963,7 +1038,10 @@ export default function DroneInfoPanel({
                   group={group}
                   count={count}
                   holdTotalMs={holdTotalMs}
+                  first={pathPoints[group.start]}
                   onToggle={() => togglePathGroupExpanded(group.start)}
+                  onCoordChange={(axis, value) => updatePathPointGroupCoords(group, axis, value)}
+                  onCoordBlur={() => queueMicrotask(() => syncPathToConfig())}
                 />
                 {Array.from({ length: count }, (_, k) => renderPathPointRow(group.start + k))}
               </div>
@@ -981,6 +1059,8 @@ export default function DroneInfoPanel({
               first={pathPoints[group.start]}
               onToggle={() => togglePathGroupExpanded(group.start)}
               onDelete={() => removePathPointGroup(group)}
+              onCoordChange={(axis, value) => updatePathPointGroupCoords(group, axis, value)}
+              onCoordBlur={() => queueMicrotask(() => syncPathToConfig())}
             />
           );
         })}
