@@ -65,7 +65,7 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
   const [initial, setInitial] = useState([]);
   const [phases, setPhases] = useState([]);
   const [stepSize, setStepSize] = useState('1.0');
-  const [durationMs, setDurationMs] = useState('1000');
+  const [cruiseSpeed, setCruiseSpeed] = useState('0.1');
   const [takeoffTime, setTakeoffTime] = useState('5');
   const [autoUpload, setAutoUpload] = useState(false);
   const [output, setOutput] = useState('path');
@@ -141,8 +141,10 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
         points: phase.points,
       })),
       step_size: Number.isFinite(Number(stepSize)) && Number(stepSize) > 0 ? Number(stepSize) : 1.0,
-      duration_ms:
-        Number.isFinite(Number(durationMs)) && Number(durationMs) > 0 ? Number(durationMs) : 1000,
+      cruise_speed:
+        Number.isFinite(Number(cruiseSpeed)) && Number(cruiseSpeed) > 0
+          ? Number(cruiseSpeed)
+          : 0.1,
       takeoff_time:
         Number.isFinite(Number(takeoffTime)) && Number(takeoffTime) >= 0 ? Number(takeoffTime) : 5,
       velocity_smoothing: smoothing,
@@ -336,7 +338,7 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
           }}
         >
           <input value={stepSize} onChange={(e) => setStepSize(e.target.value)} placeholder="step_size" style={inputStyle} />
-          <input value={durationMs} onChange={(e) => setDurationMs(e.target.value)} placeholder="duration_ms" style={inputStyle} />
+          <input value={cruiseSpeed} onChange={(e) => setCruiseSpeed(e.target.value)} placeholder="cruise_speed" style={inputStyle} />
           <input value={takeoffTime} onChange={(e) => setTakeoffTime(e.target.value)} placeholder="takeoff_time" style={inputStyle} />
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
             <input type="checkbox" checked={autoUpload} onChange={(e) => setAutoUpload(e.target.checked)} />

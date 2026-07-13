@@ -56,7 +56,7 @@ const initialState: ThreeDSliceState = {
     formationPhases: [],
     formationSettings: {
       step_size: 1.0,
-      duration_ms: 1000,
+      cruise_speed: 0.1,
       takeoff_time: 0,
       auto_upload: false,
       output: '',

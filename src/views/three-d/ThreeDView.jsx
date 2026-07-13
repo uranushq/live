@@ -106,7 +106,8 @@ const FORMATION_COLORS = Object.freeze([
 
 const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   step_size: 1.0,
-  duration_ms: 1000,
+  // duration_ms를 보내면 서버가 cruise_speed를 무시하므로 cruise_speed만 사용.
+  cruise_speed: 0.1,
   takeoff_time: 0,
   auto_upload: false,
   // 빈 문자열 = 백엔드 기본값(.skyc 다운로드) 사용. payload에서 output 키를 생략.
@@ -204,19 +205,28 @@ const getDroneHomePositionTupleForReload = (drone) => {
 const sanitizeFormationSettings = (settings) => {
   const merged = { ...DEFAULT_FORMATION_SETTINGS, ...(settings || {}) };
   const stepSize = Number(merged.step_size);
-  const durationMs = Number(merged.duration_ms);
+  const resolvedStepSize =
+    Number.isFinite(stepSize) && stepSize > 0
+      ? stepSize
+      : DEFAULT_FORMATION_SETTINGS.step_size;
+  let cruiseSpeed = Number(merged.cruise_speed);
+  // 예전 저장값(duration_ms)만 있으면 step당 속도로 환산.
+  if (!(Number.isFinite(cruiseSpeed) && cruiseSpeed > 0)) {
+    const legacyDurationMs = Number(merged.duration_ms);
+    if (Number.isFinite(legacyDurationMs) && legacyDurationMs > 0) {
+      cruiseSpeed = (resolvedStepSize * 1000) / legacyDurationMs;
+    }
+  }
   const takeoffTime = Number(merged.takeoff_time);
   const rawOutput = merged.output == null ? '' : String(merged.output);
   const output = FORMATION_OUTPUT_OPTIONS.includes(rawOutput)
     ? rawOutput
     : DEFAULT_FORMATION_SETTINGS.output;
   return {
-    step_size: Number.isFinite(stepSize) && stepSize > 0
-      ? stepSize
-      : DEFAULT_FORMATION_SETTINGS.step_size,
-    duration_ms: Number.isFinite(durationMs) && durationMs >= 0
-      ? Math.round(durationMs)
-      : DEFAULT_FORMATION_SETTINGS.duration_ms,
+    step_size: resolvedStepSize,
+    cruise_speed: Number.isFinite(cruiseSpeed) && cruiseSpeed > 0
+      ? cruiseSpeed
+      : DEFAULT_FORMATION_SETTINGS.cruise_speed,
     takeoff_time: Number.isFinite(takeoffTime) && takeoffTime >= 0
       ? takeoffTime
       : DEFAULT_FORMATION_SETTINGS.takeoff_time,
@@ -1267,13 +1277,15 @@ const ThreeDView = React.forwardRef((props, ref) => {
   }, [syncActive, ledPlayheadSec, maxPathDurationMs, applyProgressToAll]);
 
   // Formation hold-windows on the shared timeline. The dance runs: optional
-  // takeoff, then for each phase a `duration_ms` move to the formation followed
-  // by its `holdMs` hold. Each region marks when a formation is held; the first
-  // region's start is the recommended LED-activation delay after dance start.
+  // takeoff, then for each phase a (step_size / cruise_speed) move to the
+  // formation followed by its `holdMs` hold. Each region marks when a formation
+  // is held; the first region's start is the recommended LED-activation delay
+  // after dance start.
   const formationTimeline = useMemo(() => {
     if (!Array.isArray(formationPhases) || !formationPhases.length) return [];
     const s = sanitizeFormationSettings(formationSettings);
-    const moveSec = Math.max(0, Number(s.duration_ms) || 0) / 1000;
+    const cruise = Math.max(1e-6, Number(s.cruise_speed) || 0);
+    const moveSec = Math.max(0, Number(s.step_size) || 0) / cruise;
     let cursorSec = Math.max(0, Number(s.takeoff_time) || 0);
     return formationPhases.map((phase, i) => {
       cursorSec += moveSec; // travel to this formation
@@ -1653,7 +1665,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       initial,
       phases,
       step_size: sanitized.step_size,
-      duration_ms: sanitized.duration_ms,
+      cruise_speed: sanitized.cruise_speed,
       auto_upload: sanitized.auto_upload,
     };
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.

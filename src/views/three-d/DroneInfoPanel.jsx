@@ -993,7 +993,7 @@ export default function DroneInfoPanel({
 
   const safeFormationSettings = formationSettings || {
     step_size: 1,
-    duration_ms: 1000,
+    cruise_speed: 0.1,
     takeoff_time: 0,
     auto_upload: false,
     output: '',
@@ -1502,7 +1502,12 @@ export default function DroneInfoPanel({
           >
             {[
               { key: 'step_size', label: 'step_size', placeholder: '1.0' },
-              { key: 'duration_ms', label: 'duration_ms', placeholder: '1000' },
+              {
+                key: 'cruise_speed',
+                label: 'cruise_speed',
+                placeholder: '0.1',
+                title: 'm/s. duration_ms 대신 전송해 서버 cruise 속도를 사용합니다.',
+              },
               {
                 key: 'takeoff_time',
                 label: 'takeoff_time',
@@ -1538,7 +1543,11 @@ export default function DroneInfoPanel({
                       });
                       commitFormationSetting(key, raw);
                     }}
-                    inputMode={key === 'step_size' ? 'decimal' : 'numeric'}
+                    inputMode={
+                      key === 'step_size' || key === 'cruise_speed'
+                        ? 'decimal'
+                        : 'numeric'
+                    }
                     placeholder={placeholder}
                     title={title}
                     style={smallInputStyle}
@@ -1949,7 +1958,7 @@ DroneInfoPanel.propTypes = {
   ),
   formationSettings: PropTypes.shape({
     step_size: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    duration_ms: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    cruise_speed: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     takeoff_time: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     auto_upload: PropTypes.bool,
     output: PropTypes.string,
