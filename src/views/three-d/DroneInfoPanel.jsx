@@ -1282,6 +1282,28 @@ export default function DroneInfoPanel({
                     style={{ ...smallInputStyle, flex: 1, minWidth: 0 }}
                   />
                   <input
+                    value={
+                      phase.durationMs === undefined || phase.durationMs === null
+                        ? ''
+                        : phase.durationMs
+                    }
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        onUpdateFormationPhaseMeta(phase.id, { durationMs: undefined });
+                        return;
+                      }
+                      const n = Number(raw);
+                      onUpdateFormationPhaseMeta(phase.id, {
+                        durationMs: Number.isFinite(n) && n >= 0 ? n : undefined,
+                      });
+                    }}
+                    placeholder="dur"
+                    title="이 phase로 이동하는 시간(ms). 비우면 전역 duration_ms 사용"
+                    inputMode="numeric"
+                    style={{ ...smallInputStyle, width: 56, flexShrink: 0 }}
+                  />
+                  <input
                     value={phase.holdMs ?? 0}
                     onChange={(e) =>
                       onUpdateFormationPhaseMeta(phase.id, {
@@ -1291,7 +1313,7 @@ export default function DroneInfoPanel({
                     placeholder="hold"
                     title="이 phase 완성 후 머무는 시간(ms)"
                     inputMode="numeric"
-                    style={{ ...smallInputStyle, width: 64, flexShrink: 0 }}
+                    style={{ ...smallInputStyle, width: 56, flexShrink: 0 }}
                   />
                 </div>
 
@@ -1502,7 +1524,13 @@ export default function DroneInfoPanel({
           >
             {[
               { key: 'step_size', label: 'step_size', placeholder: '1.0' },
-              { key: 'duration_ms', label: 'duration_ms', placeholder: '1000' },
+              {
+                key: 'duration_ms',
+                label: 'duration_ms',
+                placeholder: '1000',
+                title:
+                  '기본 이동 시간(ms). phase에 durationMs가 없으면 이 값 사용. staging/RTH도 이 값',
+              },
               {
                 key: 'takeoff_time',
                 label: 'takeoff_time',
@@ -1943,6 +1971,7 @@ DroneInfoPanel.propTypes = {
     PropTypes.shape({
       id: PropTypes.string.isRequired,
       name: PropTypes.string,
+      durationMs: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
       holdMs: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
       points: PropTypes.object,
     })

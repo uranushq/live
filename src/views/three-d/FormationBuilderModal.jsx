@@ -43,8 +43,18 @@ const getSceneDronePositions = (droneIds) => {
 const makeDefaultPhase = (index, points) => ({
   name: `phase-${index + 1}`,
   holdMs: 3000,
+  // durationMs 생략 시 전역 duration_ms 사용
   points,
 });
+
+const parseOptionalPhaseDurationMs = (phase) => {
+  if (phase == null || typeof phase !== 'object') return undefined;
+  const value = phase.durationMs ?? phase.duration_ms;
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n);
+};
 
 const getErrorMessage = async (response) => {
   const text = await response.text().catch(() => '');
@@ -135,11 +145,18 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
   const handleSend = async () => {
     const payload = {
       initial,
-      phases: phases.map((phase) => ({
-        name: phase.name,
-        holdMs: Math.max(0, Number(phase.holdMs) || 0),
-        points: phase.points,
-      })),
+      phases: phases.map((phase) => {
+        const phaseOut = {
+          name: phase.name,
+          holdMs: Math.max(0, Number(phase.holdMs) || 0),
+          points: phase.points,
+        };
+        const phaseDurationMs = parseOptionalPhaseDurationMs(phase);
+        if (phaseDurationMs !== undefined) {
+          phaseOut.durationMs = phaseDurationMs;
+        }
+        return phaseOut;
+      }),
       step_size: Number.isFinite(Number(stepSize)) && Number(stepSize) > 0 ? Number(stepSize) : 1.0,
       duration_ms:
         Number.isFinite(Number(durationMs)) && Number(durationMs) > 0 ? Number(durationMs) : 1000,
@@ -262,6 +279,31 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
                   }
                   placeholder="phase 이름"
                   style={inputStyle}
+                />
+                <input
+                  value={
+                    phase.durationMs === undefined || phase.durationMs === null
+                      ? ''
+                      : String(phase.durationMs)
+                  }
+                  onChange={(e) =>
+                    setPhases((prev) =>
+                      prev.map((item, i) => {
+                        if (i !== index) return item;
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          const next = { ...item };
+                          delete next.durationMs;
+                          return next;
+                        }
+                        return { ...item, durationMs: raw };
+                      })
+                    )
+                  }
+                  placeholder="durationMs"
+                  title="비우면 전역 duration_ms 사용"
+                  inputMode="numeric"
+                  style={{ ...inputStyle, width: 110 }}
                 />
                 <input
                   value={String(phase.holdMs)}

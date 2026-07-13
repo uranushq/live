@@ -225,6 +225,23 @@ const sanitizeFormationSettings = (settings) => {
   };
 };
 
+/** phase.durationMs가 있으면 사용, 없으면 전역 duration_ms. staging/RTH는 백엔드가 전역만 씀. */
+const parseOptionalPhaseDurationMs = (raw) => {
+  if (raw == null || typeof raw !== 'object') return undefined;
+  const value = raw.durationMs ?? raw.duration_ms;
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n);
+};
+
+const resolvePhaseMoveDurationMs = (phase, globalDurationMs) => {
+  const override = parseOptionalPhaseDurationMs(phase);
+  if (override !== undefined) return override;
+  const fallback = Number(globalDurationMs);
+  return Number.isFinite(fallback) && fallback >= 0 ? Math.round(fallback) : 0;
+};
+
 const generateImportedFormationPhaseId = (index) =>
   `phase-import-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -235,6 +252,7 @@ const normalizeFormationPhaseForImport = (raw, index) => {
       : generateImportedFormationPhaseId(index);
   const name = String(raw?.name ?? '').trim() || `phase-${index + 1}`;
   const holdMs = Math.max(0, Math.round(Number(raw?.holdMs) || 0));
+  const durationMs = parseOptionalPhaseDurationMs(raw);
   const points = {};
   const rawPoints = raw?.points;
   if (rawPoints && typeof rawPoints === 'object' && !Array.isArray(rawPoints)) {
@@ -260,7 +278,11 @@ const normalizeFormationPhaseForImport = (raw, index) => {
       points[String(droneId)] = point;
     });
   }
-  return { id, name, holdMs, points };
+  const phase = { id, name, holdMs, points };
+  if (durationMs !== undefined) {
+    phase.durationMs = durationMs;
+  }
+  return phase;
 };
 
 const stripFormationFromDroneConfigRoot = (parsed) => {
@@ -828,15 +850,22 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const configToSave = {
       drones: droneRows,
       formation: {
-        phases: phasesAligned.map((p) => ({
-          id: p.id,
-          name: String(p.name || '').trim() || 'phase',
-          holdMs: Math.max(0, Math.round(Number(p.holdMs) || 0)),
-          points:
-            p.points && typeof p.points === 'object' && !Array.isArray(p.points)
-              ? { ...p.points }
-              : {},
-        })),
+        phases: phasesAligned.map((p) => {
+          const phaseOut = {
+            id: p.id,
+            name: String(p.name || '').trim() || 'phase',
+            holdMs: Math.max(0, Math.round(Number(p.holdMs) || 0)),
+            points:
+              p.points && typeof p.points === 'object' && !Array.isArray(p.points)
+                ? { ...p.points }
+                : {},
+          };
+          const durationMs = parseOptionalPhaseDurationMs(p);
+          if (durationMs !== undefined) {
+            phaseOut.durationMs = durationMs;
+          }
+          return phaseOut;
+        }),
         settings: sanitizeFormationSettings(formationSettings),
       },
     };
@@ -1267,15 +1296,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
   }, [syncActive, ledPlayheadSec, maxPathDurationMs, applyProgressToAll]);
 
   // Formation hold-windows on the shared timeline. The dance runs: optional
-  // takeoff, then for each phase a `duration_ms` move to the formation followed
-  // by its `holdMs` hold. Each region marks when a formation is held; the first
-  // region's start is the recommended LED-activation delay after dance start.
+  // takeoff, then for each phase a move (phase.durationMs or global duration_ms)
+  // to the formation followed by its `holdMs` hold. Each region marks when a
+  // formation is held; the first region's start is the recommended LED-activation
+  // delay after dance start.
   const formationTimeline = useMemo(() => {
     if (!Array.isArray(formationPhases) || !formationPhases.length) return [];
     const s = sanitizeFormationSettings(formationSettings);
-    const moveSec = Math.max(0, Number(s.duration_ms) || 0) / 1000;
     let cursorSec = Math.max(0, Number(s.takeoff_time) || 0);
     return formationPhases.map((phase, i) => {
+      const moveSec =
+        Math.max(0, resolvePhaseMoveDurationMs(phase, s.duration_ms)) / 1000;
       cursorSec += moveSec; // travel to this formation
       const startSec = cursorSec;
       const holdSec = Math.max(0, Number(phase.holdMs) || 0) / 1000;
@@ -1452,12 +1483,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
             pos && typeof pos === 'object' && !Array.isArray(pos) ? { ...pos } : pos;
         }
         const baseName = String(phase.name || '').trim() || 'phase';
-        return {
+        const reversedPhase = {
           id: generateFormationPhaseId(),
           name: `${baseName}-rev`,
           holdMs: phase.holdMs,
           points,
         };
+        const durationMs = parseOptionalPhaseDurationMs(phase);
+        if (durationMs !== undefined) {
+          reversedPhase.durationMs = durationMs;
+        }
+        return reversedPhase;
       });
       setLastReversedPhaseIds(reversed.map((phase) => phase.id));
       return [...prev, ...reversed];
@@ -1476,7 +1512,20 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   const handleUpdateFormationPhaseMeta = useCallback((phaseId, updates) => {
     setFormationPhases((prev) =>
-      prev.map((phase) => (phase.id === phaseId ? { ...phase, ...updates } : phase))
+      prev.map((phase) => {
+        if (phase.id !== phaseId) return phase;
+        const next = { ...phase, ...updates };
+        // 빈 durationMs = 전역 duration_ms 사용 (필드 자체를 제거)
+        if (
+          Object.prototype.hasOwnProperty.call(updates, 'durationMs') &&
+          (updates.durationMs === undefined ||
+            updates.durationMs === null ||
+            updates.durationMs === '')
+        ) {
+          delete next.durationMs;
+        }
+        return next;
+      })
     );
   }, []);
 
@@ -1645,7 +1694,13 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
       const holdMs = Math.max(0, Math.round(Number(phase.holdMs) || 0));
       const name = String(phase.name || '').trim() || `phase`;
-      return { name, holdMs, points };
+      const phaseOut = { name, holdMs, points };
+      // durationMs 생략 시 백엔드가 전역 duration_ms 사용 (staging/RTH도 전역만)
+      const durationMs = parseOptionalPhaseDurationMs(phase);
+      if (durationMs !== undefined) {
+        phaseOut.durationMs = durationMs;
+      }
+      return phaseOut;
     });
 
     const sanitized = sanitizeFormationSettings(formationSettings);
