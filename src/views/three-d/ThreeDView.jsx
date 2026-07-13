@@ -546,6 +546,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const playbackFinishedDroneIdsRef = useRef(new Set());
 
   const [formationPhases, setFormationPhases] = useState([]);
+  const [lastReversedPhaseIds, setLastReversedPhaseIds] = useState([]);
   const [formationSettings, setFormationSettings] = useState(DEFAULT_FORMATION_SETTINGS);
   const [isSendingFormation, setIsSendingFormation] = useState(false);
   const [formationDeliveryStatus, setFormationDeliveryStatus] = useState('');
@@ -765,6 +766,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
           setFormationPhases(
             remapFormationPhasesToDroneIds(formationImport.phases, normalizedDrones)
           );
+          setLastReversedPhaseIds([]);
           setFormationSettings(formationImport.settings);
         }
 
@@ -1121,6 +1123,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     );
     const normalizedDrones = drones.map((d, i) => normalizeDroneForConfigIO(d, i));
     setFormationPhases(remapFormationPhasesToDroneIds(normPhases, normalizedDrones));
+    setLastReversedPhaseIds([]);
     setFormationSettings(
       sanitizeFormationSettings(
         persistedFormationSettings &&
@@ -1413,6 +1416,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     clearPathOverrides();
     setDroneConfig(null);
     setFormationPhases([]);
+    setLastReversedPhaseIds([]);
     setFormationSettings(DEFAULT_FORMATION_SETTINGS);
     setFormationDeliveryStatus('');
     setPathDeliveryStatus('');
@@ -1436,6 +1440,39 @@ const ThreeDView = React.forwardRef((props, ref) => {
       ];
     });
   }, []);
+
+  /** 기존 phase(a,b,c)의 역순(c,b,a)을 복제해 뒤에 추가 */
+  const handleAppendReversedFormationPhases = useCallback(() => {
+    setFormationPhases((prev) => {
+      if (!prev.length) return prev;
+      const reversed = [...prev].reverse().map((phase) => {
+        const points = {};
+        for (const [droneId, pos] of Object.entries(phase.points || {})) {
+          points[droneId] =
+            pos && typeof pos === 'object' && !Array.isArray(pos) ? { ...pos } : pos;
+        }
+        const baseName = String(phase.name || '').trim() || 'phase';
+        return {
+          id: generateFormationPhaseId(),
+          name: `${baseName}-rev`,
+          holdMs: phase.holdMs,
+          points,
+        };
+      });
+      setLastReversedPhaseIds(reversed.map((phase) => phase.id));
+      return [...prev, ...reversed];
+    });
+  }, []);
+
+  /** 직전에 추가한 역점(역순 복제 phase)을 제거 */
+  const handleRecoverReversedFormationPhases = useCallback(() => {
+    setFormationPhases((prev) => {
+      if (!lastReversedPhaseIds.length) return prev;
+      const idSet = new Set(lastReversedPhaseIds);
+      return prev.filter((phase) => !idSet.has(phase.id));
+    });
+    setLastReversedPhaseIds([]);
+  }, [lastReversedPhaseIds]);
 
   const handleUpdateFormationPhaseMeta = useCallback((phaseId, updates) => {
     setFormationPhases((prev) =>
@@ -1482,6 +1519,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   const handleRemoveFormationPhase = useCallback((phaseId) => {
     setFormationPhases((prev) => prev.filter((phase) => phase.id !== phaseId));
+    setLastReversedPhaseIds((prev) => prev.filter((id) => id !== phaseId));
   }, []);
 
   const handleMoveFormationPhase = useCallback((phaseId, direction) => {
@@ -1885,6 +1923,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
         isSendingFormation={isSendingFormation}
         formationDeliveryStatus={formationDeliveryStatus}
         onAddFormationPhase={handleAddFormationPhase}
+        onAppendReversedFormationPhases={handleAppendReversedFormationPhases}
+        onRecoverReversedFormationPhases={handleRecoverReversedFormationPhases}
+        canRecoverReversedFormationPhases={lastReversedPhaseIds.length > 0}
         onRemoveFormationPhase={handleRemoveFormationPhase}
         onMoveFormationPhase={handleMoveFormationPhase}
         onUpdateFormationPhaseMeta={handleUpdateFormationPhaseMeta}

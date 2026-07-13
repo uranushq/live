@@ -8,6 +8,8 @@ import LinkOff from '@mui/icons-material/LinkOff';
 import NearMe from '@mui/icons-material/NearMe';
 import Replay from '@mui/icons-material/Replay';
 import Send from '@mui/icons-material/Send';
+import SwapVert from '@mui/icons-material/SwapVert';
+import Undo from '@mui/icons-material/Undo';
 import Tooltip from '@mui/material/Tooltip';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -430,6 +432,9 @@ export default function DroneInfoPanel({
   isSendingFormation = false,
   formationDeliveryStatus = '',
   onAddFormationPhase = () => {},
+  onAppendReversedFormationPhases = () => {},
+  onRecoverReversedFormationPhases = () => {},
+  canRecoverReversedFormationPhases = false,
   onRemoveFormationPhase = () => {},
   onMoveFormationPhase = () => {},
   onUpdateFormationPhaseMeta = () => {},
@@ -1168,16 +1173,32 @@ export default function DroneInfoPanel({
               현재 드론 {droneCount}대 · phase {formationPhases.length}개
             </div>
           </div>
-          <FormationIconButton
-            title="현재 모든 드론의 위치를 새 phase로 캡처"
-            onClick={onAddFormationPhase}
-          >
-            <Add />
-          </FormationIconButton>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <FormationIconButton
+              title="현재 모든 드론의 위치를 새 phase로 캡처"
+              onClick={onAddFormationPhase}
+            >
+              <Add />
+            </FormationIconButton>
+            <FormationIconButton
+              title="기존 phase를 역순(c→b→a)으로 복제해 뒤에 추가"
+              onClick={onAppendReversedFormationPhases}
+              disabled={formationPhases.length === 0}
+            >
+              <SwapVert />
+            </FormationIconButton>
+            <FormationIconButton
+              title="직전에 추가한 역점(역순 phase) 회수"
+              onClick={onRecoverReversedFormationPhases}
+              disabled={!canRecoverReversedFormationPhases}
+            >
+              <Undo />
+            </FormationIconButton>
+          </div>
         </div>
 
         <div style={{ fontSize: 11, opacity: 0.45, marginBottom: 8, lineHeight: 1.4 }}>
-          드론 배치 후 + 로 phase 저장 (공유)
+          드론 배치 후 + 로 phase 저장 · ↕ 역점 추가 · ↩ 역점 회수
         </div>
         {selectionMissing && droneId && (
           <div
@@ -1936,6 +1957,9 @@ DroneInfoPanel.propTypes = {
   isSendingFormation: PropTypes.bool,
   formationDeliveryStatus: PropTypes.string,
   onAddFormationPhase: PropTypes.func,
+  onAppendReversedFormationPhases: PropTypes.func,
+  onRecoverReversedFormationPhases: PropTypes.func,
+  canRecoverReversedFormationPhases: PropTypes.bool,
   onRemoveFormationPhase: PropTypes.func,
   onMoveFormationPhase: PropTypes.func,
   onUpdateFormationPhaseMeta: PropTypes.func,
