@@ -1548,6 +1548,30 @@ const ThreeDView = React.forwardRef((props, ref) => {
     });
   }, []);
 
+  const handleDuplicateFormationPhase = useCallback((phaseId) => {
+    if (!phaseId) return;
+    setFormationPhases((prev) => {
+      const index = prev.findIndex((phase) => phase.id === phaseId);
+      if (index < 0) return prev;
+      const phase = prev[index];
+      const points = {};
+      for (const [droneId, pos] of Object.entries(phase.points || {})) {
+        points[droneId] =
+          pos && typeof pos === 'object' && !Array.isArray(pos) ? { ...pos } : pos;
+      }
+      const baseName = String(phase.name || '').trim() || 'phase';
+      const copy = {
+        id: generateFormationPhaseId(),
+        name: `${baseName}-copy`,
+        holdMs: phase.holdMs,
+        points,
+      };
+      const next = prev.slice();
+      next.splice(index + 1, 0, copy);
+      return next;
+    });
+  }, []);
+
   const handleUpdateFormationSettings = useCallback((updates) => {
     setFormationSettings((prev) => sanitizeFormationSettings({ ...prev, ...updates }));
   }, []);
@@ -1940,6 +1964,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         canRecoverReversedFormationPhases={lastReversedPhaseIds.length > 0}
         onRemoveFormationPhase={handleRemoveFormationPhase}
         onMoveFormationPhase={handleMoveFormationPhase}
+        onDuplicateFormationPhase={handleDuplicateFormationPhase}
         onUpdateFormationPhaseMeta={handleUpdateFormationPhaseMeta}
         onUpdateFormationDronePosition={handleUpdateFormationDronePosition}
         onCaptureDronePositionInPhase={handleCaptureDronePositionInPhase}
