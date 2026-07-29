@@ -29,6 +29,7 @@ import MissionPlannerDialog from './features/mission/MissionPlannerDialog';
 import MissionProgressObserver from './features/mission/MissionProgressObserver';
 import MavlinkFlightModeUpdater from './features/mavlink/MavlinkFlightModeUpdater';
 import ParameterUploadSetupDialog from './features/parameters/ParameterUploadSetupDialog';
+import ParameterViewerDialog from './features/parameters/ParameterViewerDialog';
 import PromptDialog from './features/prompt/PromptDialog';
 import RTKSetupDialog from './features/rtk/RTKSetupDialog';
 import SafetyDialog from './features/safety/SafetyDialog';
@@ -248,6 +249,7 @@ const App = ({ onFirstRender }) => (
       <MapCachingDialog />
       <MissionPlannerDialog />
       <ParameterUploadSetupDialog />
+      <ParameterViewerDialog />
       <PromptDialog />
       <RTKSetupDialog />
       <SafetyDialog />

@@ -1,5 +1,6 @@
 import Build from '@mui/icons-material/Build';
 import Functions from '@mui/icons-material/Functions';
+import ListAlt from '@mui/icons-material/ListAlt';
 import Tune from '@mui/icons-material/Tune';
 import VpnKey from '@mui/icons-material/VpnKey';
 import Divider from '@mui/material/Divider';
@@ -19,6 +20,7 @@ import { getActiveUAVIdsBeingAveraged } from '~/features/measurement/selectors';
 import { showAveragingDialog } from '~/features/measurement/slice';
 import { showParameterUploadDialog } from '~/features/parameters/actions';
 import { JOB_TYPE as PARAMETER_UPLOAD_JOB_TYPE } from '~/features/parameters/constants';
+import { showParameterViewerDialog } from '~/features/parameters/slice';
 import { isConnected } from '~/features/servers/selectors';
 import { isDeveloperModeEnabled } from '~/features/session/selectors';
 import { getRunningUploadJobType } from '~/features/upload/selectors';
@@ -40,6 +42,7 @@ type ToolboxMenuPresentationProps = Readonly<{
   showLicenseInfoDialog: () => void;
   showMapCachingDialog: () => void;
   showParameterUploadDialog: () => void;
+  showParameterViewerDialog: () => void;
   showVersionCheckDialog: () => void;
 }> &
   MenuProps;
@@ -54,6 +57,7 @@ const ToolboxMenuPresentation = ({
   showLicenseInfoDialog,
   showMapCachingDialog,
   showParameterUploadDialog,
+  showParameterViewerDialog,
   showVersionCheckDialog: _showVersionCheckDialog,
   requestClose,
   ...rest
@@ -124,6 +128,12 @@ const ToolboxMenuPresentation = ({
           }
         />
       </MenuItem>
+      <MenuItem onClick={createClickListener(showParameterViewerDialog)}>
+        <ListItemIcon>
+          <ListAlt />
+        </ListItemIcon>
+        <ListItemText primary={t('toolbox.paramViewer')} />
+      </MenuItem>
       <Divider />
       <MenuItem
         disabled={!isConnected}
@@ -161,6 +171,7 @@ export default connect(
     showLicenseInfoDialog,
     showMapCachingDialog,
     showParameterUploadDialog,
+    showParameterViewerDialog,
     showVersionCheckDialog,
   }
 )(ToolboxMenuPresentation);

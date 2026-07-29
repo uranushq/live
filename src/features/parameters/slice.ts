@@ -1,5 +1,6 @@
 /**
- * @file Slice of the state object that stores the state of parameter upload.
+ * @file Slice of the state object that stores the state of parameter upload
+ * and the parameter viewer dialog.
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
@@ -21,12 +22,18 @@ type ParametersSliceState = {
   dialog: {
     open: boolean;
   };
+  viewerDialog: {
+    open: boolean;
+  };
 };
 
 const initialState: ParametersSliceState = {
   manifest: EMPTY_COLLECTION,
   rebootAfterUpload: false,
   dialog: {
+    open: false,
+  },
+  viewerDialog: {
     open: false,
   },
 };
@@ -45,6 +52,10 @@ const { actions, reducer } = createSlice({
       }
     ),
 
+    closeParameterViewerDialog: noPayload<ParametersSliceState>((state) => {
+      state.viewerDialog.open = false;
+    }),
+
     removeParameterFromManifest(state, action: PayloadAction<Parameter['id']>) {
       const { payload } = action;
       const { manifest } = state;
@@ -60,6 +71,10 @@ const { actions, reducer } = createSlice({
 
     showParameterUploadSetupDialog: noPayload<ParametersSliceState>((state) => {
       state.dialog.open = true;
+    }),
+
+    showParameterViewerDialog: noPayload<ParametersSliceState>((state) => {
+      state.viewerDialog.open = true;
     }),
 
     updateParametersInManifest(
@@ -85,9 +100,11 @@ const { actions, reducer } = createSlice({
 export const {
   clearManifest,
   closeParameterUploadSetupDialog,
+  closeParameterViewerDialog,
   removeParameterFromManifest,
   setRebootAfterUpload,
   showParameterUploadSetupDialog,
+  showParameterViewerDialog,
   updateParametersInManifest,
 } = actions;
 
