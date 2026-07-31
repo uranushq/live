@@ -45,6 +45,12 @@ export type FormationRegion = {
   startSec: number;
   endSec: number;
   color: string;
+  /**
+   * Region kind: undefined for a user formation's hold window; `'transit'`
+   * for planner-reported non-formation segments (staging-grid entry,
+   * return-to-start) so consumers can style or skip them.
+   */
+  kind?: 'transit';
 };
 
 /** A rectangular block of pixels held on the editor clipboard. */

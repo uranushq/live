@@ -8,6 +8,7 @@ import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
 import LinkOff from '@mui/icons-material/LinkOff';
 import NearMe from '@mui/icons-material/NearMe';
 import Replay from '@mui/icons-material/Replay';
+import Route from '@mui/icons-material/Route';
 import Send from '@mui/icons-material/Send';
 import Undo from '@mui/icons-material/Undo';
 import Tooltip from '@mui/material/Tooltip';
@@ -525,6 +526,8 @@ export default function DroneInfoPanel({
   onUpdateFormationDronePosition = () => {},
   onCaptureDronePositionInPhase = () => {},
   onCaptureAllPositionsInPhase = () => {},
+  onToggleFixedStraight = () => {},
+  onSetAllFixedStraight = () => {},
   onApplyDronePositionInPhase = () => {},
   onApplyAllDronesInPhase = () => {},
   onUpdateFormationSettings = () => {},
@@ -1339,6 +1342,13 @@ export default function DroneInfoPanel({
               const pz = captured?.z;
               const pyaw = captured?.yaw;
               const holdMs = phase.holdMs ?? 0;
+              const fixedIdsInPhase = Array.isArray(phase.fixedDroneIds)
+                ? phase.fixedDroneIds.map(String)
+                : [];
+              const fixedPathCount = fixedIdsInPhase.length;
+              const isFixedStraight = !!(
+                droneId && fixedIdsInPhase.includes(String(droneId))
+              );
 
               return (
                 <div
@@ -1661,6 +1671,59 @@ export default function DroneInfoPanel({
                       <LinkOff sx={iconSx} />
                       캡처 해제
                     </FormationActionButton>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 7,
+                      marginTop: 8,
+                    }}
+                  >
+                    <FormationActionButton
+                      title={
+                        '이전 formation 위치에서 이 formation 위치까지 직선으로만 이동하도록 고정.\n' +
+                        '고정된 드론들은 자동 회피/시차 대기 없이 전원 동시에 출발합니다.'
+                      }
+                      onClick={() =>
+                        droneId && onToggleFixedStraight(phase.id, droneId)
+                      }
+                      disabled={!droneId}
+                      variant={isFixedStraight ? 'accent' : undefined}
+                    >
+                      <Route sx={iconSx} />
+                      {isFixedStraight ? '직선 고정됨' : '직선 고정'}
+                    </FormationActionButton>
+                    <FormationActionButton
+                      title="등록된 모든 드론을 이 phase에서 직선 고정"
+                      onClick={() => onSetAllFixedStraight(phase.id, true)}
+                      disabled={droneCount === 0}
+                    >
+                      <Groups sx={iconSx} />
+                      모두 직선 고정
+                    </FormationActionButton>
+                    <FormationActionButton
+                      title="이 phase의 직선 고정을 모두 해제 (자동 경로 계획으로 복귀)"
+                      onClick={() => onSetAllFixedStraight(phase.id, false)}
+                      disabled={fixedPathCount === 0}
+                      style={{ color: '#9a9ca3' }}
+                    >
+                      <LinkOff sx={iconSx} />
+                      모두 해제
+                    </FormationActionButton>
+                    {fixedPathCount > 0 ? (
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          color: isFixedStraight ? '#7ee787' : FORMATION_DIM,
+                          fontWeight: 600,
+                        }}
+                      >
+                        직선 고정 {fixedPathCount}대
+                      </span>
+                    ) : null}
                   </div>
 
                   <div
@@ -2261,6 +2324,8 @@ DroneInfoPanel.propTypes = {
   onUpdateFormationDronePosition: PropTypes.func,
   onCaptureDronePositionInPhase: PropTypes.func,
   onCaptureAllPositionsInPhase: PropTypes.func,
+  onToggleFixedStraight: PropTypes.func,
+  onSetAllFixedStraight: PropTypes.func,
   onApplyDronePositionInPhase: PropTypes.func,
   onApplyAllDronesInPhase: PropTypes.func,
   onUpdateFormationSettings: PropTypes.func,
