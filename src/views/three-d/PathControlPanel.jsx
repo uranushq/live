@@ -77,6 +77,9 @@ export default function PathControlPanel({
   currentPositionMs,
   totalDurationMs,
   playbackSourceLabel,
+  showSpecActive = false,
+  showSpecIgnored = false,
+  onToggleShowSpecIgnored = () => {},
   isPlaybackRunning,
   ledSyncEnabled,
   onLedSyncToggle,
@@ -276,8 +279,39 @@ export default function PathControlPanel({
               }}
             >
               <span>{formatMs(currentPositionMs)}</span>
-              <span style={{ color: 'rgba(255,255,255,0.65)' }}>
+              <span
+                style={{
+                  color: 'rgba(255,255,255,0.65)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
                 {playbackSourceLabel} · {droneCount}대
+                {showSpecActive ? (
+                  <button
+                    type='button'
+                    onClick={onToggleShowSpecIgnored}
+                    title={
+                      showSpecIgnored
+                        ? '로드된 .skyc 쇼 스펙을 다시 표시합니다'
+                        : '로드된 .skyc 쇼 스펙을 잠시 해제하고 수동 편집(드론·formation)으로 돌아갑니다. 수동 데이터는 그대로 유지됩니다.'
+                    }
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      background: showSpecIgnored
+                        ? 'rgba(76, 141, 255, 0.25)'
+                        : 'rgba(255,255,255,0.08)',
+                      color: 'rgba(255,255,255,0.85)',
+                      borderRadius: 5,
+                      fontSize: 10,
+                      padding: '1px 7px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {showSpecIgnored ? '쇼 스펙 다시 보기' : '← 수동 편집으로'}
+                  </button>
+                ) : null}
               </span>
               <span>{formatMs(totalDurationMs)}</span>
             </div>
@@ -388,6 +422,9 @@ PathControlPanel.propTypes = {
   currentPositionMs: PropTypes.number.isRequired,
   totalDurationMs: PropTypes.number.isRequired,
   playbackSourceLabel: PropTypes.string.isRequired,
+  showSpecActive: PropTypes.bool,
+  showSpecIgnored: PropTypes.bool,
+  onToggleShowSpecIgnored: PropTypes.func,
   isPlaybackRunning: PropTypes.bool.isRequired,
   ledSyncEnabled: PropTypes.bool.isRequired,
   onLedSyncToggle: PropTypes.func.isRequired,

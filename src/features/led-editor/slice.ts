@@ -414,6 +414,85 @@ const { actions, reducer } = createSlice({
     setUploadStatus(state, action: PayloadAction<UploadStatus>) {
       state.upload = action.payload;
     },
+
+    /**
+     * Replace the whole LED show from an imported project file
+     * (`uranus-show-project` format). Every field is coerced/clamped so a
+     * hand-edited or partially corrupted file cannot produce an invalid
+     * editor state; missing pixels are filled with black.
+     */
+    importShow(
+      state,
+      action: PayloadAction<{
+        ledsPerDrone?: unknown;
+        droneCount?: unknown;
+        fps?: unknown;
+        boards?: unknown;
+      }>
+    ) {
+      const payload = action.payload ?? {};
+      const k: LedsPerDrone = Number(payload.ledsPerDrone) === 4 ? 4 : 3;
+      const droneCount = Math.max(
+        1,
+        Math.round(Number(payload.droneCount) || state.droneCount)
+      );
+      const fps = Number(payload.fps);
+
+      state.ledsPerDrone = k;
+      state.droneCount = droneCount;
+      if (Number.isFinite(fps) && fps > 0) {
+        state.fps = Math.min(120, fps);
+      }
+
+      const clampChannel = (value: unknown): number =>
+        Math.max(0, Math.min(255, Math.round(Number(value) || 0)));
+      const pixelCount = k * k;
+      const boards: Board[] = [];
+      for (const raw of Array.isArray(payload.boards) ? payload.boards : []) {
+        if (!raw || typeof raw !== 'object') continue;
+        const b = raw as Record<string, unknown>;
+        const rawId = b['id'];
+        const rawName = b['name'];
+        const rawDrones = Array.isArray(b['drones'])
+          ? (b['drones'] as unknown[])
+          : [];
+        const drones: RGB[][] = [];
+        for (let i = 0; i < droneCount; i += 1) {
+          const src = Array.isArray(rawDrones[i]) ? (rawDrones[i] as unknown[]) : [];
+          const drone: RGB[] = [];
+          for (let j = 0; j < pixelCount; j += 1) {
+            const px = Array.isArray(src[j]) ? (src[j] as unknown[]) : BLACK;
+            drone.push([
+              clampChannel(px[0]),
+              clampChannel(px[1]),
+              clampChannel(px[2]),
+            ]);
+          }
+          drones.push(drone);
+        }
+        boards.push({
+          id: typeof rawId === 'string' && rawId ? rawId : nanoid(),
+          name:
+            typeof rawName === 'string' && rawName
+              ? rawName
+              : `board-${boards.length + 1}`,
+          rows: Math.max(1, Math.round(Number(b['rows']) || 1)),
+          cols: Math.max(1, Math.round(Number(b['cols']) || 1)),
+          drones,
+          startSec: Math.max(0, Number(b['startSec']) || 0),
+          durationSec: Math.max(
+            0.1,
+            Number(b['durationSec']) || DEFAULT_BOARD_DURATION_SEC
+          ),
+        });
+      }
+      state.boards = boards;
+      state.selectedBoardIds = [];
+      state.selectedPixels = [];
+      state.playheadSec = 0;
+      state.playing = false;
+      state.upload = { state: 'idle' };
+    },
   },
 });
 
@@ -443,6 +522,7 @@ export const {
   setThreeDSync,
   setFormationSync,
   setUploadStatus,
+  importShow,
 } = actions;
 
 export default reducer;

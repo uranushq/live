@@ -17,6 +17,10 @@ export default function DroneSelectPanel({
   drones = [],
   selectedIds = [],
   onChangeSelection = () => {},
+  onDeleteSelected = () => {},
+  selectedPhase = null,
+  onCreateCluster = () => {},
+  onRemoveCluster = () => {},
 }) {
   const [collapsed, setCollapsed] = useState(false);
   // 스윕 선택 상태: {mode: 'add' | 'remove'} — mouseup까지 유지
@@ -155,6 +159,28 @@ export default function DroneSelectPanel({
             </button>
           </div>
 
+          <div style={{ padding: '0 10px 4px' }}>
+            <button
+              type='button'
+              onClick={onDeleteSelected}
+              disabled={selectedIds.length === 0}
+              title='선택한 드론을 모두 삭제합니다 (확인 팝업 표시)'
+              style={{
+                width: '100%',
+                padding: '5px 0',
+                borderRadius: 6,
+                border: '1px solid #45272c',
+                background: selectedIds.length ? '#331d22' : '#1c1e24',
+                color: selectedIds.length ? '#ff8a8a' : '#6f727b',
+                fontSize: 11.5,
+                fontWeight: 600,
+                cursor: selectedIds.length ? 'pointer' : 'default',
+              }}
+            >
+              선택 삭제{selectedIds.length ? ` (${selectedIds.length})` : ''}
+            </button>
+          </div>
+
           <div style={{ maxHeight: 220, overflowY: 'auto', padding: '2px 4px 6px' }}>
             {drones.length === 0 ? (
               <div style={{ padding: '8px 8px', color: '#6f727b' }}>
@@ -205,6 +231,120 @@ export default function DroneSelectPanel({
             )}
           </div>
 
+          {selectedPhase ? (
+            <div
+              style={{
+                borderTop: '1px solid #2c2e36',
+                padding: '8px 10px',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#9cc0ff',
+                  marginBottom: 2,
+                }}
+              >
+                {selectedPhase.name} 클러스터
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: '#6f727b',
+                  lineHeight: 1.5,
+                  marginBottom: 6,
+                }}
+              >
+                이전 phase → {selectedPhase.name}으로 들어오는 전환에
+                적용됩니다 (그룹이 대형 유지·직선·동시 이동)
+              </div>
+              <button
+                type='button'
+                onClick={onCreateCluster}
+                disabled={selectedIds.length < 2}
+                title='선택한 드론들을 이 phase 전환에서 통째로(직선·동시) 움직이는 그룹으로 지정'
+                style={{
+                  width: '100%',
+                  padding: '5px 0',
+                  borderRadius: 6,
+                  border: '1px solid #2c2e36',
+                  background: selectedIds.length >= 2 ? '#22304a' : '#1c1e24',
+                  color: selectedIds.length >= 2 ? '#9cc0ff' : '#6f727b',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: selectedIds.length >= 2 ? 'pointer' : 'default',
+                }}
+              >
+                선택 드론으로 그룹 추가 ({selectedIds.length})
+              </button>
+              {selectedPhase.clusters.length === 0 ? (
+                <div style={{ fontSize: 10.5, color: '#6f727b', marginTop: 6 }}>
+                  그룹 없음 — 통째로 움직인 블록은 자동 감지됩니다
+                </div>
+              ) : (
+                selectedPhase.clusters.map((cluster, index) => (
+                  <div
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={index}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      marginTop: 6,
+                      fontSize: 10.5,
+                      color: '#b9bbc2',
+                    }}
+                  >
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={cluster.join(', ')}
+                    >
+                      그룹 {index + 1} · {cluster.length}대
+                    </span>
+                    <button
+                      type='button'
+                      onClick={() => onChangeSelection(cluster)}
+                      title='이 그룹의 드론들을 선택'
+                      style={{
+                        border: '1px solid #2c2e36',
+                        background: '#1c1e24',
+                        color: '#9a9ca3',
+                        borderRadius: 5,
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      선택
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => onRemoveCluster(index)}
+                      title='그룹 해제'
+                      style={{
+                        border: '1px solid #45272c',
+                        background: '#331d22',
+                        color: '#ff8a8a',
+                        borderRadius: 5,
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      해제
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
           <div
             style={{
               padding: '6px 10px 8px',
@@ -217,6 +357,12 @@ export default function DroneSelectPanel({
             행을 누른 채 긁으면 한 번에 선택됩니다.
             <br />
             2대 이상 선택 후 기즈모 드래그 = 함께 이동
+            {selectedPhase ? null : (
+              <>
+                <br />
+                phase 카드를 클릭하면 여기서 그룹을 만들 수 있습니다
+              </>
+            )}
           </div>
         </>
       )}
@@ -233,4 +379,12 @@ DroneSelectPanel.propTypes = {
   ),
   selectedIds: PropTypes.arrayOf(PropTypes.string),
   onChangeSelection: PropTypes.func,
+  onDeleteSelected: PropTypes.func,
+  selectedPhase: PropTypes.shape({
+    id: PropTypes.string.isRequired,
+    name: PropTypes.string,
+    clusters: PropTypes.arrayOf(PropTypes.arrayOf(PropTypes.string)),
+  }),
+  onCreateCluster: PropTypes.func,
+  onRemoveCluster: PropTypes.func,
 };

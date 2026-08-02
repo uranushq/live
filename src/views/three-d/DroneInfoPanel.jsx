@@ -528,6 +528,11 @@ export default function DroneInfoPanel({
   onCaptureAllPositionsInPhase = () => {},
   onToggleFixedStraight = () => {},
   onSetAllFixedStraight = () => {},
+  selectedPhaseId = null,
+  onTogglePhaseSelected = () => {},
+  multiSelectedDroneIds = [],
+  onAddClusterToPhase = () => {},
+  onRemoveClusterFromPhase = () => {},
   onApplyDronePositionInPhase = () => {},
   onApplyAllDronesInPhase = () => {},
   onUpdateFormationSettings = () => {},
@@ -1349,6 +1354,12 @@ export default function DroneInfoPanel({
               const isFixedStraight = !!(
                 droneId && fixedIdsInPhase.includes(String(droneId))
               );
+              const clusterCount = Array.isArray(phase.clusters)
+                ? phase.clusters.length
+                : 0;
+              const isPhaseSelected =
+                selectedPhaseId != null &&
+                String(phase.id) === String(selectedPhaseId);
 
               return (
                 <div
@@ -1356,19 +1367,41 @@ export default function DroneInfoPanel({
                   style={{
                     padding: 16,
                     ...formationSurfaceStyle,
+                    ...(isPhaseSelected
+                      ? {
+                          border: `1px solid ${FORMATION_ACCENT}`,
+                          boxShadow: `0 0 0 1px ${FORMATION_ACCENT}55`,
+                        }
+                      : {}),
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    onClick={() => {
+                      const willSelect = !isPhaseSelected;
+                      onTogglePhaseSelected(String(phase.id));
+                      // 선택하는 순간 3D 씬의 모든 드론을 이 phase의
+                      // 좌표로 이동시켜 실제 대형을 눈으로 확인하게 한다.
+                      if (willSelect) {
+                        onApplyAllDronesInPhase(phase.id);
+                      }
+                    }}
+                    title="클릭: phase 선택 + 모든 드론을 이 phase 위치로 이동. 선택 상태에서 클러스터(그룹)를 만들 수 있습니다"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      cursor: 'pointer',
+                    }}
+                  >
                     <span
                       style={{
-                        color: '#5b5e67',
+                        color: isPhaseSelected ? FORMATION_ACCENT : '#5b5e67',
                         fontSize: 15,
                         lineHeight: 1,
                         letterSpacing: -2,
                         userSelect: 'none',
                         flexShrink: 0,
                       }}
-                      title="순서 변경은 아래 위로/아래로 버튼 사용"
                     >
                       ⠿⠿
                     </span>
@@ -1379,12 +1412,16 @@ export default function DroneInfoPanel({
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: FORMATION_INPUT_BG,
-                        border: `1px solid ${FORMATION_BORDER}`,
+                        background: isPhaseSelected
+                          ? '#22304a'
+                          : FORMATION_INPUT_BG,
+                        border: `1px solid ${
+                          isPhaseSelected ? FORMATION_ACCENT : FORMATION_BORDER
+                        }`,
                         borderRadius: 7,
                         ...formationMonoStyle,
                         fontSize: 12,
-                        color: '#9a9ca3',
+                        color: isPhaseSelected ? '#9cc0ff' : '#9a9ca3',
                         flexShrink: 0,
                       }}
                     >
@@ -1392,6 +1429,7 @@ export default function DroneInfoPanel({
                     </span>
                     <input
                       value={phase.name ?? ''}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={(e) =>
                         onUpdateFormationPhaseMeta(phase.id, { name: e.target.value })
                       }
@@ -1405,6 +1443,18 @@ export default function DroneInfoPanel({
                         fontFamily: 'inherit',
                       }}
                     />
+                    {clusterCount > 0 ? (
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          color: '#7ee787',
+                          flexShrink: 0,
+                        }}
+                      >
+                        그룹 {clusterCount}
+                      </span>
+                    ) : null}
                   </div>
 
                   <div
@@ -1723,6 +1773,116 @@ export default function DroneInfoPanel({
                       >
                         직선 고정 {fixedPathCount}대
                       </span>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 12,
+                      paddingTop: 12,
+                      borderTop: '1px solid #26282f',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        color: FORMATION_DIM,
+                        fontWeight: 600,
+                        marginBottom: 6,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      클러스터 (그룹 이동)
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: '#6f727b',
+                        lineHeight: 1.55,
+                        marginBottom: 8,
+                      }}
+                    >
+                      클러스터는{' '}
+                      <b style={{ color: '#9cc0ff' }}>
+                        이전 phase → 이 phase(#{idx + 1})
+                      </b>
+                      로 <b style={{ color: '#9cc0ff' }}>들어오는</b> 전환에
+                      적용됩니다. 그룹 드론들은 대형을 유지한 채 직선 경로로
+                      전원 동시에 이동합니다. 이 phase에서 다음 phase로{' '}
+                      <b>나갈 때</b>의 그룹은 다음 phase 카드에 만드세요.
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        gap: 7,
+                      }}
+                    >
+                      <FormationActionButton
+                        title={
+                          '좌측 "드론 선택" 탭에서 고른 드론들을 이 phase 전환의 ' +
+                          '클러스터로 추가합니다 (2대 이상 선택 필요)'
+                        }
+                        onClick={() => onAddClusterToPhase(phase.id)}
+                        disabled={multiSelectedDroneIds.length < 2}
+                        variant="accent"
+                      >
+                        <Groups sx={iconSx} />
+                        선택 드론 그룹 추가 ({multiSelectedDroneIds.length})
+                      </FormationActionButton>
+                      {clusterCount === 0 ? (
+                        <span style={{ fontSize: 10.5, color: FORMATION_DIM }}>
+                          그룹 없음 — 통짜 이동 블록은 자동 감지
+                        </span>
+                      ) : null}
+                    </div>
+                    {clusterCount > 0 ? (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                        }}
+                      >
+                        {phase.clusters.map((cluster, clusterIndex) => (
+                          <div
+                            // eslint-disable-next-line react/no-array-index-key
+                            key={clusterIndex}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontSize: 10.5,
+                              color: '#b9bbc2',
+                            }}
+                          >
+                            <span
+                              style={{
+                                flex: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={cluster.join(', ')}
+                            >
+                              그룹 {clusterIndex + 1} · {cluster.length}대 —{' '}
+                              {cluster.join(', ')}
+                            </span>
+                            <FormationActionButton
+                              title="이 그룹 해제"
+                              onClick={() =>
+                                onRemoveClusterFromPhase(phase.id, clusterIndex)
+                              }
+                              variant="danger"
+                              style={{ fontSize: 10, padding: '3px 8px' }}
+                            >
+                              해제
+                            </FormationActionButton>
+                          </div>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
 
@@ -2326,6 +2486,11 @@ DroneInfoPanel.propTypes = {
   onCaptureAllPositionsInPhase: PropTypes.func,
   onToggleFixedStraight: PropTypes.func,
   onSetAllFixedStraight: PropTypes.func,
+  selectedPhaseId: PropTypes.string,
+  onTogglePhaseSelected: PropTypes.func,
+  multiSelectedDroneIds: PropTypes.arrayOf(PropTypes.string),
+  onAddClusterToPhase: PropTypes.func,
+  onRemoveClusterFromPhase: PropTypes.func,
   onApplyDronePositionInPhase: PropTypes.func,
   onApplyAllDronesInPhase: PropTypes.func,
   onUpdateFormationSettings: PropTypes.func,

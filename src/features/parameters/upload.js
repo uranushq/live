@@ -4,6 +4,7 @@ import { getServerVersionValidator } from '~/features/servers/selectors';
 import messageHub from '~/message-hub';
 
 import { JOB_TYPE } from './constants';
+import { resolveParameterValue } from './expressions';
 
 const supportsBulkUpload = getServerVersionValidator('>=2.34.1');
 
@@ -24,9 +25,16 @@ function* runSingleParameterUpload({ uavId, payload }, options) {
 
   const useBulkUpload = yield select(supportsBulkUpload);
 
+  // Per-drone expression support: values containing `$` (e.g.
+  // `SYSID_THISMAV=$id+1`) are evaluated separately for every target UAV.
+  const resolvedItems = items.map(({ name, value }) => ({
+    name,
+    value: resolveParameterValue(value, uavId),
+  }));
+
   if (useBulkUpload) {
     const parameters = Object.fromEntries(
-      items.map(({ name, value }) => [name, value])
+      resolvedItems.map(({ name, value }) => [name, value])
     );
 
     // No need for a timeout here; it utilizes the message hub, which has its
@@ -37,7 +45,7 @@ function* runSingleParameterUpload({ uavId, payload }, options) {
       options
     );
   } else {
-    for (const { name, value } of items) {
+    for (const { name, value } of resolvedItems) {
       // No need for a timeout here; it utilizes the message hub, which has its
       // own timeout for failed command executions (although it is quite long)
       yield call(messageHub.execute.setParameter, {

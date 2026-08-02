@@ -1,4 +1,5 @@
 import Add from '@mui/icons-material/Add';
+import ArrowBack from '@mui/icons-material/ArrowBack';
 import Check from '@mui/icons-material/Check';
 import CloudDownload from '@mui/icons-material/CloudDownload';
 import Flight from '@mui/icons-material/Flight';
@@ -17,7 +18,7 @@ import { makeStyles } from '@skybrush/app-theme-mui';
 
 import { Status } from '~/components/semantics';
 import { AltitudeReference } from '~/features/show/constants';
-import { loadShowFromFile } from '~/features/show/actions';
+import { clearLoadedShow, loadShowFromFile } from '~/features/show/actions';
 import {
   getAbsolutePathOfShowFile,
   getOutdoorShowAltitudeReference,
@@ -301,6 +302,7 @@ const MissionSetupStrip = ({
   isUploading,
   maxDistance,
   missionDroneCount,
+  onClearLoadedShow,
   onEditEnvironment,
   onLoadFromCloud,
   onOpenTakeoffArea,
@@ -314,6 +316,19 @@ const MissionSetupStrip = ({
   const classes = useStyles();
   const { t } = useTranslation();
   const exportFileInputRef = useRef(null);
+
+  // 뒤로가기: 로드된 쇼를 해제하고 mission setup을 1단계(파일 선택)로
+  // 되돌린다. 이후 단계들(환경/배치/업로드)의 상태는 로드된 쇼에서
+  // 파생되므로 쇼 해제가 곧 전체 스텝의 되돌리기다.
+  const handleGoBack = useCallback(() => {
+    const confirmed = window.confirm(
+      '로드된 쇼를 해제하고 mission setup을 처음 단계로 되돌릴까요?\n' +
+        '(3D 뷰의 수동 편집 데이터는 그대로 유지됩니다)'
+    );
+    if (confirmed && onClearLoadedShow) {
+      onClearLoadedShow();
+    }
+  }, [onClearLoadedShow]);
 
   const handleExportPathClick = useCallback(() => {
     if (exportFileInputRef.current) {
@@ -603,16 +618,29 @@ const MissionSetupStrip = ({
         </Box>
       </Box>
 
-      {hasFeature('loadShowFromCloud') ? (
+      {hasFeature('loadShowFromCloud') || hasLoadedFile ? (
         <Box className={classes.footer}>
-          <IconButton
-            aria-label={t('show.fromCloud')}
-            className={classes.addButton}
-            onClick={onLoadFromCloud}
-            size='small'
-          >
-            <Add fontSize='small' />
-          </IconButton>
+          {hasLoadedFile ? (
+            <IconButton
+              aria-label='뒤로가기 (쇼 해제)'
+              title='로드된 쇼를 해제하고 mission setup을 처음 단계로 되돌립니다'
+              className={classes.addButton}
+              onClick={handleGoBack}
+              size='small'
+            >
+              <ArrowBack fontSize='small' />
+            </IconButton>
+          ) : null}
+          {hasFeature('loadShowFromCloud') ? (
+            <IconButton
+              aria-label={t('show.fromCloud')}
+              className={classes.addButton}
+              onClick={onLoadFromCloud}
+              size='small'
+            >
+              <Add fontSize='small' />
+            </IconButton>
+          ) : null}
         </Box>
       ) : null}
     </Box>
@@ -625,6 +653,7 @@ MissionSetupStrip.propTypes = {
   isUploading: PropTypes.bool,
   maxDistance: PropTypes.number,
   missionDroneCount: PropTypes.number,
+  onClearLoadedShow: PropTypes.func,
   onEditEnvironment: PropTypes.func,
   onLoadFromCloud: PropTypes.func,
   onOpenTakeoffArea: PropTypes.func,
@@ -649,6 +678,7 @@ export default connect(
     stageStatuses: getSetupStageStatuses(state),
   }),
   {
+    onClearLoadedShow: clearLoadedShow,
     onEditEnvironment: openEnvironmentEditorDialog,
     onLoadFromCloud: openLoadShowFromCloudDialog,
     onOpenTakeoffArea: openTakeoffAreaSetupDialog,

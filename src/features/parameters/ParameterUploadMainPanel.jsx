@@ -61,20 +61,27 @@ const ParametersTextFieldPresentation = ({ onChange, optimizeUIForTouch }) => {
   };
 
   return (
-    <TextField
-      fullWidth
-      multiline
-      autoFocus={!optimizeUIForTouch}
-      error={Boolean(error)}
-      label={t('parameterUploadMainPanel.parameterNamesValues')}
-      variant='filled'
-      minRows={7}
-      helperText={error || t('parameterUploadMainPanel.specifyEntries')}
-      value={parameterString}
-      onBlur={validate}
-      onChange={handleChange}
-      onKeyPress={handleKeyPress}
-    />
+    <>
+      <TextField
+        fullWidth
+        multiline
+        autoFocus={!optimizeUIForTouch}
+        error={Boolean(error)}
+        label={t('parameterUploadMainPanel.parameterNamesValues')}
+        variant='filled'
+        minRows={7}
+        helperText={error || t('parameterUploadMainPanel.specifyEntries')}
+        value={parameterString}
+        onBlur={validate}
+        onChange={handleChange}
+        onKeyPress={handleKeyPress}
+      />
+      <Typography variant='caption' color='textSecondary' component='div'>
+        값에 <code>$id</code>를 쓰면 드론별 수식으로 계산됩니다 (드론 id의
+        숫자 부분). 예: <code>SYSID_THISMAV=$id</code>,{' '}
+        <code>SYSID_THISMAV=$id+1</code>, <code>GRP=($id-1)%4</code>
+      </Typography>
+    </>
   );
 };
 

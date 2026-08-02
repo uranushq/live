@@ -61,6 +61,7 @@ import {
   isMapCoordinateSystemLeftHanded,
 } from '~/selectors/map';
 import {
+  importShow,
   setPlayhead,
   setPlaying,
   setThreeDSync,
@@ -284,9 +285,29 @@ const normalizeFormationPhaseForImport = (raw, index) => {
       fixedDroneIds.push(key);
     }
   });
+  // 클러스터(강체 그룹): [[droneId, ...], ...]
+  const clusters = [];
+  if (Array.isArray(raw?.clusters)) {
+    raw.clusters.forEach((cluster) => {
+      if (!Array.isArray(cluster)) return;
+      const clean = [];
+      cluster.forEach((droneId) => {
+        const key = droneId != null ? String(droneId).trim() : '';
+        if (key && !clean.includes(key)) {
+          clean.push(key);
+        }
+      });
+      if (clean.length) {
+        clusters.push(clean);
+      }
+    });
+  }
   const phase = { id, name, holdMs, points };
   if (fixedDroneIds.length) {
     phase.fixedDroneIds = fixedDroneIds;
+  }
+  if (clusters.length) {
+    phase.clusters = clusters;
   }
   return phase;
 };
@@ -365,17 +386,30 @@ const remapFormationPhasesToDroneIds = (phases, drones) => {
       assign(key);
     });
     let next = { ...phase, points: newPoints };
-    // 직선 고정 드론 목록도 phase.points와 같은 id 매핑을 따라간다.
+    // 직선 고정 드론 목록과 클러스터도 phase.points와 같은 id 매핑을 따른다.
+    const mapId = (k) => {
+      const key = String(k);
+      return keyMap[key] || (droneIdSet.has(key) ? key : null);
+    };
     if (Array.isArray(phase.fixedDroneIds) && phase.fixedDroneIds.length) {
       const newFixed = [];
       phase.fixedDroneIds.forEach((k) => {
-        const key = String(k);
-        const mapped = keyMap[key] || (droneIdSet.has(key) ? key : null);
+        const mapped = mapId(k);
         if (mapped && !newFixed.includes(mapped)) {
           newFixed.push(mapped);
         }
       });
       next = { ...next, fixedDroneIds: newFixed };
+    }
+    if (Array.isArray(phase.clusters) && phase.clusters.length) {
+      const newClusters = phase.clusters
+        .map((cluster) =>
+          (Array.isArray(cluster) ? cluster : [])
+            .map(mapId)
+            .filter((v, i, arr) => v && arr.indexOf(v) === i)
+        )
+        .filter((cluster) => cluster.length > 0);
+      next = { ...next, clusters: newClusters };
     }
     return next;
   });
@@ -800,10 +834,24 @@ const ThreeDView = React.forwardRef((props, ref) => {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
+
+        // uranus-show-project: LED 쇼 섹션이 있으면 JR LED 에디터 상태를
+        // 통째로 복원한다 (섹션이 없으면 LED 상태는 건드리지 않음).
+        if (
+          parsed &&
+          parsed.ledShow &&
+          typeof parsed.ledShow === 'object' &&
+          !Array.isArray(parsed.ledShow)
+        ) {
+          store.dispatch(importShow(parsed.ledShow));
+        }
+
         const importedDrones = normalizeDronesFromConfigImport(parsed);
         if (!importedDrones.length) {
-          // eslint-disable-next-line no-console
-          console.warn('[ThreeDView] invalid drone config JSON (missing "drones")');
+          if (!parsed?.ledShow) {
+            // eslint-disable-next-line no-console
+            console.warn('[ThreeDView] invalid drone config JSON (missing "drones")');
+          }
           return;
         }
         const normalizedDrones = importedDrones.map((d, index) => {
@@ -878,21 +926,60 @@ const ThreeDView = React.forwardRef((props, ref) => {
       dronesForFormationKeys.map((d, index) => normalizeDroneForConfigIO(d, index))
     );
 
+    // ── uranus-show-project v1 ─────────────────────────────────────────
+    // 프론트 상태 전체를 재현 가능한 단일 프로젝트 파일. 섹션은 내용이
+    // 있을 때만 포함한다 (없던 섹션은 다시 열어도 없음):
+    //   format/version : 파일 식별자 ("uranus-show-project", 1)
+    //   drones         : 드론 목록 (id/이름/초기 위치/수동 경로)
+    //   formation      : phases(좌표·yaw·holdMs·직선고정·클러스터) + 설정
+    //   ledShow        : JR LED 애니메이션 (ledsPerDrone, droneCount, fps,
+    //                    boards[id/name/rows/cols/startSec/durationSec/
+    //                    drones(드론별 k*k RGB 픽셀)])
+    // 구버전 three-d-drone-config.json(drones+formation만)도 계속 읽힌다.
     const configToSave = {
+      format: 'uranus-show-project',
+      version: 1,
       drones: droneRows,
       formation: {
-        phases: phasesAligned.map((p) => ({
-          id: p.id,
-          name: String(p.name || '').trim() || 'phase',
-          holdMs: Math.max(0, Math.round(Number(p.holdMs) || 0)),
-          points:
-            p.points && typeof p.points === 'object' && !Array.isArray(p.points)
-              ? { ...p.points }
-              : {},
-        })),
+        phases: phasesAligned.map((p) => {
+          const phase = {
+            id: p.id,
+            name: String(p.name || '').trim() || 'phase',
+            holdMs: Math.max(0, Math.round(Number(p.holdMs) || 0)),
+            points:
+              p.points && typeof p.points === 'object' && !Array.isArray(p.points)
+                ? { ...p.points }
+                : {},
+          };
+          if (Array.isArray(p.fixedDroneIds) && p.fixedDroneIds.length) {
+            phase.fixedDroneIds = [...p.fixedDroneIds];
+          }
+          if (Array.isArray(p.clusters) && p.clusters.length) {
+            phase.clusters = p.clusters.map((c) => [...c]);
+          }
+          return phase;
+        }),
         settings: sanitizeFormationSettings(formationSettings),
       },
     };
+
+    const ledState = store.getState().ledEditor;
+    if (ledState && Array.isArray(ledState.boards) && ledState.boards.length) {
+      configToSave.ledShow = {
+        ledsPerDrone: ledState.ledsPerDrone,
+        droneCount: ledState.droneCount,
+        fps: ledState.fps,
+        boards: ledState.boards.map((b) => ({
+          id: b.id,
+          name: b.name,
+          rows: b.rows,
+          cols: b.cols,
+          startSec: b.startSec,
+          durationSec: b.durationSec,
+          drones: b.drones,
+        })),
+      };
+    }
 
     const blob = new Blob([JSON.stringify(configToSave, null, 2)], {
       type: 'application/json',
@@ -900,7 +987,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'three-d-drone-config.json';
+    a.download = 'uranus-show-project.json';
     document.body.appendChild(a);
     a.click();
     if (a.parentNode === document.body) {
@@ -986,6 +1073,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   const [gizmoDragState, setGizmoDragState] = useState({ dragging: false, axis: null });
 
+  // ── showSpec 모드 뒤로가기 ────────────────────────────────────────────
+  // .skyc 쇼를 로드하면 3D 뷰가 쇼 스펙을 표시하는 모드로 전환된다.
+  // 이 플래그를 켜면 로드된 스펙을 무시하고 수동 편집 상태(droneConfig +
+  // formation)로 돌아간다 — 스펙 자체는 지워지지 않아 언제든 복귀 가능.
+  const [showSpecIgnored, setShowSpecIgnored] = useState(false);
+
+  // 새 쇼 파일이 로드되면 다시 표시 상태로 리셋
+  useEffect(() => {
+    setShowSpecIgnored(false);
+  }, [showSpecDroneConfig]);
+
   // ── 드론 다중 선택 + 그룹 이동 ────────────────────────────────────────
   // 좌측 "드론 선택" 탭에서 고른 드론 id 목록. 2대 이상 선택된 상태에서
   // 선택된 드론의 기즈모를 드래그하면 나머지 선택 드론도 같은 벡터만큼
@@ -1069,8 +1167,46 @@ const ThreeDView = React.forwardRef((props, ref) => {
       window.removeEventListener('drone-moved', onMoved);
     };
   }, []);
+
+  // "드론 선택" 탭에서 고른 드론들을 확인 팝업 후 한 번에 삭제.
+  // 패널의 "선택 삭제" 버튼과 Del 키 모두 이 핸들러를 사용한다.
+  const handleDeleteSelectedDrones = useCallback(() => {
+    const ids = [...multiSelectedRef.current];
+    if (!ids.length) return;
+    const confirmed = window.confirm(
+      `선택한 드론 ${ids.length}대를 삭제할까요?\n(${ids.join(', ')})`
+    );
+    if (!confirmed) return;
+    window.dispatchEvent(
+      new CustomEvent('drone-delete-request', { detail: { ids } })
+    );
+    setMultiSelectedDroneIds([]);
+  }, []);
+
+  useEffect(() => {
+    if (!isCreateMode) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Delete') return;
+      const target = e.target;
+      const tag = target?.tagName ? String(target.tagName).toLowerCase() : '';
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (!multiSelectedRef.current.size) return;
+      e.preventDefault();
+      handleDeleteSelectedDrones();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCreateMode, handleDeleteSelectedDrones]);
   const effectiveConfig = useMemo(() => {
     const hasShowSpec =
+      !showSpecIgnored &&
       showSpecDroneConfig &&
       Array.isArray(showSpecDroneConfig.drones) &&
       showSpecDroneConfig.drones.length > 0;
@@ -1095,7 +1231,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     }
 
     return collectConfigFromScene();
-  }, [droneConfig, showSpecDroneConfig, collectConfigFromScene]);
+  }, [droneConfig, showSpecDroneConfig, showSpecIgnored, collectConfigFromScene]);
   droneConfigRef.current = effectiveConfig;
 
   // 삭제되거나 사라진 드론은 다중 선택에서 자동 제거
@@ -1429,10 +1565,30 @@ const ThreeDView = React.forwardRef((props, ref) => {
     if (!Array.isArray(formationPhases) || !formationPhases.length) return [];
     const s = sanitizeFormationSettings(formationSettings);
     const cruise = Math.max(1e-6, Number(s.cruise_speed) || 0);
-    const moveSec = Math.max(0, Number(s.step_size) || 0) / cruise;
+    // 전환 시간 추정: 이전 phase에서 가장 멀리 이동하는 드론의 직선 거리
+    // 기준 (예전엔 1스텝 시간으로 잡아 실제 타임라인과 크게 어긋났다 —
+    // phase-1이 이륙 구간에 뭉개져 "사라진 것처럼" 보이던 원인).
+    const transitSecTo = (phase, prevPhase) => {
+      const points = phase.points || {};
+      const prevPoints = prevPhase?.points || {};
+      let maxDist = 0;
+      for (const [droneId, p] of Object.entries(points)) {
+        const q = prevPoints[droneId];
+        if (!p || !q) continue;
+        const dx = Number(p.x) - Number(q.x);
+        const dy = Number(p.y) - Number(q.y);
+        const dz = Number(p.z) - Number(q.z);
+        if ([dx, dy, dz].every(Number.isFinite)) {
+          maxDist = Math.max(maxDist, Math.sqrt(dx * dx + dy * dy + dz * dz));
+        }
+      }
+      // 첫 phase는 이전 정보가 없으니 대략 이륙+스테이징 추정치로 20 m.
+      const dist = prevPhase ? maxDist : 20.0;
+      return Math.max(Number(s.step_size) || 1, dist) / cruise;
+    };
     let cursorSec = Math.max(0, Number(s.takeoff_time) || 0);
     return formationPhases.map((phase, i) => {
-      cursorSec += moveSec; // travel to this formation
+      cursorSec += transitSecTo(phase, formationPhases[i - 1]);
       const startSec = cursorSec;
       const holdSec = Math.max(0, Number(phase.holdMs) || 0) / 1000;
       const endSec = startSec + holdSec;
@@ -1639,6 +1795,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
         if (Array.isArray(phase.fixedDroneIds) && phase.fixedDroneIds.length) {
           reversedPhase.fixedDroneIds = [...phase.fixedDroneIds];
         }
+        if (Array.isArray(phase.clusters) && phase.clusters.length) {
+          reversedPhase.clusters = phase.clusters.map((c) => [...c]);
+        }
         return reversedPhase;
       });
       setLastReversedPhaseIds(reversed.map((phase) => phase.id));
@@ -1746,6 +1905,57 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const handleRemoveFormationPhase = useCallback((phaseId) => {
     setFormationPhases((prev) => prev.filter((phase) => phase.id !== phaseId));
     setLastReversedPhaseIds((prev) => prev.filter((id) => id !== phaseId));
+    setSelectedPhaseId((prev) => (prev === phaseId ? null : prev));
+  }, []);
+
+  // ── phase 선택 + 클러스터(강체 그룹) ─────────────────────────────────
+  // phase 카드를 클릭해 선택하면, 좌측 "드론 선택" 탭에서 현재 선택된
+  // 드론들로 그 phase 전환의 클러스터(통째로 움직이는 그룹)를 만들 수 있다.
+  const [selectedPhaseId, setSelectedPhaseId] = useState(null);
+
+  const handleTogglePhaseSelected = useCallback((phaseId) => {
+    const pid = phaseId != null ? String(phaseId) : '';
+    if (!pid) return;
+    setSelectedPhaseId((prev) => (prev === pid ? null : pid));
+  }, []);
+
+  const handleAddClusterToPhase = useCallback((phaseId) => {
+    const pid = phaseId != null ? String(phaseId) : '';
+    const ids = [...multiSelectedRef.current];
+    if (!pid || ids.length < 2) return;
+    setFormationPhases((prev) =>
+      prev.map((phase) => {
+        if (String(phase.id) !== pid) return phase;
+        const existing = Array.isArray(phase.clusters)
+          ? phase.clusters.map((c) => c.map(String))
+          : [];
+        // 새 그룹 멤버는 기존 그룹들에서 제거해 중복 소속을 막는다.
+        const idSet = new Set(ids);
+        const cleaned = existing
+          .map((cluster) => cluster.filter((id) => !idSet.has(id)))
+          .filter((cluster) => cluster.length > 0);
+        return { ...phase, clusters: [...cleaned, ids] };
+      })
+    );
+  }, []);
+
+  const handleAddClusterToSelectedPhase = useCallback(() => {
+    if (selectedPhaseId) {
+      handleAddClusterToPhase(selectedPhaseId);
+    }
+  }, [selectedPhaseId, handleAddClusterToPhase]);
+
+  const handleRemoveClusterFromPhase = useCallback((phaseId, clusterIndex) => {
+    const pid = phaseId != null ? String(phaseId) : '';
+    if (!pid) return;
+    setFormationPhases((prev) =>
+      prev.map((phase) => {
+        if (String(phase.id) !== pid) return phase;
+        const clusters = Array.isArray(phase.clusters) ? phase.clusters : [];
+        const next = clusters.filter((_, index) => index !== clusterIndex);
+        return { ...phase, clusters: next };
+      })
+    );
   }, []);
 
   const handleMoveFormationPhase = useCallback((phaseId, direction) => {
@@ -1782,6 +1992,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
       };
       if (Array.isArray(phase.fixedDroneIds) && phase.fixedDroneIds.length) {
         copy.fixedDroneIds = [...phase.fixedDroneIds];
+      }
+      if (Array.isArray(phase.clusters) && phase.clusters.length) {
+        copy.clusters = phase.clusters.map((c) => [...c]);
       }
       const next = prev.slice();
       next.splice(index + 1, 0, copy);
@@ -1917,6 +2130,24 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const phasePayload = { name, holdMs, points };
       if (fixedPaths.length) {
         phasePayload.fixedPaths = fixedPaths;
+      }
+
+      // 클러스터: 존재하는 드론만, 직선 고정(fixedPaths)과 중복되지 않게.
+      const pointIdSet = new Set(points.map((p) => p.droneId));
+      const clusters = (Array.isArray(phase.clusters) ? phase.clusters : [])
+        .map((cluster) =>
+          (Array.isArray(cluster) ? cluster : [])
+            .map(String)
+            .filter(
+              (id, i, arr) =>
+                pointIdSet.has(id) &&
+                !fixedSet.has(id) &&
+                arr.indexOf(id) === i
+            )
+        )
+        .filter((cluster) => cluster.length > 0);
+      if (clusters.length) {
+        phasePayload.clusters = clusters;
       }
       return phasePayload;
     });
@@ -2078,6 +2309,15 @@ const ThreeDView = React.forwardRef((props, ref) => {
         currentPositionMs={currentPositionMs}
         totalDurationMs={maxPathDurationMs}
         playbackSourceLabel={playbackSourceLabel}
+        showSpecActive={
+          !!(
+            showSpecDroneConfig &&
+            Array.isArray(showSpecDroneConfig.drones) &&
+            showSpecDroneConfig.drones.length > 0
+          )
+        }
+        showSpecIgnored={showSpecIgnored}
+        onToggleShowSpecIgnored={() => setShowSpecIgnored((prev) => !prev)}
         isPlaybackRunning={syncActive ? ledPlaying : isPlaybackRunning}
         ledSyncEnabled={threeDSync}
         onLedSyncToggle={handleLedSyncToggle}
@@ -2240,6 +2480,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onCaptureAllPositionsInPhase={handleCaptureAllPositionsInPhase}
         onToggleFixedStraight={handleToggleFixedStraight}
         onSetAllFixedStraight={handleSetAllFixedStraight}
+        selectedPhaseId={selectedPhaseId}
+        onTogglePhaseSelected={handleTogglePhaseSelected}
+        multiSelectedDroneIds={multiSelectedDroneIds}
+        onAddClusterToPhase={handleAddClusterToPhase}
+        onRemoveClusterFromPhase={handleRemoveClusterFromPhase}
         onApplyDronePositionInPhase={handleApplyDronePositionInPhase}
         onApplyAllDronesInPhase={handleApplyAllDronesInPhase}
         onUpdateFormationSettings={handleUpdateFormationSettings}
@@ -2263,6 +2508,26 @@ const ThreeDView = React.forwardRef((props, ref) => {
             }))}
           selectedIds={multiSelectedDroneIds}
           onChangeSelection={setMultiSelectedDroneIds}
+          onDeleteSelected={handleDeleteSelectedDrones}
+          selectedPhase={(() => {
+            if (!selectedPhaseId) return null;
+            const index = formationPhases.findIndex(
+              (p) => String(p.id) === selectedPhaseId
+            );
+            if (index < 0) return null;
+            const phase = formationPhases[index];
+            return {
+              id: String(phase.id),
+              name: String(phase.name || '').trim() || `phase-${index + 1}`,
+              clusters: Array.isArray(phase.clusters)
+                ? phase.clusters.map((c) => c.map(String))
+                : [],
+            };
+          })()}
+          onCreateCluster={handleAddClusterToSelectedPhase}
+          onRemoveCluster={(clusterIndex) =>
+            handleRemoveClusterFromPhase(selectedPhaseId, clusterIndex)
+          }
         />
       )}
 

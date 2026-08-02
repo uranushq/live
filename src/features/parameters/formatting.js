@@ -1,8 +1,11 @@
 /*
  * Parameters are canonically represented as arrays where each item is shaped
  * as { name, value }. The user manipulates them as strings of the format
- * "name=value", one parameter per line.
+ * "name=value", one parameter per line. Values may be per-drone expressions
+ * (see ./expressions.js), e.g. `SYSID_THISMAV=$id+1`.
  */
+
+import { validateParameterExpression } from './expressions';
 
 export function formatParameters(parameters) {
   const rows = parameters.map(({ name, value }) => `${name}=${value}`);
@@ -40,6 +43,16 @@ export function parseParameters(parameterString) {
     if (name.length === 0) {
       throw new Error(
         `Line ${lineNumber} contains no parameter name, only a value`
+      );
+    }
+
+    try {
+      validateParameterExpression(value);
+    } catch (error) {
+      throw new Error(
+        `Line ${lineNumber}: invalid $-expression — ${
+          error.message || String(error)
+        }`
       );
     }
 

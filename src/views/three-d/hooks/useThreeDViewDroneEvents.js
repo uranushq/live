@@ -169,8 +169,16 @@ export default function useThreeDViewDroneEvents({
     };
 
     const onDroneDeleteRequest = (e) => {
-      const raw = e.detail?.id;
-      if (raw === undefined || raw === null || String(raw).trim() === '') return;
+      // 단일 삭제({id})와 다중 삭제({ids: [...]})를 모두 지원한다. 여러
+      // 드론은 반드시 한 이벤트로 삭제해야 한다 — 이벤트를 드론별로 나눠
+      // 보내면 아래 base 결정이 stale한 droneConfigRef를 다시 읽어 앞서
+      // 지운 드론이 되살아난다.
+      const detail = e.detail || {};
+      const rawList = Array.isArray(detail.ids) ? detail.ids : [detail.id];
+      const idList = rawList
+        .filter((v) => v !== undefined && v !== null && String(v).trim() !== '')
+        .map(String);
+      if (!idList.length) return;
 
       const hasShowSpec =
         showSpecDroneConfig &&
@@ -178,13 +186,11 @@ export default function useThreeDViewDroneEvents({
         showSpecDroneConfig.drones.length > 0;
 
       setDroneConfig((prev) => {
-        const rawId = String(raw);
-
         if (hasShowSpec) {
           const deletedIds = [
             ...new Set([
               ...(Array.isArray(prev?.deletedIds) ? prev.deletedIds : []),
-              rawId,
+              ...idList,
             ]),
           ];
           return { ...(prev || {}), deletedIds };
@@ -207,12 +213,14 @@ export default function useThreeDViewDroneEvents({
           return { drones: [] };
         }
 
-        const drones = base.drones.filter((d) => !sameDroneId(d.id, raw));
+        const drones = base.drones.filter(
+          (d) => !idList.some((id) => sameDroneId(d.id, id))
+        );
         return { ...base, drones };
       });
 
       setSelectedDrone((prev) => {
-        if (prev && sameDroneId(prev.id, raw)) {
+        if (prev && idList.some((id) => sameDroneId(prev.id, id))) {
           queueMicrotask(() => {
             window.dispatchEvent(new CustomEvent('drone-deselected'));
           });

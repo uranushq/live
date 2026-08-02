@@ -219,8 +219,13 @@ if (!AFrame.components['drone-axis-gizmo']) {
     },
 
     _onDroneDeleteRequest(event) {
-      const { id } = event.detail || {};
-      if (id && id === this._selectedId) {
+      const detail = event.detail || {};
+      const ids = Array.isArray(detail.ids)
+        ? detail.ids.map(String)
+        : detail.id != null
+          ? [String(detail.id)]
+          : [];
+      if (this._selectedId && ids.includes(String(this._selectedId))) {
         this._hideGizmo();
       }
     },
