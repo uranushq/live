@@ -224,5 +224,27 @@
     "write": "기체에 쓰기",
     "writeFailed": "파라미터를 기체에 쓰지 못했습니다.",
     "wroteToast": "파라미터 {{count}}개를 기체에 썼습니다"
+  },
+  "takeoffAreaSetupDialog": {
+    "placeVirtualDrones": "가상 드론을 이륙 위치에 배치",
+    "takeoffAreaSetup": "이륙 영역 설정"
+  },
+  "virtualUavsControl": {
+    "actionFailed": "가상 UAV 작업 실패: {{message}}",
+    "applyCount": "적용",
+    "count": "개수",
+    "countSuccess": "가상 UAV 개수를 변경했습니다.",
+    "disable": "끄기",
+    "disableSuccess": "가상 UAV 플릿을 껐습니다.",
+    "disabled": "꺼짐",
+    "droneCount": "{{count}}대",
+    "enable": "켜기",
+    "enableSuccess": "가상 UAV 플릿을 켰습니다.",
+    "enabled": "켜짐",
+    "invalidCount": "개수는 0 이상의 정수여야 합니다.",
+    "noUavs": "레지스트리에 가상 UAV가 없습니다.",
+    "refresh": "상태 새로고침",
+    "statusFailed": "가상 UAV 상태를 불러오지 못했습니다: {{message}}",
+    "title": "가상 UAV 플릿"
   }
 }

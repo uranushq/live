@@ -1047,5 +1047,23 @@
     "sunset": "Sunset",
     "timezone": "Timezone",
     "utcOffset": "UTC offset"
+  },
+  "virtualUavsControl": {
+    "actionFailed": "Virtual UAV action failed: {{message}}",
+    "applyCount": "Apply",
+    "count": "Count",
+    "countSuccess": "Virtual UAV count updated.",
+    "disable": "Disable",
+    "disableSuccess": "Virtual UAV fleet disabled.",
+    "disabled": "Disabled",
+    "droneCount": "{{count}} drones",
+    "enable": "Enable",
+    "enableSuccess": "Virtual UAV fleet enabled.",
+    "enabled": "Enabled",
+    "invalidCount": "Count must be a non-negative integer.",
+    "noUavs": "No virtual UAVs in the registry.",
+    "refresh": "Refresh status",
+    "statusFailed": "Failed to load virtual UAV status: {{message}}",
+    "title": "Virtual UAV fleet"
   }
 }

@@ -44,7 +44,11 @@ const baseline: Config = {
       'altitude-summary-header-button',
       'velocity-summary-header-button',
     ],
-    ['rtk-status-header-button', 'weather-header-button'],
+    [
+      'rtk-status-header-button',
+      'weather-header-button',
+      'virtual-uavs-header-button',
+    ],
     ['connection-status-button'],
     [
       'server-connection-settings-button',
