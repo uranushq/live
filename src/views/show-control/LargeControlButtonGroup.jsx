@@ -68,7 +68,7 @@ import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
 import { scheduleShowStartWithDelay } from '~/features/show/actions';
 
-import { getSelectedUAVIds, getShowStageFlightControlStatus } from '~/features/uavs/selectors';
+import { getSelectedUAVIds, getShowStageFlightControlStatus, getUAVIdList } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
 
@@ -798,6 +798,8 @@ const LargeControlButtonGroup = ({
 
   selectedUAVIds,
 
+  allUAVIds,
+
   showStageFlightControlStatus,
 
   t,
@@ -826,75 +828,59 @@ const LargeControlButtonGroup = ({
 
   const isArmDisabled = Boolean(showStageFlightControlStatus?.armDisabled);
 
+  // Bottom bar Drone Control always targets the current selection only.
+  const selectionOnly = variant === 'bottomBar';
+  const hasSelection = selectedUAVIds.length > 0;
+  const commandsDisabled = selectionOnly && !hasSelection;
+
   const requestCommand = useCallback((commandKey) => {
+    if (commandsDisabled) {
+      return;
+    }
 
     if (commandKey === 'startShow') {
-
       setShowStartDelayOpen(true);
-
       return;
-
     }
 
     setPendingCommand(commandKey);
-
     setConfirmOpen(true);
-
-  }, []);
+  }, [commandsDisabled]);
 
   const handleShowStartDelayClose = useCallback(() => {
-
     setShowStartDelayOpen(false);
-
   }, []);
 
   const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
-
     scheduleShowStartWithDelay(delaySeconds);
-
     setShowStartDelayOpen(false);
-
   }, [scheduleShowStartWithDelay]);
 
   const handleConfirmClose = useCallback(() => {
-
     setConfirmOpen(false);
-
     setPendingCommand(null);
-
   }, []);
 
   const handleConfirmAction = useCallback(() => {
-
     if (!pendingCommand || !uavActions[pendingCommand]) {
-
       return;
-
     }
 
     uavActions[pendingCommand]({ skipUAVOperationConfirmation: true });
-
     handleConfirmClose();
-
   }, [pendingCommand, uavActions, handleConfirmClose]);
 
   const confirmMessage = useMemo(() => {
-
     if (!pendingCommand) {
-
       return '';
-
     }
 
     const labelKey = COMMAND_CONFIRM_LABEL_KEYS[pendingCommand];
-
     const commandLabel = labelKey
-
       ? t(`largeControlButtonGroup.${labelKey}`)
-
       : pendingCommand;
 
-    if (broadcast) {
+    if (!selectionOnly && broadcast) {
       return t('largeControlButtonGroup.confirmCommandMessageBroadcast', {
         command: commandLabel,
       });
@@ -902,7 +888,8 @@ const LargeControlButtonGroup = ({
 
     const drones = formatCommandTargetDrones(
       selectedUAVIds,
-      reverseMissionMapping
+      reverseMissionMapping,
+      allUAVIds
     );
 
     if (!drones) {
@@ -915,8 +902,15 @@ const LargeControlButtonGroup = ({
       command: commandLabel,
       drones,
     });
-
-  }, [broadcast, pendingCommand, reverseMissionMapping, selectedUAVIds, t]);
+  }, [
+    allUAVIds,
+    broadcast,
+    pendingCommand,
+    reverseMissionMapping,
+    selectedUAVIds,
+    selectionOnly,
+    t,
+  ]);
 
   if (variant === 'bottomBar') {
     return (
@@ -927,13 +921,22 @@ const LargeControlButtonGroup = ({
           </Typography>
         ) : null}
 
+        {!hasSelection ? (
+          <Typography className={classes.stageStatusHint} variant='caption'>
+            {t('largeControlButtonGroup.targetSelection')}
+          </Typography>
+        ) : null}
+
         <Box className={classes.bottomBarGrid}>
           {BOTTOM_BAR_BUTTONS.map((button) => (
             <BottomBarCommandButton
               key={button.key}
               button={button}
               classes={classes}
-              disabled={button.key === 'turnMotorsOn' && isArmDisabled}
+              disabled={
+                commandsDisabled ||
+                (button.key === 'turnMotorsOn' && isArmDisabled)
+              }
               label={t(`largeControlButtonGroup.${button.labelKey}`)}
               onClick={() => requestCommand(button.key)}
             />
@@ -1123,6 +1126,8 @@ LargeControlButtonGroup.propTypes = {
 
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
 
+  allUAVIds: PropTypes.arrayOf(PropTypes.string),
+
   showStageFlightControlStatus: PropTypes.shape({
 
     armDisabled: PropTypes.bool,
@@ -1146,87 +1151,57 @@ LargeControlButtonGroup.propTypes = {
 
 
 export default connect(
-
   // mapStateToProps
-
   (state) => ({
-
+    allUAVIds: getUAVIdList(state),
     allUAVIdsInMission: getUAVIdsParticipatingInMission(state),
-
     broadcast: areFlightCommandsBroadcast(state),
-
     channel: getPreferredCommunicationChannelIndex(state),
-
     reverseMissionMapping: getReverseMissionMapping(state),
-
     selectedUAVIds: getSelectedUAVIds(state),
-
     showStageFlightControlStatus: getShowStageFlightControlStatus(state),
-
   }),
-
   // mapDispatchToProps
+  (dispatch, ownProps) => {
+    const selectionOnly = ownProps.variant === 'bottomBar';
 
-  (dispatch) => ({
+    return {
+      onChangeBroadcastMode: (_event, value) => {
+        if (value) {
+          dispatch(setCommandsAreBroadcast(value === 'broadcast'));
+        }
+      },
 
-    onChangeBroadcastMode: (_event, value) => {
+      scheduleShowStartWithDelay: (delaySeconds) => {
+        dispatch(scheduleShowStartWithDelay(delaySeconds));
+      },
 
-      if (value) {
+      uavActions: bindActionCreators(
+        createUAVOperationThunks({
+          getTargetedUAVIds(state) {
+            if (selectionOnly) {
+              return getSelectedUAVIds(state);
+            }
 
-        dispatch(setCommandsAreBroadcast(value === 'broadcast'));
+            const broadcast = areFlightCommandsBroadcast(state);
+            return broadcast
+              ? getUAVIdsParticipatingInMission(state)
+              : getSelectedUAVIds(state);
+          },
 
-      }
-
-    },
-
-
-
-    scheduleShowStartWithDelay: (delaySeconds) => {
-
-      dispatch(scheduleShowStartWithDelay(delaySeconds));
-
-    },
-
-
-
-    uavActions: bindActionCreators(
-
-      createUAVOperationThunks({
-
-        getTargetedUAVIds(state) {
-
-          const broadcast = areFlightCommandsBroadcast(state);
-
-          return broadcast
-
-            ? getUAVIdsParticipatingInMission(state)
-
-            : getSelectedUAVIds(state);
-
-        },
-
-
-
-        getTransportOptions(state) {
-
-          return {
-
-            channel: getPreferredCommunicationChannelIndex(state),
-
-            broadcast: areFlightCommandsBroadcast(state),
-
-          };
-
-        },
-
-      }),
-
-      dispatch
-
-    ),
-
-  })
-
+          getTransportOptions(state) {
+            return {
+              channel: getPreferredCommunicationChannelIndex(state),
+              broadcast: selectionOnly
+                ? false
+                : areFlightCommandsBroadcast(state),
+            };
+          },
+        }),
+        dispatch
+      ),
+    };
+  }
 )(withTranslation()(LargeControlButtonGroup));
 
 

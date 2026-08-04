@@ -120,24 +120,25 @@ export default function DroneSelectPanel({
 
       {!collapsed && (
         <>
-          <div style={{ display: 'flex', gap: 6, padding: '8px 10px 4px' }}>
+          <div style={{ display: 'flex', gap: 8, padding: '10px 10px 6px' }}>
             <button
               type='button'
               onClick={selectAll}
               disabled={drones.length === 0}
               style={{
                 flex: 1,
-                padding: '5px 0',
-                borderRadius: 6,
+                minHeight: 40,
+                padding: '10px 0',
+                borderRadius: 8,
                 border: '1px solid #2c2e36',
-                background: '#22304a',
-                color: '#9cc0ff',
-                fontSize: 11.5,
-                fontWeight: 600,
+                background: '#2f80ed',
+                color: '#ffffff',
+                fontSize: 14,
+                fontWeight: 700,
                 cursor: drones.length ? 'pointer' : 'default',
               }}
             >
-              전체선택
+              Select All
             </button>
             <button
               type='button'
@@ -145,17 +146,18 @@ export default function DroneSelectPanel({
               disabled={selectedIds.length === 0}
               style={{
                 flex: 1,
-                padding: '5px 0',
-                borderRadius: 6,
+                minHeight: 40,
+                padding: '10px 0',
+                borderRadius: 8,
                 border: '1px solid #2c2e36',
                 background: '#1c1e24',
-                color: '#9a9ca3',
-                fontSize: 11.5,
-                fontWeight: 600,
+                color: '#d7d9de',
+                fontSize: 14,
+                fontWeight: 700,
                 cursor: selectedIds.length ? 'pointer' : 'default',
               }}
             >
-              해제
+              Deselect
             </button>
           </div>
 

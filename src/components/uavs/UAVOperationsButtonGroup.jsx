@@ -126,6 +126,7 @@ const UAVOperationsButtonGroup = ({
   requestRemovalOfUAVsMarkedAsGone,
   reverseMissionMapping,
   selectedUAVIds,
+  allUAVIds,
   showStageFlightControlStatus,
   size,
   startSeparator,
@@ -226,7 +227,8 @@ const UAVOperationsButtonGroup = ({
 
     const drones = formatCommandTargetDrones(
       selectedUAVIds,
-      reverseMissionMapping
+      reverseMissionMapping,
+      allUAVIds
     );
 
     if (!drones) {
@@ -239,7 +241,14 @@ const UAVOperationsButtonGroup = ({
       command: commandLabel,
       drones,
     });
-  }, [broadcast, pendingFlightCommand, reverseMissionMapping, selectedUAVIds, t]);
+  }, [
+    allUAVIds,
+    broadcast,
+    pendingFlightCommand,
+    reverseMissionMapping,
+    selectedUAVIds,
+    t,
+  ]);
 
   const [keepFlashing, setKeepFlashing] = useState(false);
   const flashLightsButtonOnClick = useCallback(
@@ -600,6 +609,7 @@ UAVOperationsButtonGroup.propTypes = {
   requestRemovalOfUAVsMarkedAsGone: PropTypes.func,
   reverseMissionMapping: PropTypes.object,
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
+  allUAVIds: PropTypes.arrayOf(PropTypes.string),
   showStageFlightControlStatus: PropTypes.shape({
     armDisabled: PropTypes.bool,
     errorCount: PropTypes.number,
@@ -620,6 +630,7 @@ export default connect(
       : ownProps.selectedUAVIds ?? [];
 
     return {
+      allUAVIds: getUAVIdList(state),
       reverseMissionMapping: getReverseMissionMapping(state),
       showStageFlightControlStatus: summarizeShowStageFlightControlStatus(
         targetUAVIds,
