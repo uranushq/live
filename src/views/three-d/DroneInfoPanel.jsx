@@ -514,6 +514,7 @@ export default function DroneInfoPanel({
   formationPhases = [],
   formationSettings = null,
   isSendingFormation = false,
+  formationSendStartedAt = null,
   formationDeliveryStatus = '',
   onAddFormationPhase = () => {},
   onAppendReversedFormationPhases = () => {},
@@ -533,6 +534,7 @@ export default function DroneInfoPanel({
   multiSelectedDroneIds = [],
   onAddClusterToPhase = () => {},
   onRemoveClusterFromPhase = () => {},
+  onOpenImageDots = () => {},
   onApplyDronePositionInPhase = () => {},
   onApplyAllDronesInPhase = () => {},
   onUpdateFormationSettings = () => {},
@@ -542,6 +544,22 @@ export default function DroneInfoPanel({
   skycDownloadStatus = '',
 }) {
   const [activeTab, setActiveTab] = useState('path');
+
+  // 포메이션 전송 중 경과 시간 (0.5초 간격 갱신)
+  const [sendElapsedSec, setSendElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!isSendingFormation || !formationSendStartedAt) {
+      setSendElapsedSec(0);
+      return undefined;
+    }
+    const update = () =>
+      setSendElapsedSec(
+        Math.floor((Date.now() - formationSendStartedAt) / 1000)
+      );
+    update();
+    const timer = setInterval(update, 500);
+    return () => clearInterval(timer);
+  }, [isSendingFormation, formationSendStartedAt]);
   const [pathPoints, setPathPoints] = useState([
     { x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false },
   ]);
@@ -1089,6 +1107,7 @@ export default function DroneInfoPanel({
     takeoff_time: 0,
     auto_upload: false,
     output: '',
+    min_separation: 1.45,
   };
 
   const renderPathTab = () => (
@@ -1268,6 +1287,15 @@ export default function DroneInfoPanel({
             >
               <Add sx={{ fontSize: 16, color: 'inherit' }} />
               현재 배치로 Phase 추가
+            </FormationActionButton>
+            <FormationActionButton
+              title="이미지를 올려 내용·구조를 대표하는 점들을 추출하고, 정면 수직 평면 phase로 추가"
+              onClick={onOpenImageDots}
+              disabled={droneCount === 0}
+              variant="secondary"
+              style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12 }}
+            >
+              이미지 → 점
             </FormationActionButton>
             <FormationActionButton
               title="기존 phase를 역순으로 복제해 뒤에 추가"
@@ -2030,6 +2058,15 @@ export default function DroneInfoPanel({
                 placeholder: '0 = 생략',
                 title: '0이면 페이로드에 포함되지 않습니다 (옵션값)',
               },
+              {
+                key: 'min_separation',
+                label: '최소 간격 (m)',
+                placeholder: '1.45',
+                title:
+                  '드론 간 최소 간격 (모든 축 기준, m). 절대 하한 1.45 m — ' +
+                  '그보다 작은 값을 입력해도 1.45로 강제됩니다. ' +
+                  '초기 배치·모든 phase 좌표·비행 중 경로 전부에 적용됩니다.',
+              },
             ].map(({ key, label, placeholder, title }) => {
               const displayValue =
                 formationSettingsDrafts[key] ??
@@ -2157,7 +2194,9 @@ export default function DroneInfoPanel({
             }}
           >
             <Send sx={{ fontSize: 16, color: 'inherit' }} />
-            {isSendingFormation ? '전달 중...' : '포메이션 전달'}
+            {isSendingFormation
+              ? `전달 중... ${sendElapsedSec}s (계획 계산에는 수 분이 걸릴 수 있습니다)`
+              : '포메이션 전달'}
           </FormationActionButton>
         </div>
 
@@ -2467,11 +2506,13 @@ DroneInfoPanel.propTypes = {
   formationSettings: PropTypes.shape({
     step_size: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     cruise_speed: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    min_separation: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     takeoff_time: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     auto_upload: PropTypes.bool,
     output: PropTypes.string,
   }),
   isSendingFormation: PropTypes.bool,
+  formationSendStartedAt: PropTypes.number,
   formationDeliveryStatus: PropTypes.string,
   onAddFormationPhase: PropTypes.func,
   onAppendReversedFormationPhases: PropTypes.func,
@@ -2491,6 +2532,7 @@ DroneInfoPanel.propTypes = {
   multiSelectedDroneIds: PropTypes.arrayOf(PropTypes.string),
   onAddClusterToPhase: PropTypes.func,
   onRemoveClusterFromPhase: PropTypes.func,
+  onOpenImageDots: PropTypes.func,
   onApplyDronePositionInPhase: PropTypes.func,
   onApplyAllDronesInPhase: PropTypes.func,
   onUpdateFormationSettings: PropTypes.func,
