@@ -183,6 +183,12 @@
   "toolbox": {
     "paramViewer": "파라미터 조회"
   },
+  "parameterUploadMainPanel": {
+    "addToManifest": "매니페스트에 추가",
+    "expressionHint": "값에 $id를 쓰면 드론별 수식으로 계산됩니다 (드론 id의 숫자 부분). 예: SYSID_THISMAV=$id, SYSID_THISMAV=$id+1, GRP=($id-1)%4",
+    "parameterUploadHint": "<kbd>⇧</kbd> + <kbd>Enter</kbd> 또는 매니페스트에 추가 버튼으로 파라미터를 추가하세요. 사이드바의 파라미터를 클릭하면 매니페스트에서 제거됩니다.",
+    "specifyEntries": "name=value 형식으로 한 줄에 하나씩 입력하세요."
+  },
   "parameterViewerDialog": {
     "allGroups": "전체 그룹",
     "columnDefault": "기본값",

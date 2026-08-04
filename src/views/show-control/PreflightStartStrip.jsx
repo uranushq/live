@@ -1,3 +1,5 @@
+import ListAlt from '@mui/icons-material/ListAlt';
+import Tune from '@mui/icons-material/Tune';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Typography from '@mui/material/Typography';
@@ -8,6 +10,8 @@ import { connect } from 'react-redux';
 
 import { makeStyles } from '@skybrush/app-theme-mui';
 
+import { showParameterUploadDialog } from '~/features/parameters/actions';
+import { showParameterViewerDialog } from '~/features/parameters/slice';
 import { getUAVIdsParticipatingInMission } from '~/features/mission/selectors';
 import { isShowAuthorizedToStartLocally } from '~/features/show/selectors';
 import {
@@ -83,11 +87,47 @@ const useStyles = makeStyles((theme) => ({
     lineHeight: 1.25,
     textTransform: 'uppercase',
   },
+  toolButton: {
+    alignItems: 'center',
+    backgroundColor: theme.palette.action.hover,
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: theme.spacing(1),
+    color: theme.palette.text.primary,
+    display: 'flex',
+    gap: theme.spacing(0.75),
+    justifyContent: 'flex-start',
+    minHeight: 36,
+    padding: theme.spacing(0.5, 1),
+    textAlign: 'left',
+    transition: theme.transitions.create(['background-color', 'border-color']),
+    width: '100%',
+
+    '&:hover': {
+      backgroundColor: theme.palette.action.selected,
+    },
+
+    '&.Mui-focusVisible': {
+      outline: `2px solid ${theme.palette.primary.main}`,
+      outlineOffset: 2,
+    },
+  },
+  toolIcon: {
+    color: theme.palette.text.secondary,
+    flexShrink: 0,
+    fontSize: '1.15rem',
+  },
+  toolLabel: {
+    fontSize: 'clamp(0.72rem, 0.85vw, 0.8rem)',
+    fontWeight: 600,
+    lineHeight: 1.2,
+  },
 }));
 
 const PreflightStartStrip = ({
   isAuthorized,
   onAuthorizeClick,
+  onOpenParameterUpload,
+  onOpenParameterViewer,
   revocationDisabled,
 }) => {
   const classes = useStyles();
@@ -116,6 +156,28 @@ const PreflightStartStrip = ({
           {authorizeLabel}
         </Typography>
       </ButtonBase>
+
+      <ButtonBase
+        className={classes.toolButton}
+        focusRipple={false}
+        onClick={onOpenParameterUpload}
+      >
+        <Tune className={classes.toolIcon} />
+        <Typography className={classes.toolLabel} component='span'>
+          {t('toolbox.paramUpload')}
+        </Typography>
+      </ButtonBase>
+
+      <ButtonBase
+        className={classes.toolButton}
+        focusRipple={false}
+        onClick={onOpenParameterViewer}
+      >
+        <ListAlt className={classes.toolIcon} />
+        <Typography className={classes.toolLabel} component='span'>
+          {t('toolbox.paramViewer')}
+        </Typography>
+      </ButtonBase>
     </Box>
   );
 };
@@ -123,6 +185,8 @@ const PreflightStartStrip = ({
 PreflightStartStrip.propTypes = {
   isAuthorized: PropTypes.bool,
   onAuthorizeClick: PropTypes.func,
+  onOpenParameterUpload: PropTypes.func,
+  onOpenParameterViewer: PropTypes.func,
   revocationDisabled: PropTypes.bool,
 };
 
@@ -145,5 +209,7 @@ export default connect(
       }
       dispatch(openShowStartPermissionDialog());
     },
+    onOpenParameterUpload: showParameterUploadDialog,
+    onOpenParameterViewer: showParameterViewerDialog,
   }
 )(PreflightStartStrip);

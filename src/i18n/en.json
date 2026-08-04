@@ -486,8 +486,10 @@
     "removeAllItems": "Remove all items from manifest"
   },
   "parameterUploadMainPanel": {
+    "addToManifest": "Add to manifest",
+    "expressionHint": "Use $id in values for per-drone formulas (numeric part of the drone id). Examples: SYSID_THISMAV=$id, SYSID_THISMAV=$id+1, GRP=($id-1)%4",
     "parameterNamesValues": "Parameter names and values",
-    "parameterUploadHint": "Press <kbd>⇧</kbd> + <kbd>Enter</kbd> to add the parameter to the manifest. Click on a parameter in the sidebar to remove it from the manifest.",
+    "parameterUploadHint": "Use <kbd>⇧</kbd> + <kbd>Enter</kbd> or the Add to manifest button to add parameters. Click on a parameter in the sidebar to remove it from the manifest.",
     "rebootAfterUpload": "Reboot after upload",
     "specifyEntries": "Specify entries as name=value, one parameter per row."
   },
