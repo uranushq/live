@@ -15,6 +15,7 @@ import React from 'react';
 import { getSingleUAVStatusLevel } from '~/features/uavs/selectors';
 import { isPositionOutsideGeofencePolygon } from '~/features/safety/geofencePosition';
 import Flock from '~/model/flock';
+import { isGPSPositionValid } from '~/model/geography';
 import { uavIdToGlobalId } from '~/model/identifiers';
 import { setLayerSelectable, setLayerTriggersTooltip } from '~/model/layers';
 import type UAV from '~/model/uav';
@@ -296,19 +297,27 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     }
   };
 
+  _getValidMapCoordinates = (uav: UAV): LonLat | undefined => {
+    // Prefer the validated `position` getter so Null Island / NaN never move
+    // markers. Falling back to lon/lat getters would reintroduce dropouts.
+    const gps = uav.position;
+    if (!isGPSPositionValid(gps)) {
+      return undefined;
+    }
+
+    return [gps.lon, gps.lat];
+  };
+
   _isOutsideGeofence = (uav: UAV) => {
     const { geofencePoints } = this.props;
-    if (
-      !geofencePoints?.length ||
-      uav.lon === undefined ||
-      uav.lat === undefined
-    ) {
+    const coords = this._getValidMapCoordinates(uav);
+    if (!geofencePoints?.length || !coords) {
       return false;
     }
 
     return (
       isPositionOutsideGeofencePolygon(
-        { lon: uav.lon, lat: uav.lat },
+        { lon: coords[0], lat: coords[1] },
         geofencePoints
       ) ?? false
     );
@@ -323,18 +332,19 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
    */
   _onUAVsUpdated = (uavs: UAV[]) => {
     for (const uav of uavs) {
-      if (uav.lon === 0 && uav.lat === 0) {
+      const coords = this._getValidMapCoordinates(uav);
+      let feature = this._featureManager.getFeatureById(uav.id);
+
+      if (coords) {
+        feature = this._featureManager.createOrUpdateFeatureById(
+          uav.id,
+          coords
+        );
+      } else if (!feature) {
+        // No valid fix yet and nothing on the map — wait for the next good GPS.
         continue;
       }
-
-      if (uav.lon === undefined || uav.lat === undefined) {
-        continue;
-      }
-
-      const feature = this._featureManager.createOrUpdateFeatureById(uav.id, [
-        uav.lon,
-        uav.lat,
-      ]);
+      // Invalid/missing GPS: keep the existing marker at its last-good location.
 
       // Set or update the heading of the feature
       if (uav.heading !== undefined) {

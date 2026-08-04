@@ -1037,17 +1037,6 @@
     "uav-details": "UAV details",
     "uav-list": "UAVs"
   },
-  "weatherMiniList": {
-    "compassDeclination": "Compass declination",
-    "kpIndex": "Kp index",
-    "lastUpdate": "Last update",
-    "noWeatherInfo": "No weather information on this day",
-    "refreshing": "Refreshing…",
-    "sunrise": "Sunrise",
-    "sunset": "Sunset",
-    "timezone": "Timezone",
-    "utcOffset": "UTC offset"
-  },
   "virtualUavsControl": {
     "actionFailed": "Virtual UAV action failed: {{message}}",
     "applyCount": "Apply",
@@ -1065,5 +1054,16 @@
     "refresh": "Refresh status",
     "statusFailed": "Failed to load virtual UAV status: {{message}}",
     "title": "Virtual UAV fleet"
+  },
+  "weatherMiniList": {
+    "compassDeclination": "Compass declination",
+    "kpIndex": "Kp index",
+    "lastUpdate": "Last update",
+    "noWeatherInfo": "No weather information on this day",
+    "refreshing": "Refreshing…",
+    "sunrise": "Sunrise",
+    "sunset": "Sunset",
+    "timezone": "Timezone",
+    "utcOffset": "UTC offset"
   }
 }
