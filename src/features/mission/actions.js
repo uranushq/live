@@ -39,6 +39,7 @@ import {
   getCurrentLocalPositionByUavId,
   getMissingUAVIdsInMapping,
   getSingleSelectedUAVId,
+  getAllUAVIdList,
   getUAVIdList,
   getUnmappedUAVIds,
 } from '~/features/uavs/selectors';
@@ -811,7 +812,7 @@ export const restoreMissingFeatures =
     // and generic coordinates as well, if UAVs are not available
     const markerParameters = [
       ...(mapping[ParameterUIContext.SELECTED_MARKER_FEATURE] ?? []),
-      ...(getUAVIdList(state).length === 0
+      ...(getAllUAVIdList(state).length === 0
         ? [
             ...(mapping[ParameterUIContext.SELECTED_UAV_COORDINATE] ?? []),
             ...(mapping[ParameterUIContext.SELECTED_COORDINATE] ?? []),

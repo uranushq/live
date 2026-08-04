@@ -35,6 +35,8 @@ export type ActiveUAVsLayerSourceProps = {
   selection: string[];
   labelHidden?: boolean;
   scale: number;
+  /** When provided, only these UAV IDs are shown on the map. */
+  visibleUAVIds?: string[];
 };
 
 type EventBindings = {
@@ -85,6 +87,10 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     this._onGeofenceMaybeChanged(
       previousProps.geofencePoints,
       this.props.geofencePoints
+    );
+    this._onVisibleUAVIdsMaybeChanged(
+      previousProps.visibleUAVIds,
+      this.props.visibleUAVIds
     );
     this._featureManager.projection = this.props.projection;
     if (this.props.labelHidden !== previousProps.labelHidden) {
@@ -284,6 +290,33 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     }
   };
 
+  _onVisibleUAVIdsMaybeChanged = (
+    oldVisibleUAVIds: string[] | undefined,
+    newVisibleUAVIds: string[] | undefined
+  ) => {
+    if (oldVisibleUAVIds === newVisibleUAVIds) {
+      return;
+    }
+
+    // Identity-stable arrays from createSelector still need a content check.
+    if (
+      Array.isArray(oldVisibleUAVIds) &&
+      Array.isArray(newVisibleUAVIds) &&
+      oldVisibleUAVIds.length === newVisibleUAVIds.length &&
+      oldVisibleUAVIds.every((id, index) => id === newVisibleUAVIds[index])
+    ) {
+      return;
+    }
+
+    const flock = this.props.flock;
+    if (!flock) {
+      return;
+    }
+
+    this._featureManager.removeAllFeatures();
+    this._onUAVsUpdated(flock.getAllUAVs());
+  };
+
   /**
    * Event handler that is called when some UAVs were removed from the flock and
    * the layer should be re-drawn without these UAVs.
@@ -295,6 +328,15 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
     for (const uav of uavs) {
       this._featureManager.removeFeatureById(uav.id);
     }
+  };
+
+  _isUAVVisible = (uavId: string): boolean => {
+    const { visibleUAVIds } = this.props;
+    if (!visibleUAVIds) {
+      return true;
+    }
+
+    return visibleUAVIds.includes(uavId);
   };
 
   _getValidMapCoordinates = (uav: UAV): LonLat | undefined => {
@@ -332,6 +374,11 @@ class ActiveUAVsLayerSource extends React.Component<ActiveUAVsLayerSourceProps> 
    */
   _onUAVsUpdated = (uavs: UAV[]) => {
     for (const uav of uavs) {
+      if (!this._isUAVVisible(uav.id)) {
+        this._featureManager.removeFeatureById(uav.id);
+        continue;
+      }
+
       const coords = this._getValidMapCoordinates(uav);
       let feature = this._featureManager.getFeatureById(uav.id);
 

@@ -190,6 +190,34 @@
       "warningsAndErrors": "Warn/Err"
     }
   },
+  "droneGroups": {
+    "allDrones": "All drones",
+    "availableDrones": "Available ({{count}})",
+    "badge": "Group",
+    "chipLabel": "{{name}}",
+    "chipLabelAll": "Group",
+    "clearGroupFilter": "Show all drones",
+    "clearSelection": "Clear",
+    "create": "Create",
+    "createGroup": "Create group…",
+    "createTitle": "Create drone group",
+    "currentGroup": "Current group",
+    "delete": "Delete",
+    "editGroup": "Edit group…",
+    "editTitle": "Edit drone group",
+    "filterBy": "Filter by group",
+    "filterByMulti": "Select one or more groups",
+    "memberCount": "{{count}} drones",
+    "multipleGroups": "{{count}} groups",
+    "name": "Group name",
+    "noAvailableDrones": "No available drones",
+    "noDronesAvailable": "No drones available",
+    "noneSelected": "No drones selected",
+    "save": "Save",
+    "selectAll": "Select all",
+    "selectDrones": "Include drones",
+    "selectedDrones": "Selected ({{count}})"
+  },
   "fitAllFeaturesButton": {
     "fitAllDrones": "Fit all drones",
     "fitAllFeatures": "Fit all features"

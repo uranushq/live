@@ -6,7 +6,8 @@ import { connect } from 'react-redux';
 
 import { makeStyles } from '@skybrush/app-theme-mui';
 
-import { clearSelection, selectAllUAVs } from '~/features/map/selection';
+import { clearSelection } from '~/features/map/selection';
+import { selectAllVisibleUAVs } from '~/features/drone-groups/actions';
 import { getSelectedUAVIds, getUAVIdList } from '~/features/uavs/selectors';
 
 const useStyles = makeStyles((theme) => ({
@@ -132,6 +133,6 @@ export default connect(
   },
   {
     onDeselect: clearSelection,
-    onSelectAll: selectAllUAVs,
+    onSelectAll: selectAllVisibleUAVs,
   }
 )(DroneSelectionButtons);
