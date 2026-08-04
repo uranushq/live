@@ -444,10 +444,15 @@
     "altitude": "Altitude",
     "arrows": "Arrows",
     "flyForwardBackward": "Fly forward / backward",
+    "flyMove": "Fly / strafe",
+    "leftDragLook": "Left drag: look around",
     "lookAround": "Look around",
+    "middleDrag": "Middle drag",
     "moveSideways": "Move sideways",
     "noInstruction": "No instructions for this navigation mode",
-    "run": "Run",
+    "rightDrag": "Right drag",
+    "run": "Faster move",
+    "shiftDrag": "Shift + drag",
     "walkAround": "Walk around"
   },
   "notifications": {

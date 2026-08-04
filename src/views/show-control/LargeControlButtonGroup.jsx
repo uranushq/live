@@ -66,15 +66,15 @@ import {
 
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
-import { scheduleShowStartWithDelay } from '~/features/show/actions';
+import { isShowAuthorizedToStartLocally } from '~/features/show/selectors';
+
+import { openStartTimeDialog } from '~/features/show/slice';
 
 import { getSelectedUAVIds, getShowStageFlightControlStatus, getUAVIdList } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
 
 import { formatCommandTargetDrones } from './formatCommandTargetDrones';
-
-import ShowStartDelayDialog from './ShowStartDelayDialog';
 
 
 
@@ -790,11 +790,13 @@ const LargeControlButtonGroup = ({
 
   broadcast,
 
+  isShowAuthorized,
+
   onChangeBroadcastMode,
 
-  reverseMissionMapping,
+  onOpenStartTimeDialog,
 
-  scheduleShowStartWithDelay,
+  reverseMissionMapping,
 
   selectedUAVIds,
 
@@ -818,8 +820,6 @@ const LargeControlButtonGroup = ({
 
   const [pendingCommand, setPendingCommand] = useState(null);
 
-  const [showStartDelayOpen, setShowStartDelayOpen] = useState(false);
-
   const stageStatusMessage = showStageFlightControlStatus?.statusMessageKey
 
     ? t(showStageFlightControlStatus.statusMessageKey)
@@ -839,22 +839,16 @@ const LargeControlButtonGroup = ({
     }
 
     if (commandKey === 'startShow') {
-      setShowStartDelayOpen(true);
+      if (!isShowAuthorized) {
+        return;
+      }
+      onOpenStartTimeDialog?.();
       return;
     }
 
     setPendingCommand(commandKey);
     setConfirmOpen(true);
-  }, [commandsDisabled]);
-
-  const handleShowStartDelayClose = useCallback(() => {
-    setShowStartDelayOpen(false);
-  }, []);
-
-  const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
-    scheduleShowStartWithDelay(delaySeconds);
-    setShowStartDelayOpen(false);
-  }, [scheduleShowStartWithDelay]);
+  }, [commandsDisabled, isShowAuthorized, onOpenStartTimeDialog]);
 
   const handleConfirmClose = useCallback(() => {
     setConfirmOpen(false);
@@ -948,12 +942,6 @@ const LargeControlButtonGroup = ({
           message={confirmMessage}
           onConfirm={handleConfirmAction}
           onCancel={handleConfirmClose}
-        />
-
-        <ShowStartDelayDialog
-          open={showStartDelayOpen}
-          onCancel={handleShowStartDelayClose}
-          onConfirm={handleShowStartDelayConfirm}
         />
       </Box>
     );
@@ -1100,12 +1088,6 @@ const LargeControlButtonGroup = ({
 
       />
 
-      <ShowStartDelayDialog
-        open={showStartDelayOpen}
-        onCancel={handleShowStartDelayClose}
-        onConfirm={handleShowStartDelayConfirm}
-      />
-
     </Box>
 
   );
@@ -1118,11 +1100,13 @@ LargeControlButtonGroup.propTypes = {
 
   broadcast: PropTypes.bool,
 
+  isShowAuthorized: PropTypes.bool,
+
   onChangeBroadcastMode: PropTypes.func,
 
-  reverseMissionMapping: PropTypes.object,
+  onOpenStartTimeDialog: PropTypes.func,
 
-  scheduleShowStartWithDelay: PropTypes.func.isRequired,
+  reverseMissionMapping: PropTypes.object,
 
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
 
@@ -1157,6 +1141,7 @@ export default connect(
     allUAVIdsInMission: getUAVIdsParticipatingInMission(state),
     broadcast: areFlightCommandsBroadcast(state),
     channel: getPreferredCommunicationChannelIndex(state),
+    isShowAuthorized: isShowAuthorizedToStartLocally(state),
     reverseMissionMapping: getReverseMissionMapping(state),
     selectedUAVIds: getSelectedUAVIds(state),
     showStageFlightControlStatus: getShowStageFlightControlStatus(state),
@@ -1172,8 +1157,8 @@ export default connect(
         }
       },
 
-      scheduleShowStartWithDelay: (delaySeconds) => {
-        dispatch(scheduleShowStartWithDelay(delaySeconds));
+      onOpenStartTimeDialog: () => {
+        dispatch(openStartTimeDialog());
       },
 
       uavActions: bindActionCreators(

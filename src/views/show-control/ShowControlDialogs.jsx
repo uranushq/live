@@ -6,6 +6,7 @@ import EnvironmentEditorDialog from './EnvironmentEditorDialog';
 import LoadShowFromCloudDialog from './LoadShowFromCloudDialog';
 import ManualPreflightChecksDialog from './ManualPreflightChecksDialog';
 import OnboardPreflightChecksDialog from './OnboardPreflightChecksDialog';
+import ShowStartPermissionDialog from './ShowStartPermissionDialog';
 import StartTimeDialog from './StartTimeDialog';
 import TakeoffAreaSetupDialog from './TakeoffAreaSetupDialog';
 
@@ -20,6 +21,7 @@ const ShowControlDialogs = () => (
     <TakeoffAreaSetupDialog />
     <OnboardPreflightChecksDialog />
     <ManualPreflightChecksDialog />
+    <ShowStartPermissionDialog />
   </>
 );
 

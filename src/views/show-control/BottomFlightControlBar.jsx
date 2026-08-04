@@ -52,11 +52,7 @@ const useStyles = makeStyles((theme) => ({
     display: 'grid',
     gap: theme.spacing(1),
     gridAutoRows: 'auto',
-    gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 0.95fr)',
-
-    [theme.breakpoints.down('xl')]: {
-      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 0.9fr)',
-    },
+    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.7fr)',
 
     [theme.breakpoints.down('md')]: {
       gridTemplateColumns: 'minmax(0, 1fr)',
