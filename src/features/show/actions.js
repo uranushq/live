@@ -22,6 +22,7 @@ import {
 } from '~/features/mission/slice';
 import { showNotification } from '~/features/snackbar/actions';
 import { MessageSemantics } from '~/features/snackbar/types';
+import { getRoundedClockSkewInMilliseconds } from '~/features/servers/selectors';
 import {
   getActiveUAVIds,
   getCurrentGPSPositionByUavId,
@@ -92,21 +93,28 @@ export const authorizeIfAndOnlyIfHasStartTime = () => (dispatch, getState) => {
 
 /**
  * Schedules the show to start automatically after the given delay in seconds.
+ *
+ * Uses the server-corrected clock (PC time + clock skew) so the absolute UTC
+ * start time matches what the server / GPS-synced drones expect. Without this,
+ * a PC that is ahead of GPS makes a 15s delay feel like ~50s on real aircraft.
  */
-export const scheduleShowStartWithDelay = (delaySeconds) => (dispatch) => {
-  const seconds = Math.max(0, Math.floor(Number(delaySeconds)) || 0);
+export const scheduleShowStartWithDelay =
+  (delaySeconds) => (dispatch, getState) => {
+    const seconds = Math.max(0, Math.floor(Number(delaySeconds)) || 0);
+    const clockSkew = getRoundedClockSkewInMilliseconds(getState()) || 0;
+    const startAt = add(Date.now() + clockSkew, { seconds });
 
-  dispatch(setStartMethod(StartMethod.AUTO));
-  dispatch(
-    setStartTime({
-      clock: undefined,
-      time: getUnixTime(startOfSecond(add(Date.now(), { seconds }))),
-    })
-  );
-  dispatch(setShowAuthorization(true));
-  dispatch(setCommandsAreBroadcast(true));
-  dispatch(synchronizeShowSettings('toServer'));
-};
+    dispatch(setStartMethod(StartMethod.AUTO));
+    dispatch(
+      setStartTime({
+        clock: undefined,
+        time: getUnixTime(startOfSecond(startAt)),
+      })
+    );
+    dispatch(setShowAuthorization(true));
+    dispatch(setCommandsAreBroadcast(true));
+    dispatch(synchronizeShowSettings('toServer'));
+  };
 
 /**
  * Returns an action that clears the last show upload result from the upload

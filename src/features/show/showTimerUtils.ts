@@ -50,8 +50,11 @@ export function getSecondsUntilShowStart(
   }
 
   const clockRef = getShowClockReference(state);
+  const skew = getRoundedClockSkewInMilliseconds(state) || 0;
+
   if (!clockRef) {
-    return startTime - nowMs / 1000;
+    // Absolute UTC start times are authored against the server clock.
+    return startTime - (nowMs + skew) / 1000;
   }
 
   const clock = getClockById(state, clockRef);
@@ -59,11 +62,9 @@ export function getSecondsUntilShowStart(
     return null;
   }
 
-  const skew = isClockAffectedByClockSkew(clock)
-    ? getRoundedClockSkewInMilliseconds(state) || 0
-    : 0;
+  const clockSkew = isClockAffectedByClockSkew(clock) ? skew : 0;
   const currentSeconds =
-    getTickCountOnClockAt(clock, nowMs + skew) / clock.ticksPerSecond;
+    getTickCountOnClockAt(clock, nowMs + clockSkew) / clock.ticksPerSecond;
 
   return startTime - currentSeconds;
 }
