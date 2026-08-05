@@ -21,6 +21,7 @@ import DroneInfoPanel from './DroneInfoPanel';
 import DroneSelectPanel from './DroneSelectPanel';
 import PathControlPanel from './PathControlPanel';
 import AddDroneModal from './AddDroneModal';
+import FormationGridModal from './FormationGridModal';
 import PathGeneratorModal from './PathGeneratorModal';
 import useThreeDViewDroneEvents from './hooks/useThreeDViewDroneEvents';
 import {
@@ -606,6 +607,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   // 드론 추가 모달
   const [addDroneModalOpen, setAddDroneModalOpen] = useState(false);
+  const [formationGridModalOpen, setFormationGridModalOpen] = useState(false);
+  const [formationGridEditPhaseId, setFormationGridEditPhaseId] = useState(null);
   const [pathGeneratorModalOpen, setPathGeneratorModalOpen] = useState(false);
   const [isSendingPaths, setIsSendingPaths] = useState(false);
   const [pathDeliveryStatus, setPathDeliveryStatus] = useState('');
@@ -1772,6 +1775,134 @@ const ThreeDView = React.forwardRef((props, ref) => {
     });
   }, []);
 
+  const closeFormationGridModal = useCallback(() => {
+    setFormationGridModalOpen(false);
+    setFormationGridEditPhaseId(null);
+  }, []);
+
+  const openFormationGridCreate = useCallback(() => {
+    setFormationGridEditPhaseId(null);
+    setFormationGridModalOpen(true);
+  }, []);
+
+  const openFormationGridEdit = useCallback((phaseId) => {
+    if (!phaseId) return;
+    setFormationGridEditPhaseId(String(phaseId));
+    setFormationGridModalOpen(true);
+  }, []);
+
+  /** Lattice 그리드 툴로 새 phase 추가 또는 기존 phase 좌표 수정 후 씬에 반영 */
+  const handleConfirmFormationGridPhase = useCallback(
+    (pointsByDroneId) => {
+      if (!pointsByDroneId || typeof pointsByDroneId !== 'object') return;
+      const points = {};
+      for (const [droneId, pos] of Object.entries(pointsByDroneId)) {
+        if (!droneId || !pos || typeof pos !== 'object') continue;
+        const x = Number(pos.x);
+        const y = Number(pos.y);
+        const z = Number(pos.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        points[droneId] = {
+          x: roundCoord(x),
+          y: roundCoord(y),
+          z: roundCoord(z),
+        };
+      }
+      if (!Object.keys(points).length) return;
+
+      const editId = formationGridEditPhaseId;
+      if (editId) {
+        setFormationPhases((prev) =>
+          prev.map((phase) => {
+            if (String(phase.id) !== String(editId)) return phase;
+            const nextPoints = { ...(phase.points || {}) };
+            // 배정된 드론 좌표는 덮어쓰고, 미배정 드론의 기존 좌표는 유지
+            Object.entries(points).forEach(([id, pos]) => {
+              const prevPoint = nextPoints[id];
+              nextPoints[id] =
+                prevPoint && typeof prevPoint === 'object' && !Array.isArray(prevPoint)
+                  ? { ...prevPoint, ...pos }
+                  : pos;
+            });
+            return { ...phase, points: nextPoints };
+          })
+        );
+      } else {
+        setFormationPhases((prev) => [
+          ...prev,
+          {
+            id: generateFormationPhaseId(),
+            name: `phase-${prev.length + 1}`,
+            holdMs: 3000,
+            points,
+          },
+        ]);
+      }
+
+      Object.entries(points).forEach(([id, pos]) => {
+        window.dispatchEvent(
+          new CustomEvent('drone-move-request', {
+            detail: { id, x: pos.x, y: pos.y, z: pos.z },
+          })
+        );
+      });
+    },
+    [formationGridEditPhaseId]
+  );
+
+  const formationGridDrones = useMemo(() => {
+    const drones = Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [];
+    const editPhase = formationGridEditPhaseId
+      ? formationPhases.find((p) => String(p.id) === String(formationGridEditPhaseId))
+      : null;
+    const phasePoints =
+      editPhase?.points && typeof editPhase.points === 'object' ? editPhase.points : null;
+    const domPoints = readAllDronePositionsFromDom();
+    return drones
+      .filter((d) => d?.id != null && String(d.id).trim() !== '')
+      .map((d) => {
+        const id = String(d.id);
+        const fromPhase = phasePoints?.[id];
+        if (
+          fromPhase &&
+          Number.isFinite(Number(fromPhase.x)) &&
+          Number.isFinite(Number(fromPhase.y)) &&
+          Number.isFinite(Number(fromPhase.z))
+        ) {
+          return {
+            id,
+            x: Number(fromPhase.x),
+            y: Number(fromPhase.y),
+            z: Number(fromPhase.z),
+          };
+        }
+        const fromDom = domPoints[id];
+        if (
+          fromDom &&
+          Number.isFinite(Number(fromDom.x)) &&
+          Number.isFinite(Number(fromDom.y)) &&
+          Number.isFinite(Number(fromDom.z))
+        ) {
+          return { id, x: Number(fromDom.x), y: Number(fromDom.y), z: Number(fromDom.z) };
+        }
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id, x, y, z };
+      });
+  }, [
+    effectiveConfig,
+    formationGridModalOpen,
+    formationGridEditPhaseId,
+    formationPhases,
+  ]);
+
+  const formationGridEditPhaseName = useMemo(() => {
+    if (!formationGridEditPhaseId) return '';
+    const phase = formationPhases.find(
+      (p) => String(p.id) === String(formationGridEditPhaseId)
+    );
+    return phase?.name ? String(phase.name) : '';
+  }, [formationGridEditPhaseId, formationPhases]);
+
   /** 기존 phase(a,b,c)의 역순(c,b,a)을 복제해 뒤에 추가 */
   const handleAppendReversedFormationPhases = useCallback(() => {
     setFormationPhases((prev) => {
@@ -2349,6 +2480,22 @@ const ThreeDView = React.forwardRef((props, ref) => {
       />
       )}
       {isCreateMode && (
+      <FormationGridModal
+        open={formationGridModalOpen}
+        onClose={closeFormationGridModal}
+        drones={formationGridDrones}
+        onConfirm={handleConfirmFormationGridPhase}
+        mode={formationGridEditPhaseId ? 'edit' : 'create'}
+        title={
+          formationGridEditPhaseId
+            ? `Formation · 수정${
+                formationGridEditPhaseName ? ` · ${formationGridEditPhaseName}` : ''
+              }`
+            : undefined
+        }
+      />
+      )}
+      {isCreateMode && (
       <PathGeneratorModal
         open={pathGeneratorModalOpen}
         onClose={() => setPathGeneratorModalOpen(false)}
@@ -2465,6 +2612,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
         isSendingFormation={isSendingFormation}
         formationDeliveryStatus={formationDeliveryStatus}
         onAddFormationPhase={handleAddFormationPhase}
+        onOpenFormationGrid={openFormationGridCreate}
+        onEditFormationPhaseGrid={openFormationGridEdit}
         onAppendReversedFormationPhases={handleAppendReversedFormationPhases}
         onRecoverReversedFormationPhases={handleRecoverReversedFormationPhases}
         canRecoverReversedFormationPhases={lastReversedPhaseIds.length > 0}
