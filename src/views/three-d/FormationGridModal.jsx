@@ -223,13 +223,13 @@ const overlayStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: 12,
+  padding: 8,
 };
 
 const panelStyle = {
   position: 'relative',
-  width: 'min(1180px, 100%)',
-  height: 'min(820px, calc(100vh - 24px))',
+  width: 'min(1480px, 100%)',
+  height: 'min(960px, calc(100vh - 16px))',
   display: 'flex',
   flexDirection: 'column',
   background: 'linear-gradient(165deg, rgba(18, 24, 36, 0.99), rgba(11, 16, 26, 0.97))',
@@ -1133,7 +1133,7 @@ export default function FormationGridModal({
       Object.keys(occupancy).forEach((key) => {
         if (parseInt(key.split('_')[axIndex], 10) === k) c += 1;
       });
-      const sel = !allLayers && k === layer;
+      const sel = allLayers || k === layer;
       rows.push({
         key: `L${k}`,
         name: `L${k + 1}`,
