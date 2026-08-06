@@ -57,6 +57,16 @@ const spacingOf = (arr, fallback) => {
 
 const DEFAULT_LATTICE = { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0, az: 10 };
 
+/**
+ * 기준점(ax,ay,az) = 격자 시작 모서리 (i=j=k=0).
+ * 월드 원점(0,0,0)의 XYZ 축과 별개로, 격자만 이 좌표에서 시작한다.
+ */
+const latticeSlotPos = (i, j, k, { ax, ay, az, sx, sy, sz }) => ({
+  x: ax + i * sx,
+  y: ay + j * sy,
+  z: az + k * sz,
+});
+
 const normalizeLattice = (raw) => {
   if (!raw || typeof raw !== 'object') return null;
   const nx = Math.round(Number(raw.nx));
@@ -98,7 +108,7 @@ const normalizeLattice = (raw) => {
 const matchOccupancyToLattice = (positions, lattice) => {
   const occupancy = {};
   if (!lattice || !Array.isArray(positions) || !positions.length) return occupancy;
-  const { nx, ny, nz, sx, sy, sz, ax, ay, az } = lattice;
+  const { nx, ny, nz, sx, sy, sz } = lattice;
   const tol = Math.min(sx, sy, sz) * 0.35;
   const tol2 = tol * tol;
 
@@ -109,9 +119,7 @@ const matchOccupancyToLattice = (positions, lattice) => {
     for (let k = 0; k < nz; k += 1) {
       for (let j = 0; j < ny; j += 1) {
         for (let i = 0; i < nx; i += 1) {
-          const x = ax + (i - (nx - 1) / 2) * sx;
-          const y = ay + (j - (ny - 1) / 2) * sy;
-          const z = az + k * sz;
+          const { x, y, z } = latticeSlotPos(i, j, k, lattice);
           const dd = (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2;
           if (dd < bd) {
             bd = dd;
@@ -139,8 +147,9 @@ const inferLatticeFromPositions = (positions) => {
   const nx = clamp(xs.length, 1, 14);
   const ny = clamp(ys.length, 1, 14);
   const nz = clamp(zs.length, 1, 10);
-  const ax = (xs[0] + xs[xs.length - 1]) / 2;
-  const ay = (ys[0] + ys[ys.length - 1]) / 2;
+  // 기준점 = 격자 시작 모서리 (최소 좌표)
+  const ax = xs[0];
+  const ay = ys[0];
   const az = Math.max(0, zs[0]);
   const lattice = { nx, ny, nz, sx, sy, sz, ax, ay, az };
   const occupancy = matchOccupancyToLattice(positions, lattice);
@@ -156,13 +165,13 @@ const compareDroneId = (a, b) =>
   String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
 /** 대기 드론을 격자 앞 바닥(z=0)에 일렬 스택으로 배치 */
-const buildIdleStackPositions = (idleIds, { ax, ay, ny, sy, sx }) => {
+const buildIdleStackPositions = (idleIds, { ax, ay, nx, sx, sy }) => {
   const n = idleIds.length;
   if (!n) return {};
-  const hy = ((ny - 1) / 2) * sy;
   const gap = Math.max(2.5, Math.min(4.5, Math.min(sx, sy) * 0.5));
-  const y = ay - hy - Math.max(8, sy * 1.25);
-  const startX = ax - ((n - 1) * gap) / 2;
+  const y = ay - Math.max(8, sy * 1.25);
+  const midX = ax + ((nx - 1) * sx) / 2;
+  const startX = midX - ((n - 1) * gap) / 2;
   const map = {};
   idleIds.forEach((id, idx) => {
     map[id] = { x: startX + idx * gap, y, z: 0 };
@@ -185,11 +194,7 @@ const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
   ) {
     return null;
   }
-  return {
-    x: ax + (i - (nx - 1) / 2) * sx,
-    y: ay + (j - (ny - 1) / 2) * sy,
-    z: az + k * sz,
-  };
+  return latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz });
 };
 
 /** occupancy 기준으로 배치 드론은 슬롯, 대기 드론은 바닥 스택으로 재배치 */
@@ -215,11 +220,15 @@ const relayoutDrones = (drones, occupancy, lattice) => {
   });
 };
 
+const ACCENT = '#4ea8ff';
+const ACCENT_DEEP = '#2a79d9';
+const ACCENT_SOFT = '#7ec8ff';
+
 const overlayStyle = {
   position: 'fixed',
   inset: 0,
   zIndex: 21000,
-  background: 'rgba(6, 10, 16, 0.78)',
+  background: 'rgba(6, 10, 16, 0.72)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -232,62 +241,85 @@ const panelStyle = {
   height: 'min(960px, calc(100vh - 16px))',
   display: 'flex',
   flexDirection: 'column',
-  background: 'linear-gradient(165deg, rgba(18, 24, 36, 0.99), rgba(11, 16, 26, 0.97))',
+  background: 'linear-gradient(165deg, rgba(18, 24, 36, 0.98), rgba(11, 16, 26, 0.96))',
   border: '1px solid rgba(126, 200, 255, 0.22)',
   borderRadius: 16,
-  boxShadow: '0 24px 56px rgba(0, 0, 0, 0.55)',
-  color: '#eef5ff',
+  boxShadow: '0 20px 48px rgba(0, 0, 0, 0.48)',
+  color: '#f3f8ff',
   overflow: 'hidden',
 };
 
 const labStyle = {
-  fontSize: 10,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  color: 'rgba(190, 210, 235, 0.55)',
-  fontWeight: 600,
+  fontSize: 11,
+  opacity: 0.68,
+  letterSpacing: 0.2,
 };
 
 const inputStyle = {
   flex: 1,
   minWidth: 0,
   width: 56,
-  padding: '6px 8px',
+  padding: '7px 8px',
   fontSize: 13,
   color: '#ecf5ff',
   background: 'rgba(245, 250, 255, 0.06)',
-  border: '1px solid rgba(130, 190, 255, 0.22)',
-  borderRadius: 7,
+  border: '1px solid rgba(130, 190, 255, 0.2)',
+  borderRadius: 8,
   outline: 'none',
   boxSizing: 'border-box',
 };
 
 const segStyle = (on) => ({
   flex: 1,
-  border: `1px solid ${on ? 'rgba(96, 165, 250, 0.85)' : 'rgba(130, 190, 255, 0.22)'}`,
-  background: on ? 'rgba(59, 130, 246, 0.85)' : 'transparent',
-  color: on ? '#fff' : 'rgba(230, 240, 255, 0.85)',
-  fontSize: 11,
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-  padding: '7px 8px',
+  borderRadius: 10,
+  border: on
+    ? '1px solid rgba(78, 168, 255, 0.5)'
+    : '1px solid rgba(255,255,255,0.1)',
+  background: on
+    ? `linear-gradient(135deg, ${ACCENT}, ${ACCENT_DEEP})`
+    : 'rgba(255,255,255,0.04)',
+  color: on ? '#fff' : 'rgba(255,255,255,0.72)',
+  fontSize: 12,
+  padding: '8px 10px',
   cursor: 'pointer',
-  fontWeight: 600,
+  fontWeight: on ? 600 : 500,
 });
 
 const btnStyle = (solid = false, disabled = false) => ({
-  border: `1px solid ${solid ? 'rgba(96, 165, 250, 0.9)' : 'rgba(130, 190, 255, 0.35)'}`,
-  background: solid ? 'rgba(59, 130, 246, 0.92)' : 'transparent',
-  color: solid ? '#fff' : 'rgba(190, 220, 255, 0.95)',
-  fontSize: 12,
-  letterSpacing: '0.05em',
-  textTransform: 'uppercase',
-  padding: '8px 14px',
-  cursor: disabled ? 'default' : 'pointer',
-  opacity: disabled ? 0.4 : 1,
+  border: solid ? 'none' : '1px solid rgba(255,255,255,0.18)',
+  background: solid
+    ? disabled
+      ? 'rgba(255,255,255,0.1)'
+      : `linear-gradient(135deg, ${ACCENT}, ${ACCENT_DEEP})`
+    : 'rgba(255,255,255,0.05)',
+  color: solid
+    ? disabled
+      ? 'rgba(255,255,255,0.35)'
+      : '#fff'
+    : 'rgba(243,248,255,0.86)',
+  fontSize: 13,
+  padding: '9px 18px',
+  cursor: disabled ? 'not-allowed' : 'pointer',
   borderRadius: 8,
-  fontWeight: 600,
+  fontWeight: solid ? 600 : 500,
 });
+
+const iconBtnStyle = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.7)',
+  cursor: 'pointer',
+  fontSize: 16,
+  lineHeight: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 0,
+  flexShrink: 0,
+};
 
 const isPartialNumberInput = (raw, { integer = false, allowNegative = true } = {}) => {
   if (raw === '') return true;
@@ -618,12 +650,8 @@ export default function FormationGridModal({
   );
 
   const nodePos = useCallback(
-    (i, j, k) => ({
-      x: ax + (i - (nx - 1) / 2) * sx,
-      y: ay + (j - (ny - 1) / 2) * sy,
-      z: az + k * sz,
-    }),
-    [ax, ay, az, nx, ny, sx, sy, sz]
+    (i, j, k) => latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz }),
+    [ax, ay, az, sx, sy, sz]
   );
 
   // spacing / anchor / lattice·occupancy 바뀌면 배치 드론은 슬롯, 대기 드론은 바닥 스택으로 재배치
@@ -660,41 +688,44 @@ export default function FormationGridModal({
   const axCount = laxis === 'x' ? nx : laxis === 'y' ? ny : nz;
   const axValue = useCallback(
     (idx) => {
-      if (laxis === 'x') return ax + (idx - (nx - 1) / 2) * sx;
-      if (laxis === 'y') return ay + (idx - (ny - 1) / 2) * sy;
+      if (laxis === 'x') return ax + idx * sx;
+      if (laxis === 'y') return ay + idx * sy;
       return az + idx * sz;
     },
-    [laxis, ax, ay, az, nx, ny, sx, sy, sz]
+    [laxis, ax, ay, az, sx, sy, sz]
   );
 
+  // 투영·회전은 항상 월드 원점(0,0,0) 기준.
+  // 3D 뷰와 동일하게 +Y가 화면 오른쪽, +X가 왼쪽·아래, +Z가 위.
   const raw = useCallback(
     (x, y, z) => {
       const c = Math.cos(RAD(yaw));
       const s = Math.sin(RAD(yaw));
-      const dx = x - ax;
-      const dy = y - ay;
-      const rx = dx * c - dy * s;
-      const ry = dx * s + dy * c;
-      return { u: (rx - ry) * COS30, v: (rx + ry) * 0.5 - z, depth: rx + ry };
+      const rx = x * c - y * s;
+      const ry = x * s + y * c;
+      return { u: (ry - rx) * COS30, v: (rx + ry) * 0.5 - z, depth: rx + ry };
     },
-    [yaw, ax, ay]
+    [yaw]
   );
 
   const fit = useMemo(() => {
-    const pts = [];
+    // 월드 원점 + 격자를 함께 맞춤 → 축(0,0,0)이 보이면서 격자는 기준점 오프셋만큼 떨어짐
+    const pts = [{ x: 0, y: 0, z: 0 }];
     for (const k of [0, nz - 1]) {
       for (const j of [0, ny - 1]) {
         for (const i of [0, nx - 1]) pts.push(nodePos(i, j, k));
       }
     }
-    const hx = ((nx - 1) / 2) * sx + sx * 0.6;
-    const hy = ((ny - 1) / 2) * sy + sy * 0.6;
-    for (const sxn of [-1, 1]) {
-      for (const syn of [-1, 1]) {
-        pts.push({ x: ax + sxn * hx, y: ay + syn * hy, z: 0 });
+    const pad = Math.max(sx, sy) * 0.6;
+    const x0 = ax - pad;
+    const x1 = ax + Math.max(0, nx - 1) * sx + pad;
+    const y0 = ay - pad;
+    const y1 = ay + Math.max(0, ny - 1) * sy + pad;
+    for (const x of [x0, x1]) {
+      for (const y of [y0, y1]) {
+        pts.push({ x, y, z: 0 });
       }
     }
-    drones.forEach((d) => pts.push(d));
 
     let uMin = Infinity;
     let uMax = -Infinity;
@@ -708,18 +739,22 @@ export default function FormationGridModal({
       if (r.v > vMax) vMax = r.v;
     });
 
-    const pad = 54;
-    const w = Math.max(120, view.w - pad * 2);
-    const h = Math.max(120, view.h - pad * 2);
+    const padX = 54;
+    const padTop = 48;
+    const padBottom = 110;
+    const w = Math.max(120, view.w - padX * 2);
+    const h = Math.max(120, view.h - padTop - padBottom);
     const du = Math.max(1, uMax - uMin);
     const dv = Math.max(1, vMax - vMin);
     const s = Math.min(w / du, h / dv) * zoom;
+    const cu = (uMin + uMax) / 2;
+    const cv = (vMin + vMax) / 2;
     return {
       s,
-      ox: view.w / 2 - ((uMin + uMax) / 2) * s,
-      oy: view.h / 2 - ((vMin + vMax) / 2) * s,
+      ox: view.w / 2 - cu * s,
+      oy: padTop + h / 2 - cv * s,
     };
-  }, [nx, ny, nz, sx, sy, ax, ay, drones, raw, nodePos, view, zoom]);
+  }, [nx, ny, nz, sx, sy, ax, ay, raw, nodePos, view, zoom]);
 
   const proj = useCallback(
     (x, y, z) => {
@@ -934,18 +969,21 @@ export default function FormationGridModal({
 
   const scene = useMemo(() => {
     const plate = [];
-    const hx = ((nx - 1) / 2) * sx + sx * 0.6;
-    const hy = ((ny - 1) / 2) * sy + sy * 0.6;
+    const pad = Math.max(sx, sy) * 0.6;
+    const x0 = ax - pad;
+    const x1 = ax + Math.max(0, nx - 1) * sx + pad;
+    const y0 = ay - pad;
+    const y1 = ay + Math.max(0, ny - 1) * sy + pad;
     for (let i = 0; i <= nx; i += 1) {
-      const x = ax - hx + (i / nx) * hx * 2;
-      const a = proj(x, ay - hy, 0);
-      const b = proj(x, ay + hy, 0);
+      const x = x0 + (i / nx) * (x1 - x0);
+      const a = proj(x, y0, 0);
+      const b = proj(x, y1, 0);
       plate.push({ x1: a.px, y1: a.py, x2: b.px, y2: b.py, key: `px${i}` });
     }
     for (let j = 0; j <= ny; j += 1) {
-      const y = ay - hy + (j / ny) * hy * 2;
-      const a = proj(ax - hx, y, 0);
-      const b = proj(ax + hx, y, 0);
+      const y = y0 + (j / ny) * (y1 - y0);
+      const a = proj(x0, y, 0);
+      const b = proj(x1, y, 0);
       plate.push({ x1: a.px, y1: a.py, x2: b.px, y2: b.py, key: `py${j}` });
     }
 
@@ -982,8 +1020,11 @@ export default function FormationGridModal({
     }
 
     const posts = [];
-    Object.entries(occupancy).forEach(([key]) => {
+    const droneOnLayer = {};
+    Object.entries(occupancy).forEach(([key, droneId]) => {
       const { i, j, k } = parseNodeKey(key);
+      const onLayer = allLayers || [i, j, k][axIndex] === layer;
+      if (droneId != null) droneOnLayer[droneId] = onLayer;
       const p = nodePos(i, j, k);
       const top = proj(p.x, p.y, p.z);
       const ground = proj(p.x, p.y, 0);
@@ -993,6 +1034,7 @@ export default function FormationGridModal({
         x2: ground.px,
         y2: ground.py,
         key: `post${key}`,
+        onLayer,
       });
     });
 
@@ -1048,6 +1090,8 @@ export default function FormationGridModal({
       const s = proj(d.x, d.y, d.z);
       const placed = placedDroneIds.has(d.id);
       const selected = selectedId === d.id;
+      // 대기 드론은 배치 대상이라 유지, 배치된 드론은 활성 층만 강조
+      const onLayer = !placed || allLayers || droneOnLayer[d.id] !== false;
       return {
         key: d.id,
         label: d.label || shortLabel(d.id, idx),
@@ -1061,11 +1105,14 @@ export default function FormationGridModal({
         placed,
         selected,
         idle: !placed,
+        onLayer,
       };
     });
 
-    // 3D 뷰와 동일: 원점(0,0,0) 기준 +X/+Y/+Z 축 (짧게 표시)
-    const axisLen = Math.max(2.5, Math.min(hx, hy) * 0.18, Math.max(sx, sy, sz) * 0.85);
+    // 3D 뷰와 동일: 원점(0,0,0) 기준 +X/+Y/+Z 축 (항상 월드 원점에 고정)
+    const spanX = Math.max(sx, (nx - 1) * sx);
+    const spanY = Math.max(sy, (ny - 1) * sy);
+    const axisLen = Math.max(2.5, Math.min(spanX, spanY) * 0.18, Math.max(sx, sy, sz) * 0.85);
     const origin = proj(0, 0, 0);
     const makeAxis = (key, tipWorld, color) => {
       const tip = proj(tipWorld.x, tipWorld.y, tipWorld.z);
@@ -1161,27 +1208,29 @@ export default function FormationGridModal({
             display: 'flex',
             alignItems: 'center',
             gap: 14,
-            padding: '12px 18px',
-            borderBottom: '1px solid rgba(130, 190, 255, 0.14)',
+            padding: '14px 20px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
             flex: '0 0 auto',
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '0.06em' }}>
-            {title || (isEdit ? 'Formation · 그리드 수정' : 'Formation · Lattice')}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 700 }}>
+              {title || (isEdit ? '그리드 수정' : '그리드로 Phase 추가')}
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.55, marginTop: 2 }}>
+              {selectedId
+                ? `드론 ${selectedId} 선택됨 — 빈 격자를 클릭하면 바로 배치됩니다`
+                : '드래그로 회전, 휠로 확대 · 대기 드론은 하단에서 선택해 배치하세요'}
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.55)', flex: 1 }}>
-            {selectedId
-              ? `드론 ${selectedId} 선택됨 — 빈 격자를 클릭하면 바로 배치됩니다`
-              : '빈 곳 드래그·우클릭 드래그로 회전, 휠로 확대. 대기 드론은 하단 스택에서 배치하세요.'}
-          </div>
-          <span style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.65)' }}>
+          <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>
             {occupiedCount} / {drones.length} 배치
           </span>
-          <button type="button" style={btnStyle(false)} onClick={() => setGuide(true)}>
+          <button type="button" style={iconBtnStyle} onClick={() => setGuide(true)} aria-label="도움말">
             ?
           </button>
-          <button type="button" style={btnStyle(false)} onClick={onClose} aria-label="닫기">
-            ✕
+          <button type="button" style={iconBtnStyle} onClick={onClose} aria-label="닫기">
+            ×
           </button>
         </div>
 
@@ -1189,7 +1238,7 @@ export default function FormationGridModal({
           <div
             style={{
               flex: '0 0 280px',
-              borderRight: '1px solid rgba(130, 190, 255, 0.14)',
+              borderRight: '1px solid rgba(255,255,255,0.06)',
               padding: 16,
               display: 'flex',
               flexDirection: 'column',
@@ -1198,7 +1247,7 @@ export default function FormationGridModal({
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={labStyle}>Lattice X · Y · Z (개수)</span>
+              <span style={labStyle}>격자 개수 (X · Y · Z)</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <NumberField value={nx} min={1} max={14} integer onChange={setNx} />
                 <NumberField value={ny} min={1} max={14} integer onChange={setNy} />
@@ -1217,7 +1266,7 @@ export default function FormationGridModal({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={labStyle}>Spacing X · Y · Z (m)</span>
+              <span style={labStyle}>간격 (m)</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <NumberField value={sx} min={1} max={60} step={0.5} onChange={setSx} />
                 <NumberField value={sy} min={1} max={60} step={0.5} onChange={setSy} />
@@ -1226,7 +1275,7 @@ export default function FormationGridModal({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={labStyle}>Anchor X · Y · Z (m)</span>
+              <span style={labStyle}>기준점 · 격자 시작 (m)</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <NumberField value={ax} step={0.5} free allowNegative onChange={setAx} />
                 <NumberField value={ay} step={0.5} free allowNegative onChange={setAy} />
@@ -1241,14 +1290,14 @@ export default function FormationGridModal({
               </div>
             </div>
 
-            <div style={{ height: 1, background: 'rgba(130, 190, 255, 0.12)' }} />
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>
                 작업 평면 ·{' '}
-                {laxis === 'z' ? 'X · Y 평면' : laxis === 'y' ? 'X · Z 평면' : 'Y · Z 평면'}
+                {laxis === 'z' ? 'X · Y' : laxis === 'y' ? 'X · Z' : 'Y · Z'}
               </span>
-              <div style={{ display: 'flex', gap: 0 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   type="button"
                   style={segStyle(laxis === 'z')}
@@ -1300,17 +1349,17 @@ export default function FormationGridModal({
                     setLayer(parseInt(e.target.value, 10) || 0);
                     setAllLayers(false);
                   }}
-                  style={{ flex: 1, accentColor: '#3b82f6' }}
+                  style={{ flex: 1, accentColor: ACCENT }}
                 />
                 <button
                   type="button"
-                  style={{ ...segStyle(allLayers), flex: '0 0 auto' }}
+                  style={{ ...segStyle(allLayers), flex: '0 0 auto', padding: '8px 12px' }}
                   onClick={() => setAllLayers((v) => !v)}
                 >
-                  All
+                  전체
                 </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
                 {layerRows.map((r) => (
                   <button
                     key={r.key}
@@ -1324,42 +1373,40 @@ export default function FormationGridModal({
                       alignItems: 'center',
                       gap: 10,
                       cursor: 'pointer',
-                      padding: '5px 8px',
+                      padding: '7px 10px',
                       border: `1px solid ${
-                        r.sel ? 'rgba(96, 165, 250, 0.85)' : 'rgba(130, 190, 255, 0.18)'
+                        r.sel ? 'rgba(78, 168, 255, 0.5)' : 'rgba(255,255,255,0.1)'
                       }`,
-                      background: r.sel ? 'rgba(59, 130, 246, 0.18)' : 'transparent',
+                      background: r.sel ? 'rgba(78, 168, 255, 0.12)' : 'rgba(255,255,255,0.02)',
                       color: 'inherit',
-                      borderRadius: 6,
+                      borderRadius: 8,
                       textAlign: 'left',
                     }}
                   >
-                    <span style={{ letterSpacing: '0.06em', fontSize: 12, fontWeight: 600 }}>
-                      {r.name}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'rgba(190, 210, 235, 0.5)' }}>{r.alt}</span>
-                    <span style={{ fontSize: 12, marginLeft: 'auto' }}>{r.count}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</span>
+                    <span style={{ fontSize: 11, opacity: 0.5 }}>{r.alt}</span>
+                    <span style={{ fontSize: 12, marginLeft: 'auto', opacity: 0.85 }}>{r.count}</span>
                   </button>
                 ))}
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" style={{ ...btnStyle(false), flex: 1, fontSize: 11 }} onClick={fillLayer}>
+              <button type="button" style={{ ...btnStyle(false), flex: 1, padding: '8px 10px', fontSize: 12 }} onClick={fillLayer}>
                 층 채우기
               </button>
-              <button type="button" style={{ ...btnStyle(false), flex: 1, fontSize: 11 }} onClick={clearAll}>
-                전체 대기 위치로
+              <button type="button" style={{ ...btnStyle(false), flex: 1, padding: '8px 10px', fontSize: 12 }} onClick={clearAll}>
+                전체 대기
               </button>
             </div>
 
-            <div style={{ height: 1, background: 'rgba(130, 190, 255, 0.12)' }} />
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>
-                View · {yaw}° / zoom {zoom.toFixed(1)}×
+                뷰 · {yaw}° / {zoom.toFixed(1)}×
               </span>
-              <div style={{ fontSize: 11, color: 'rgba(190, 210, 235, 0.45)', lineHeight: 1.4 }}>
+              <div style={{ fontSize: 11, opacity: 0.45, lineHeight: 1.4 }}>
                 드래그로 회전 · 휠로 확대/축소
               </div>
               <input
@@ -1369,7 +1416,7 @@ export default function FormationGridModal({
                 step={1}
                 value={yaw}
                 onChange={(e) => setYaw(parseInt(e.target.value, 10) || 0)}
-                style={{ accentColor: '#3b82f6' }}
+                style={{ accentColor: ACCENT }}
               />
               <input
                 type="range"
@@ -1378,16 +1425,16 @@ export default function FormationGridModal({
                 step={0.1}
                 value={zoom}
                 onChange={(e) => setZoom(parseFloat(e.target.value) || 1)}
-                style={{ accentColor: '#3b82f6' }}
+                style={{ accentColor: ACCENT }}
               />
             </div>
 
             <div
               style={{
-                border: '1px solid rgba(130, 190, 255, 0.2)',
+                border: '1px solid rgba(130, 190, 255, 0.14)',
                 borderRadius: 10,
                 padding: '12px 14px',
-                background: 'rgba(245, 250, 255, 0.03)',
+                background: 'rgba(245, 250, 255, 0.04)',
               }}
             >
               <div style={{ ...labStyle, marginBottom: 8 }}>배치 현황</div>
@@ -1399,11 +1446,11 @@ export default function FormationGridModal({
                   fontSize: 13,
                 }}
               >
-                <span style={{ color: 'rgba(190, 210, 235, 0.55)' }}>배치된 드론</span>
+                <span style={{ opacity: 0.55 }}>배치된 드론</span>
                 <span>{occupiedCount}</span>
-                <span style={{ color: 'rgba(190, 210, 235, 0.55)' }}>보유 드론</span>
+                <span style={{ opacity: 0.55 }}>보유 드론</span>
                 <span>{drones.length}</span>
-                <span style={{ color: 'rgba(190, 210, 235, 0.55)' }}>대기 드론</span>
+                <span style={{ opacity: 0.55 }}>대기 드론</span>
                 <span>{Math.max(0, drones.length - occupiedCount)}</span>
               </div>
             </div>
@@ -1435,7 +1482,11 @@ export default function FormationGridModal({
               touchAction: 'none',
             }}
           >
-            <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            <svg
+              width="100%"
+              height="100%"
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 3 }}
+            >
               {scene.plate.map((l) => (
                 <line
                   key={l.key}
@@ -1483,25 +1534,6 @@ export default function FormationGridModal({
                   strokeWidth="1.25"
                 />
               ) : null}
-              {scene.planePoly ? (
-                <polygon
-                  points={scene.planePoly}
-                  fill="rgba(59, 130, 246, 0.12)"
-                  stroke="rgba(96, 165, 250, 0.75)"
-                  strokeWidth="1.5"
-                />
-              ) : null}
-              {scene.planeLines.map((l) => (
-                <line
-                  key={l.key}
-                  x1={l.x1}
-                  y1={l.y1}
-                  x2={l.x2}
-                  y2={l.y2}
-                  stroke="rgba(96, 165, 250, 0.35)"
-                  strokeWidth="1"
-                />
-              ))}
               {scene.posts.map((p) => (
                 <line
                   key={p.key}
@@ -1509,7 +1541,9 @@ export default function FormationGridModal({
                   y1={p.y1}
                   x2={p.x2}
                   y2={p.y2}
-                  stroke="rgba(96, 165, 250, 0.35)"
+                  stroke={
+                    p.onLayer ? 'rgba(78, 168, 255, 0.35)' : 'rgba(78, 168, 255, 0.1)'
+                  }
                   strokeWidth="1"
                   strokeDasharray="2 4"
                 />
@@ -1520,12 +1554,88 @@ export default function FormationGridModal({
                   y1={scene.idleRail.y1}
                   x2={scene.idleRail.x2}
                   y2={scene.idleRail.y2}
-                  stroke="rgba(240, 180, 41, 0.55)"
-                  strokeWidth="2.5"
+                  stroke="rgba(240, 180, 41, 0.22)"
+                  strokeWidth="2"
                   strokeLinecap="round"
                 />
               ) : null}
+              {scene.planePoly ? (
+                <polygon
+                  points={scene.planePoly}
+                  fill="rgba(78, 168, 255, 0.12)"
+                  stroke="rgba(78, 168, 255, 0.55)"
+                  strokeWidth="1.5"
+                />
+              ) : null}
+              {scene.planeLines.map((l) => (
+                <line
+                  key={l.key}
+                  x1={l.x1}
+                  y1={l.y1}
+                  x2={l.x2}
+                  y2={l.y2}
+                  stroke="rgba(78, 168, 255, 0.35)"
+                  strokeWidth="1"
+                />
+              ))}
             </svg>
+
+            {/* 대기 드론: 연하게, 격자보다 뒤 */}
+            {scene.dots
+              .filter((d) => d.idle)
+              .map((d) => {
+                const selected = d.selected;
+                return (
+                  <div
+                    key={d.key}
+                    title={d.title}
+                    onMouseDown={handleDroneClick(d.key)}
+                    style={{
+                      position: 'absolute',
+                      left: d.px - 11,
+                      top: d.py - 11,
+                      width: 22,
+                      height: 22,
+                      pointerEvents: 'auto',
+                      cursor: 'pointer',
+                      zIndex: selected ? 6 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition:
+                        'left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1), opacity .15s',
+                      opacity: selected ? 1 : 0.28,
+                    }}
+                  >
+                    <i
+                      style={{
+                        display: 'block',
+                        width: selected ? 14 : 9,
+                        height: selected ? 14 : 9,
+                        borderRadius: '50%',
+                        background: selected ? '#f0b429' : '#c9a227',
+                        border: `1px solid ${selected ? '#fff3c4' : 'rgba(138, 90, 0, 0.45)'}`,
+                        boxShadow: selected ? '0 0 0 3px rgba(240,180,41,.45)' : 'none',
+                      }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: 16,
+                        top: 2,
+                        fontSize: 10,
+                        color: '#ff4d4d',
+                        fontWeight: 700,
+                        pointerEvents: 'none',
+                        opacity: selected ? 1 : 0.85,
+                        textShadow: '0 0 4px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.7)',
+                      }}
+                    >
+                      {d.label}
+                    </span>
+                  </div>
+                );
+              })}
 
             {scene.nodes.map((n) => (
               <div
@@ -1539,12 +1649,13 @@ export default function FormationGridModal({
                   top: n.sPy - 11,
                   width: 22,
                   height: 22,
+                  zIndex: 4,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: n.live ? 'pointer' : 'not-allowed',
                   pointerEvents: n.live ? 'auto' : 'none',
-                  opacity: n.onLayer ? (n.live ? 1 : 0.3) : n.on ? 0.5 : 0.16,
+                  opacity: n.onLayer ? (n.live ? 1 : 0.3) : n.on ? 0.2 : 0.1,
                   userSelect: 'none',
                 }}
               >
@@ -1553,8 +1664,9 @@ export default function FormationGridModal({
                     display: 'block',
                     width: n.on ? 13 : 7,
                     height: n.on ? 13 : 7,
-                    background: n.on ? '#3b82f6' : 'transparent',
-                    border: `1px solid ${n.on ? '#93c5fd' : 'rgba(160, 180, 210, 0.55)'}`,
+                    borderRadius: n.on ? 3 : 2,
+                    background: n.on ? ACCENT : 'transparent',
+                    border: `1px solid ${n.on ? ACCENT_SOFT : 'rgba(160, 180, 210, 0.5)'}`,
                     transition: 'transform .12s',
                   }}
                 />
@@ -1565,8 +1677,7 @@ export default function FormationGridModal({
                       left: 17,
                       top: 1,
                       fontSize: 9,
-                      letterSpacing: '0.06em',
-                      color: '#93c5fd',
+                      color: ACCENT_SOFT,
                       pointerEvents: 'none',
                       fontWeight: 600,
                     }}
@@ -1577,58 +1688,66 @@ export default function FormationGridModal({
               </div>
             ))}
 
-            {scene.dots.map((d) => (
-              <div
-                key={d.key}
-                title={d.title}
-                onMouseDown={handleDroneClick(d.key)}
-                style={{
-                  position: 'absolute',
-                  left: d.px - 11,
-                  top: d.py - 11,
-                  width: 22,
-                  height: 22,
-                  pointerEvents: 'auto',
-                  cursor: 'pointer',
-                  zIndex: d.selected ? 6 : d.idle ? 3 : 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)',
-                }}
-              >
-                <i
-                  style={{
-                    display: 'block',
-                    width: d.selected ? 14 : d.idle ? 10 : 11,
-                    height: d.selected ? 14 : d.idle ? 10 : 11,
-                    borderRadius: '50%',
-                    background: d.selected || d.placed ? '#f0b429' : '#c9a227',
-                    border: `1px solid ${d.selected ? '#fff3c4' : '#8a5a00'}`,
-                    boxShadow: d.selected
-                      ? '0 0 0 3px rgba(240,180,41,.45)'
-                      : d.placed
-                        ? '0 0 0 2px rgba(240,180,41,.2)'
-                        : 'none',
-                    opacity: d.idle && !d.selected ? 0.85 : 1,
-                  }}
-                />
-                <span
+            {/* 배치된 드론: 격자 위 */}
+            {scene.dots
+              .filter((d) => !d.idle)
+              .map((d) => {
+              const dimmed = !d.onLayer && !d.selected;
+              return (
+                <div
+                  key={d.key}
+                  title={d.title}
+                  onMouseDown={handleDroneClick(d.key)}
                   style={{
                     position: 'absolute',
-                    left: 16,
-                    top: 2,
-                    fontSize: 9,
-                    letterSpacing: '0.06em',
-                    color: '#d4a017',
-                    fontWeight: 600,
-                    pointerEvents: 'none',
+                    left: d.px - 11,
+                    top: d.py - 11,
+                    width: 22,
+                    height: 22,
+                    pointerEvents: 'auto',
+                    cursor: 'pointer',
+                    zIndex: d.selected ? 6 : dimmed ? 2 : 5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition:
+                      'left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1), opacity .15s',
+                    opacity: dimmed ? 0.22 : 1,
                   }}
                 >
-                  {d.label}
-                </span>
-              </div>
-            ))}
+                  <i
+                    style={{
+                      display: 'block',
+                      width: d.selected ? 14 : 11,
+                      height: d.selected ? 14 : 11,
+                      borderRadius: '50%',
+                      background: '#f0b429',
+                      border: `1px solid ${d.selected ? '#fff3c4' : '#8a5a00'}`,
+                      boxShadow: dimmed
+                        ? 'none'
+                        : d.selected
+                          ? '0 0 0 3px rgba(240,180,41,.45)'
+                          : '0 0 0 2px rgba(240,180,41,.2)',
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 16,
+                      top: 2,
+                      fontSize: 10,
+                      color: '#ff4d4d',
+                      fontWeight: 700,
+                      pointerEvents: 'none',
+                      opacity: dimmed ? 0.55 : 1,
+                      textShadow: '0 0 4px rgba(0,0,0,0.85), 0 1px 2px rgba(0,0,0,0.7)',
+                    }}
+                  >
+                    {d.label}
+                  </span>
+                </div>
+              );
+            })}
 
             {/* 축 색상 범례 (3D 뷰 Colors.axes와 동일) */}
             <div
@@ -1637,15 +1756,14 @@ export default function FormationGridModal({
                 top: 10,
                 left: 10,
                 display: 'flex',
-                gap: 7,
-                padding: '4px 7px',
-                borderRadius: 6,
-                border: '1px solid rgba(130, 190, 255, 0.2)',
+                gap: 8,
+                padding: '5px 8px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.12)',
                 background: 'rgba(12, 16, 24, 0.72)',
                 pointerEvents: 'none',
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.06em',
+                fontSize: 11,
+                fontWeight: 600,
               }}
             >
               {[
@@ -1697,15 +1815,14 @@ export default function FormationGridModal({
               >
                 <div
                   style={{
-                    fontSize: 10,
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    color: 'rgba(240, 180, 41, 0.8)',
-                    fontWeight: 700,
+                    fontSize: 11,
+                    color: 'rgba(240, 180, 41, 0.85)',
+                    fontWeight: 600,
                     marginBottom: 8,
+                    opacity: 0.95,
                   }}
                 >
-                  대기중 드론 · {idleDrones.length}대
+                  대기 드론 {idleDrones.length}대
                   {selectedId ? ` · ${selectedId} 선택됨` : ' · 클릭 후 격자 배치'}
                 </div>
                 {idleDrones.length === 0 ? (
@@ -1801,48 +1918,47 @@ export default function FormationGridModal({
                 maxWidth: 'calc(100% - 40px)',
                 maxHeight: 'calc(100% - 64px)',
                 overflowY: 'auto',
-                background: 'rgba(14, 20, 32, 0.98)',
-                border: '1px solid rgba(130, 190, 255, 0.28)',
+                background: 'linear-gradient(165deg, rgba(18, 24, 36, 0.98), rgba(11, 16, 26, 0.96))',
+                border: '1px solid rgba(126, 200, 255, 0.22)',
                 borderRadius: 14,
-                padding: '26px 28px',
+                boxShadow: '0 20px 48px rgba(0, 0, 0, 0.48)',
+                padding: '24px 26px',
               }}
             >
               <div
                 style={{
-                  fontSize: 22,
+                  fontSize: 18,
                   fontWeight: 700,
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
                   marginBottom: 4,
                 }}
               >
-                클릭하면 드론이 바로 갑니다
+                클릭하면 드론이 바로 배치됩니다
               </div>
-              <div style={{ fontSize: 13, color: 'rgba(190, 210, 235, 0.6)', marginBottom: 20 }}>
-                켠 점 → 미리보기 단계 없이, 격자를 클릭하는 순간 드론이 그 자리로 이동합니다.
+              <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>
+                격자를 클릭하는 순간 대기 드론이 그 자리로 이동합니다.
               </div>
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '26px 1fr',
+                  gridTemplateColumns: '28px 1fr',
                   gap: '14px 12px',
                   alignItems: 'start',
-                  fontSize: 14,
+                  fontSize: 13,
                   lineHeight: 1.5,
                 }}
               >
                 {[
                   [
                     '격자 만들기',
-                    'Lattice는 X·Y·Z 방향 점 개수, Spacing은 점 사이 거리(m), Anchor는 격자 기준 좌표입니다.',
+                    '격자 개수는 X·Y·Z 방향 점 수, 간격은 점 사이 거리(m), 기준점은 격자 시작 모서리입니다. XYZ 축은 항상 (0,0,0)에 있고, 기준점만큼 떨어진 곳에서 격자가 시작됩니다.',
                   ],
                   [
                     '바로 배치',
-                    '대기 드론은 바닥 직선 스택과 하단 UI에 모입니다. 스택에서 드론을 고른 뒤 격자를 누르면 바로 배치됩니다. 빈 격자만 눌러도 가장 가까운 대기 드론이 올라갑니다.',
+                    '대기 드론은 하단 스택에 모입니다. 드론을 고른 뒤 격자를 누르면 바로 배치되고, 빈 격자만 눌러도 가장 가까운 대기 드론이 올라갑니다.',
                   ],
                   [
                     '뷰 조작',
-                    '빈 배경을 드래그하거나 우클릭 드래그로 회전하고, 마우스 휠로 확대·축소합니다. 왼쪽 슬라이더로도 동일하게 조절할 수 있습니다.',
+                    '빈 배경을 드래그하거나 우클릭 드래그로 회전하고, 마우스 휠로 확대·축소합니다. 왼쪽 슬라이더로도 조절할 수 있습니다.',
                   ],
                   [
                     isEdit ? 'Phase 수정 적용' : 'Phase로 추가',
@@ -1854,13 +1970,15 @@ export default function FormationGridModal({
                   <React.Fragment key={stepTitle}>
                     <div
                       style={{
-                        width: 26,
-                        height: 26,
-                        border: '1px solid rgba(96, 165, 250, 0.7)',
+                        width: 28,
+                        height: 28,
+                        borderRadius: 8,
+                        border: '1px solid rgba(78, 168, 255, 0.5)',
+                        background: 'rgba(78, 168, 255, 0.12)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#93c5fd',
+                        color: ACCENT_SOFT,
                         fontWeight: 700,
                         fontSize: 12,
                       }}
@@ -1868,9 +1986,9 @@ export default function FormationGridModal({
                       {idx + 1}
                     </div>
                     <div>
-                      <b style={{ letterSpacing: '0.04em' }}>{stepTitle}</b>
+                      <b>{stepTitle}</b>
                       <br />
-                      <span style={{ color: 'rgba(190, 210, 235, 0.55)' }}>{body}</span>
+                      <span style={{ opacity: 0.55 }}>{body}</span>
                     </div>
                   </React.Fragment>
                 ))}
@@ -1879,7 +1997,7 @@ export default function FormationGridModal({
                 <button type="button" style={btnStyle(true)} onClick={() => setGuide(false)}>
                   시작하기
                 </button>
-                <span style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.45)' }}>
+                <span style={{ fontSize: 12, opacity: 0.45 }}>
                   우측 상단 ? 버튼으로 다시 열 수 있습니다.
                 </span>
               </div>
