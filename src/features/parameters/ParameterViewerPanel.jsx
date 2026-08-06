@@ -2,6 +2,7 @@ import Clear from '@mui/icons-material/Clear';
 import Error from '@mui/icons-material/Error';
 import Refresh from '@mui/icons-material/Refresh';
 import SyncAlt from '@mui/icons-material/SyncAlt';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
@@ -49,6 +50,7 @@ import {
   coerceParameterValue,
   formatParameterValue,
   getParameters,
+  getParametersForUav,
   parameterValuesEqual,
 } from '~/utils/mavlinkParameters';
 
@@ -68,31 +70,32 @@ const useStyles = makeStyles((theme) => ({
     display: 'flex',
     flexDirection: 'column',
     flex: 'none',
-    gap: theme.spacing(2),
-    width: 260,
+    gap: theme.spacing(1.25),
+    width: 240,
     overflowY: 'auto',
     borderRight: `1px solid ${theme.palette.divider}`,
-    paddingRight: theme.spacing(1.5),
+    paddingRight: theme.spacing(1),
   },
   sidebarHeader: {
-    alignItems: 'baseline',
+    alignItems: 'center',
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: theme.spacing(0.5),
+    marginBottom: theme.spacing(0.25),
   },
   sidebarTitle: {
     color: theme.palette.text.secondary,
-    fontSize: '0.7rem',
+    fontSize: '0.65rem',
     fontWeight: theme.typography.fontWeightMedium,
     letterSpacing: '0.08em',
     textTransform: 'uppercase',
   },
   vehicleItem: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     border: `1px solid ${theme.palette.divider}`,
-    borderRadius: theme.shape.borderRadius,
-    marginBottom: theme.spacing(0.75),
-    padding: theme.spacing(0.5, 0.75),
+    borderRadius: 6,
+    marginBottom: 3,
+    minHeight: 0,
+    padding: '2px 6px',
   },
   vehicleItemSelected: {
     backgroundColor: alpha(theme.palette.primary.main, 0.08),
@@ -101,7 +104,13 @@ const useStyles = makeStyles((theme) => ({
   vehicleMeta: {
     color: theme.palette.text.secondary,
     fontFamily: 'monospace',
-    fontSize: '0.7rem',
+    fontSize: '0.65rem',
+    lineHeight: 1.2,
+  },
+  vehicleId: {
+    fontSize: '0.8rem',
+    fontWeight: theme.typography.fontWeightMedium,
+    lineHeight: 1.2,
   },
   groupItem: {
     borderLeft: '2px solid transparent',
@@ -246,8 +255,17 @@ const useStyles = makeStyles((theme) => ({
     width: 11,
   },
   checkboxDense: {
-    marginLeft: -8,
-    padding: 4,
+    marginLeft: -10,
+    padding: 2,
+  },
+  setRefChip: {
+    cursor: 'pointer',
+    fontSize: '0.6rem',
+    height: 16,
+    '& .MuiChip-label': {
+      paddingLeft: 6,
+      paddingRight: 6,
+    },
   },
 }));
 
@@ -285,10 +303,11 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
   const allUavIds = useSelector(getUAVIdList);
   const uavsById = useSelector(getUAVIdToStateMapping);
 
+  // 맵에서 고른 기체가 없으면 전체부터 시작 (한 대만 골라야 파라미터가 일부만 보이는 혼란 방지)
   const [selectedIds, setSelectedIds] = useState(() =>
     (defaultSelectedUavIds?.length
       ? defaultSelectedUavIds
-      : allUavIds.slice(0, 1)
+      : allUavIds
     ).filter((id) => allUavIds.includes(id))
   );
   const [query, setQuery] = useState('');
@@ -297,6 +316,8 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
   const [edits, setEdits] = useState({});
   const [editingKey, setEditingKey] = useState(null);
   const [writing, setWriting] = useState(false);
+  /** 사용자가 직접 지정한 REF; 선택 해제되면 자동 폴백 */
+  const [manualReferenceId, setManualReferenceId] = useState(null);
 
   useEffect(() => {
     setSelectedIds((prev) => {
@@ -312,18 +333,16 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
         return fallback;
       }
 
-      return allUavIds.slice(0, 1);
+      return [...allUavIds];
     });
   }, [allUavIds, defaultSelectedUavIds]);
 
-  const orderedSelectedIds = useMemo(
+  const selectedInListOrder = useMemo(
     () => allUavIds.filter((id) => selectedIds.includes(id)),
     [allUavIds, selectedIds]
   );
 
-  const referenceId = orderedSelectedIds[0];
-
-  const selectedKey = orderedSelectedIds.join('|');
+  const selectedKey = selectedInListOrder.join('|');
 
   useEffect(() => {
     setEdits({});
@@ -331,25 +350,88 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
   }, [selectedKey]);
 
   const state = useAsyncRetry(async () => {
-    if (orderedSelectedIds.length === 0) {
-      return [];
+    if (selectedInListOrder.length === 0) {
+      return { rows: [], skipped: [], errors: [], counts: {} };
     }
 
-    const body = await getParameters(orderedSelectedIds);
-    return buildComparedParameters(body, orderedSelectedIds);
+    const body = await getParameters(selectedInListOrder);
+    const rows = buildComparedParameters(body, selectedInListOrder);
+    const skipped = (body.skipped || []).map(String);
+    const counts = {};
+    for (const uavId of selectedInListOrder) {
+      counts[uavId] = getParametersForUav(body, uavId).length;
+    }
+
+    return {
+      rows,
+      skipped,
+      errors: Array.isArray(body.errors) ? body.errors : [],
+      counts,
+    };
   }, [selectedKey]);
+
+  const comparedRows = state.value?.rows ?? [];
+  const fetchCounts = state.value?.counts ?? {};
+  const fetchSkipped = state.value?.skipped ?? [];
+
+  // REF: 수동 지정 우선, 없거나 선택 해제면 로드된 기체 → 첫 선택
+  const referenceId = useMemo(() => {
+    if (selectedInListOrder.length === 0) {
+      return undefined;
+    }
+
+    if (manualReferenceId && selectedInListOrder.includes(manualReferenceId)) {
+      return manualReferenceId;
+    }
+
+    const withParams = selectedInListOrder.find(
+      (id) => (fetchCounts[id] ?? 0) > 0
+    );
+    return withParams || selectedInListOrder[0];
+  }, [fetchCounts, manualReferenceId, selectedInListOrder]);
+
+  // 테이블 열: REF를 맨 앞에
+  const orderedSelectedIds = useMemo(() => {
+    if (!referenceId || !selectedInListOrder.includes(referenceId)) {
+      return selectedInListOrder;
+    }
+
+    return [
+      referenceId,
+      ...selectedInListOrder.filter((id) => id !== referenceId),
+    ];
+  }, [referenceId, selectedInListOrder]);
+
+  const emptySelectedIds = useMemo(
+    () =>
+      orderedSelectedIds.filter(
+        (id) =>
+          !state.loading &&
+          !state.error &&
+          state.value &&
+          (fetchCounts[id] ?? 0) === 0
+      ),
+    [fetchCounts, orderedSelectedIds, state.error, state.loading, state.value]
+  );
 
   const getBaseValue = useCallback(
     (uavId, name) => {
-      const row = (state.value || []).find((item) => item.name === name);
+      const row = comparedRows.find((item) => item.name === name);
       return row?.values?.[uavId];
     },
-    [state.value]
+    [comparedRows]
   );
 
+  const setAsReference = useCallback((uavId) => {
+    setManualReferenceId(uavId);
+    setSelectedIds((prev) =>
+      prev.includes(uavId) ? prev : [...prev, uavId]
+    );
+    setEditingKey(null);
+  }, []);
+
   const rows = useMemo(() => {
-    const items = state.value ?? [];
-    const needle = query.trim().toUpperCase();
+    const items = comparedRows;
 
     return items.map((item) => {
       const cells = orderedSelectedIds.map((uavId) => {
@@ -385,7 +467,7 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
 
       return { ...item, cells, diff, edited };
     });
-  }, [edits, orderedSelectedIds, state.value]);
+  }, [edits, orderedSelectedIds, comparedRows]);
 
   const queryMatched = useMemo(() => {
     const needle = query.trim().toUpperCase();
@@ -474,13 +556,20 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
   const onSelectAllOrReference = useCallback(() => {
     setSelectedIds((prev) => {
       if (prev.length === allUavIds.length && allUavIds.length > 0) {
-        return [prev[0] || allUavIds[0]];
+        const keep =
+          (manualReferenceId && prev.includes(manualReferenceId)
+            ? manualReferenceId
+            : null) ||
+          referenceId ||
+          prev[0] ||
+          allUavIds[0];
+        return [keep];
       }
 
       return [...allUavIds];
     });
     setEditingKey(null);
-  }, [allUavIds]);
+  }, [allUavIds, manualReferenceId, referenceId]);
 
   const commitDraft = useCallback((key, draft, base) => {
     setEdits((prev) => {
@@ -819,7 +908,7 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
     body = (
       <BackgroundHint
         text={
-          (state.value ?? []).length === 0
+          comparedRows.length === 0
             ? t('parameterViewerDialog.empty')
             : t('parameterViewerDialog.noMatches')
         }
@@ -857,6 +946,13 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
             {vehicleSummaries.map((vehicle) => {
               const selected = selectedIds.includes(vehicle.id);
               const isRef = selected && vehicle.id === referenceId;
+              const paramCount = selected ? fetchCounts[vehicle.id] : undefined;
+              const loadFailed =
+                selected &&
+                !state.loading &&
+                state.value &&
+                ((paramCount ?? 0) === 0 ||
+                  fetchSkipped.includes(String(vehicle.id)));
               return (
                 <ListItemButton
                   key={vehicle.id}
@@ -865,25 +961,32 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
                   }`}
                   onClick={() => toggleVehicle(vehicle.id)}
                 >
-                  <ListItemIcon sx={{ minWidth: 36 }}>
+                  <ListItemIcon sx={{ minWidth: 28 }}>
                     <Checkbox
                       className={classes.checkboxDense}
                       edge='start'
+                      size='small'
                       checked={selected}
                       tabIndex={-1}
                       disableRipple
                     />
                   </ListItemIcon>
                   <ListItemText
+                    sx={{ my: 0 }}
                     primary={
                       <Box
                         sx={{
                           alignItems: 'center',
                           display: 'flex',
-                          gap: 0.75,
+                          gap: 0.5,
+                          minWidth: 0,
                         }}
                       >
-                        <Typography variant='subtitle2' component='span'>
+                        <Typography
+                          className={classes.vehicleId}
+                          component='span'
+                          noWrap
+                        >
                           {vehicle.id}
                         </Typography>
                         {isRef ? (
@@ -891,18 +994,64 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
                             size='small'
                             label={t('parameterViewerDialog.ref')}
                             color='primary'
-                            sx={{ height: 18, fontSize: '0.65rem' }}
+                            className={classes.setRefChip}
+                          />
+                        ) : (
+                          <Tooltip content={t('parameterViewerDialog.setReference')}>
+                            <Chip
+                              size='small'
+                              variant='outlined'
+                              label={t('parameterViewerDialog.ref')}
+                              className={classes.setRefChip}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setAsReference(vehicle.id);
+                              }}
+                              sx={{
+                                borderColor: alpha('#1976d2', 0.35),
+                                color: 'text.secondary',
+                                opacity: selected ? 1 : 0.7,
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+                        {loadFailed ? (
+                          <Chip
+                            size='small'
+                            label={t('parameterViewerDialog.loadEmpty')}
+                            color='warning'
+                            variant='outlined'
+                            className={classes.setRefChip}
                           />
                         ) : null}
                       </Box>
                     }
-                    secondary={`${vehicle.voltage}V · ${vehicle.status}`}
-                    secondaryTypographyProps={{ className: classes.vehicleMeta }}
+                    secondary={
+                      selected && paramCount !== undefined && !state.loading
+                        ? t('parameterViewerDialog.vehicleMetaLoaded', {
+                            count: paramCount,
+                            voltage: vehicle.voltage,
+                            status: vehicle.status,
+                          })
+                        : `${vehicle.voltage}V · ${vehicle.status}`
+                    }
+                    secondaryTypographyProps={{
+                      className: classes.vehicleMeta,
+                      noWrap: true,
+                    }}
                   />
                 </ListItemButton>
               );
             })}
           </List>
+          {emptySelectedIds.length > 0 &&
+          orderedSelectedIds.length > emptySelectedIds.length ? (
+            <Alert severity='warning' sx={{ mt: 1, py: 0.25, fontSize: '0.75rem' }}>
+              {t('parameterViewerDialog.partialLoad', {
+                ids: emptySelectedIds.join(', '),
+              })}
+            </Alert>
+          ) : null}
         </Box>
 
         <Box>
@@ -998,7 +1147,7 @@ const ParameterViewerPanel = ({ defaultSelectedUavIds }) => {
             <Typography variant='body2' color='text.secondary'>
               {t('parameterViewerDialog.count', {
                 shown: visible.length,
-                total: state.value.length,
+                total: comparedRows.length,
               })}
             </Typography>
           ) : null}

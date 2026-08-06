@@ -75,13 +75,40 @@ export async function getParameters(
 }
 
 /**
+ * Resolves a UAV entry from an API results map, tolerating string/number id keys.
+ */
+function resolveUavResult(
+  results: ParametersApiBody['results'],
+  uavId: string
+): MavlinkParametersUavResult | undefined {
+  if (!results) {
+    return undefined;
+  }
+
+  const direct = results[uavId];
+  if (direct) {
+    return direct;
+  }
+
+  const asString = String(uavId);
+  if (results[asString]) {
+    return results[asString];
+  }
+
+  const matchKey = Object.keys(results).find(
+    (key) => String(key) === asString || Number(key) === Number(uavId)
+  );
+  return matchKey ? results[matchKey] : undefined;
+}
+
+/**
  * Returns the parameter list for a single UAV from an API response body.
  */
 export function getParametersForUav(
   body: ParametersApiBody,
   uavId: string
 ): MavlinkParameter[] {
-  const result = body.results?.[uavId];
+  const result = resolveUavResult(body.results, uavId);
   if (!result || !Array.isArray(result.parameters)) {
     return [];
   }
