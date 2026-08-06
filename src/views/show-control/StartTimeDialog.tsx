@@ -291,6 +291,7 @@ const StartTimeForm = ({
             <Button
               color='primary'
               type='submit'
+              variant='contained'
               disabled={invalid || (!alwaysAllowSubmission && !dirty)}
             >
               {t('startTimeDialog.setNewStartTime')}

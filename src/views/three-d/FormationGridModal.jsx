@@ -2,8 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom';
 import PropTypes from 'prop-types';
 
+import Colors from '~/components/colors';
+
 const RAD = (d) => (d * Math.PI) / 180;
 const COS30 = Math.cos(RAD(30));
+
+/** 3D 뷰 CoordinateSystemAxes와 동일한 축 색 */
+const AXIS_COLORS = {
+  x: Colors.axes.x, // #f44
+  y: Colors.axes.y, // #4f4
+  z: Colors.axes.z, // #06f
+};
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
@@ -46,25 +55,50 @@ const spacingOf = (arr, fallback) => {
   return Math.max(1, Math.round(diffs[Math.floor(diffs.length / 2)] * 2) / 2);
 };
 
-/** phase 좌표로부터 격자 파라미터 + 슬롯 점유(occupancy)를 추정 */
-const inferLatticeFromPositions = (positions) => {
-  if (!Array.isArray(positions) || !positions.length) return null;
-  const xs = uniqSorted(positions.map((p) => p.x));
-  const ys = uniqSorted(positions.map((p) => p.y));
-  const zs = uniqSorted(positions.map((p) => p.z));
-  if (!xs.length || !ys.length || !zs.length) return null;
+const DEFAULT_LATTICE = { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0, az: 10 };
 
-  const sx = spacingOf(xs, 8);
-  const sy = spacingOf(ys, 8);
-  const sz = spacingOf(zs, 6);
-  const nx = clamp(xs.length, 1, 14);
-  const ny = clamp(ys.length, 1, 14);
-  const nz = clamp(zs.length, 1, 10);
-  const ax = (xs[0] + xs[xs.length - 1]) / 2;
-  const ay = (ys[0] + ys[ys.length - 1]) / 2;
-  const az = Math.max(0, zs[0]);
+const normalizeLattice = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const nx = Math.round(Number(raw.nx));
+  const ny = Math.round(Number(raw.ny));
+  const nz = Math.round(Number(raw.nz));
+  const sx = Number(raw.sx);
+  const sy = Number(raw.sy);
+  const sz = Number(raw.sz);
+  const ax = Number(raw.ax);
+  const ay = Number(raw.ay);
+  const az = Number(raw.az);
+  if (
+    !Number.isFinite(nx) ||
+    !Number.isFinite(ny) ||
+    !Number.isFinite(nz) ||
+    !Number.isFinite(sx) ||
+    !Number.isFinite(sy) ||
+    !Number.isFinite(sz) ||
+    !Number.isFinite(ax) ||
+    !Number.isFinite(ay) ||
+    !Number.isFinite(az)
+  ) {
+    return null;
+  }
+  return {
+    nx: clamp(nx, 1, 14),
+    ny: clamp(ny, 1, 14),
+    nz: clamp(nz, 1, 10),
+    sx: clamp(sx, 1, 60),
+    sy: clamp(sy, 1, 60),
+    sz: clamp(sz, 1, 60),
+    ax,
+    ay,
+    az: Math.max(0, az),
+  };
+};
 
+/** 드론 좌표를 격자 슬롯에 매칭해 occupancy 생성 */
+const matchOccupancyToLattice = (positions, lattice) => {
   const occupancy = {};
+  if (!lattice || !Array.isArray(positions) || !positions.length) return occupancy;
+  const { nx, ny, nz, sx, sy, sz, ax, ay, az } = lattice;
   const tol = Math.min(sx, sy, sz) * 0.35;
   const tol2 = tol * tol;
 
@@ -88,8 +122,29 @@ const inferLatticeFromPositions = (positions) => {
     }
     if (best && bd <= tol2 && !occupancy[best]) occupancy[best] = String(p.id);
   });
+  return occupancy;
+};
 
-  return { nx, ny, nz, sx, sy, sz, ax, ay, az, occupancy };
+/** phase 좌표로부터 격자 파라미터 + 슬롯 점유(occupancy)를 추정 */
+const inferLatticeFromPositions = (positions) => {
+  if (!Array.isArray(positions) || !positions.length) return null;
+  const xs = uniqSorted(positions.map((p) => p.x));
+  const ys = uniqSorted(positions.map((p) => p.y));
+  const zs = uniqSorted(positions.map((p) => p.z));
+  if (!xs.length || !ys.length || !zs.length) return null;
+
+  const sx = spacingOf(xs, 8);
+  const sy = spacingOf(ys, 8);
+  const sz = spacingOf(zs, 6);
+  const nx = clamp(xs.length, 1, 14);
+  const ny = clamp(ys.length, 1, 14);
+  const nz = clamp(zs.length, 1, 10);
+  const ax = (xs[0] + xs[xs.length - 1]) / 2;
+  const ay = (ys[0] + ys[ys.length - 1]) / 2;
+  const az = Math.max(0, zs[0]);
+  const lattice = { nx, ny, nz, sx, sy, sz, ax, ay, az };
+  const occupancy = matchOccupancyToLattice(positions, lattice);
+  return { ...lattice, occupancy };
 };
 
 const parseNodeKey = (key) => {
@@ -346,25 +401,29 @@ export default function FormationGridModal({
   onConfirm,
   mode = 'create',
   title,
+  initialLattice = null,
 }) {
   const isEdit = mode === 'edit';
   const viewRef = useRef(null);
   const paintRef = useRef(null);
+  /** 뷰 드래그 회전: { startX, startYaw } */
+  const orbitRef = useRef(null);
+  const yawRef = useRef(35);
   const placementRef = useRef({ drones: [], occupancy: {}, homeDrones: [], selectedId: null });
   const [drones, setDrones] = useState([]);
   const [homeDrones, setHomeDrones] = useState([]);
   /** key -> droneId : 격자에 바로 배치된 드론 */
   const [occupancy, setOccupancy] = useState({});
   const [selectedId, setSelectedId] = useState(null);
-  const [nx, setNx] = useState(6);
-  const [ny, setNy] = useState(6);
-  const [nz, setNz] = useState(4);
-  const [sx, setSx] = useState(8);
-  const [sy, setSy] = useState(8);
-  const [sz, setSz] = useState(6);
-  const [ax, setAx] = useState(0);
-  const [ay, setAy] = useState(0);
-  const [az, setAz] = useState(10);
+  const [nx, setNx] = useState(DEFAULT_LATTICE.nx);
+  const [ny, setNy] = useState(DEFAULT_LATTICE.ny);
+  const [nz, setNz] = useState(DEFAULT_LATTICE.nz);
+  const [sx, setSx] = useState(DEFAULT_LATTICE.sx);
+  const [sy, setSy] = useState(DEFAULT_LATTICE.sy);
+  const [sz, setSz] = useState(DEFAULT_LATTICE.sz);
+  const [ax, setAx] = useState(DEFAULT_LATTICE.ax);
+  const [ay, setAy] = useState(DEFAULT_LATTICE.ay);
+  const [az, setAz] = useState(DEFAULT_LATTICE.az);
   const [layer, setLayer] = useState(0);
   const [allLayers, setAllLayers] = useState(false);
   const [laxis, setLaxis] = useState('z');
@@ -372,11 +431,16 @@ export default function FormationGridModal({
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState({ w: 900, h: 560 });
   const [guide, setGuide] = useState(true);
+  const [orbiting, setOrbiting] = useState(false);
   const [, setPaintTick] = useState(0);
 
   useEffect(() => {
     placementRef.current = { drones, occupancy, homeDrones, selectedId };
   }, [drones, occupancy, homeDrones, selectedId]);
+
+  useEffect(() => {
+    yawRef.current = yaw;
+  }, [yaw]);
 
   useEffect(() => {
     if (!open) return;
@@ -387,26 +451,41 @@ export default function FormationGridModal({
             x: Number(d.x) || 0,
             y: Number(d.y) || 0,
             z: Number(d.z) || 0,
+            fromPhase: !!d.fromPhase,
             label: shortLabel(d.id, i),
           }))
         : makeFallbackDrones(16).map((d, i) => ({ ...d, label: shortLabel(d.id, i) }));
     setSelectedId(null);
 
-    const inferred = isEdit ? inferLatticeFromPositions(seeded) : null;
-    const lattice = inferred
-      ? {
-          nx: inferred.nx,
-          ny: inferred.ny,
-          nz: inferred.nz,
-          sx: inferred.sx,
-          sy: inferred.sy,
-          sz: inferred.sz,
-          ax: inferred.ax,
-          ay: inferred.ay,
-          az: inferred.az,
+    // 편집: 저장된 격자를 우선 복원. 없으면 phase에 속한 드론 좌표만으로 추론
+    // (대기/홈 위치 드론이 섞이면 격자가 깨져 빈 화면처럼 보임)
+    let lattice = DEFAULT_LATTICE;
+    let occ = {};
+    if (isEdit) {
+      const saved = normalizeLattice(initialLattice);
+      const phaseDrones = seeded.filter((d) => d.fromPhase);
+      const inferSource = phaseDrones.length ? phaseDrones : seeded;
+      if (saved) {
+        lattice = saved;
+        occ = matchOccupancyToLattice(inferSource, saved);
+      } else {
+        const inferred = inferLatticeFromPositions(inferSource);
+        if (inferred) {
+          lattice = {
+            nx: inferred.nx,
+            ny: inferred.ny,
+            nz: inferred.nz,
+            sx: inferred.sx,
+            sy: inferred.sy,
+            sz: inferred.sz,
+            ax: inferred.ax,
+            ay: inferred.ay,
+            az: inferred.az,
+          };
+          occ = inferred.occupancy || {};
         }
-      : { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0, az: 10 };
-    const occ = inferred?.occupancy || {};
+      }
+    }
     const laidOut = relayoutDrones(seeded, occ, lattice);
 
     setNx(lattice.nx);
@@ -428,7 +507,7 @@ export default function FormationGridModal({
     setZoom(1);
     setGuide(!isEdit);
     paintRef.current = null;
-    // dronesProp / mode는 open 시점에만 시드
+    // dronesProp / mode / initialLattice는 open 시점에만 시드
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- seed on open only
 
   useEffect(() => {
@@ -444,11 +523,27 @@ export default function FormationGridModal({
       const r = el.getBoundingClientRect();
       setView({ w: r.width, h: r.height });
     }
+    const wrapYaw = (v) => {
+      let n = Math.round(v) % 360;
+      if (n < 0) n += 360;
+      return n;
+    };
+    const endOrbit = () => {
+      if (!orbitRef.current) return;
+      orbitRef.current = null;
+      setOrbiting(false);
+    };
+    const onMove = (e) => {
+      if (!orbitRef.current) return;
+      const dx = e.clientX - orbitRef.current.startX;
+      setYaw(wrapYaw(orbitRef.current.startYaw + dx * 0.45));
+    };
     const onUp = () => {
       if (paintRef.current !== null) {
         paintRef.current = null;
         setPaintTick((t) => t + 1);
       }
+      endOrbit();
     };
     const onKey = (e) => {
       if (e.key === 'Escape') {
@@ -456,14 +551,71 @@ export default function FormationGridModal({
         else onClose();
       }
     };
+    const onWheel = (e) => {
+      e.preventDefault();
+      const step = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoom((z) => clamp(Math.round((z + step) * 10) / 10, 0.5, 2.4));
+    };
+    const onContextMenu = (e) => {
+      // 우클릭 회전과 충돌하지 않도록 뷰 안에서는 컨텍스트 메뉴 막음
+      e.preventDefault();
+    };
+    window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     window.addEventListener('keydown', onKey);
+    if (el) {
+      el.addEventListener('wheel', onWheel, { passive: false });
+      el.addEventListener('contextmenu', onContextMenu);
+    }
     return () => {
       if (ro) ro.disconnect();
+      window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('keydown', onKey);
+      if (el) {
+        el.removeEventListener('wheel', onWheel);
+        el.removeEventListener('contextmenu', onContextMenu);
+      }
+      orbitRef.current = null;
     };
   }, [open, guide, onClose]);
+
+  const beginOrbit = useCallback((clientX) => {
+    orbitRef.current = { startX: clientX, startYaw: yawRef.current };
+    setOrbiting(true);
+    paintRef.current = null;
+  }, []);
+
+  const isViewBackgroundTarget = (target, currentTarget) => {
+    if (!target || !currentTarget) return false;
+    if (target === currentTarget) return true;
+    const tag = String(target.tagName || '').toLowerCase();
+    return (
+      tag === 'svg' ||
+      tag === 'line' ||
+      tag === 'polygon' ||
+      tag === 'path' ||
+      tag === 'text' ||
+      tag === 'circle'
+    );
+  };
+
+  const handleViewMouseDown = useCallback(
+    (e) => {
+      if (guide) return;
+      // 우클릭·휠클릭: 어디서든 회전 / 좌클릭: 빈 배경에서만 회전 (슬롯 배치와 분리)
+      if (e.button === 2 || e.button === 1) {
+        e.preventDefault();
+        beginOrbit(e.clientX);
+        return;
+      }
+      if (e.button === 0 && isViewBackgroundTarget(e.target, e.currentTarget)) {
+        e.preventDefault();
+        beginOrbit(e.clientX);
+      }
+    },
+    [guide, beginOrbit]
+  );
 
   const nodePos = useCallback(
     (i, j, k) => ({
@@ -659,6 +811,7 @@ export default function FormationGridModal({
     (key, live) => (e) => {
       if (!live) return;
       e.preventDefault();
+      e.stopPropagation();
       const { occupancy: prevOcc, selectedId: sel } = placementRef.current;
       if (prevOcc[key]) {
         paintRef.current = false;
@@ -756,7 +909,18 @@ export default function FormationGridModal({
       };
     });
     if (!Object.keys(points).length) return;
-    onConfirm?.(points);
+    const lattice = {
+      nx,
+      ny,
+      nz,
+      sx: round3(sx),
+      sy: round3(sy),
+      sz: round3(sz),
+      ax: round3(ax),
+      ay: round3(ay),
+      az: round3(az),
+    };
+    onConfirm?.(points, lattice);
     onClose();
   };
 
@@ -900,13 +1064,52 @@ export default function FormationGridModal({
       };
     });
 
-    return { plate, planePoly, planeLines, posts, nodes, dots, idleRail };
+    // 3D 뷰와 동일: 원점(0,0,0) 기준 +X/+Y/+Z 축 (짧게 표시)
+    const axisLen = Math.max(2.5, Math.min(hx, hy) * 0.18, Math.max(sx, sy, sz) * 0.85);
+    const origin = proj(0, 0, 0);
+    const makeAxis = (key, tipWorld, color) => {
+      const tip = proj(tipWorld.x, tipWorld.y, tipWorld.z);
+      const dx = tip.px - origin.px;
+      const dy = tip.py - origin.py;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      const px = -uy;
+      const py = ux;
+      const ah = 6;
+      const aw = 3;
+      const bx = tip.px - ux * ah;
+      const by = tip.py - uy * ah;
+      return {
+        key,
+        color,
+        label: key.toUpperCase(),
+        x1: origin.px,
+        y1: origin.py,
+        x2: tip.px,
+        y2: tip.py,
+        arrow: `${tip.px.toFixed(1)},${tip.py.toFixed(1)} ${(bx + px * aw).toFixed(1)},${(
+          by +
+          py * aw
+        ).toFixed(1)} ${(bx - px * aw).toFixed(1)},${(by - py * aw).toFixed(1)}`,
+        lx: tip.px + ux * 8,
+        ly: tip.py + uy * 8,
+      };
+    };
+    const axes = [
+      makeAxis('x', { x: axisLen, y: 0, z: 0 }, AXIS_COLORS.x),
+      makeAxis('y', { x: 0, y: axisLen, z: 0 }, AXIS_COLORS.y),
+      makeAxis('z', { x: 0, y: 0, z: axisLen }, AXIS_COLORS.z),
+    ];
+
+    return { plate, planePoly, planeLines, posts, nodes, dots, idleRail, axes, origin };
   }, [
     nx,
     ny,
     nz,
     sx,
     sy,
+    sz,
     ax,
     ay,
     allLayers,
@@ -969,7 +1172,7 @@ export default function FormationGridModal({
           <div style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.55)', flex: 1 }}>
             {selectedId
               ? `드론 ${selectedId} 선택됨 — 빈 격자를 클릭하면 바로 배치됩니다`
-              : '대기 드론은 바닥 스택에 모입니다. 아래에서 골라 격자에 배치하세요.'}
+              : '빈 곳 드래그·우클릭 드래그로 회전, 휠로 확대. 대기 드론은 하단 스택에서 배치하세요.'}
           </div>
           <span style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.65)' }}>
             {occupiedCount} / {drones.length} 배치
@@ -1156,11 +1359,14 @@ export default function FormationGridModal({
               <span style={labStyle}>
                 View · {yaw}° / zoom {zoom.toFixed(1)}×
               </span>
+              <div style={{ fontSize: 11, color: 'rgba(190, 210, 235, 0.45)', lineHeight: 1.4 }}>
+                드래그로 회전 · 휠로 확대/축소
+              </div>
               <input
                 type="range"
                 min={0}
-                max={355}
-                step={5}
+                max={359}
+                step={1}
                 value={yaw}
                 onChange={(e) => setYaw(parseInt(e.target.value, 10) || 0)}
                 style={{ accentColor: '#3b82f6' }}
@@ -1216,6 +1422,7 @@ export default function FormationGridModal({
 
           <div
             ref={viewRef}
+            onMouseDown={handleViewMouseDown}
             style={{
               position: 'relative',
               flex: '1 1 auto',
@@ -1224,6 +1431,8 @@ export default function FormationGridModal({
               backgroundImage:
                 'linear-gradient(rgba(80, 120, 180, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(80, 120, 180, 0.08) 1px, transparent 1px)',
               backgroundSize: '44px 44px',
+              cursor: orbiting ? 'grabbing' : 'grab',
+              touchAction: 'none',
             }}
           >
             <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -1238,6 +1447,42 @@ export default function FormationGridModal({
                   strokeWidth="1"
                 />
               ))}
+              {scene.axes.map((a) => (
+                <g key={`axis-${a.key}`}>
+                  <line
+                    x1={a.x1}
+                    y1={a.y1}
+                    x2={a.x2}
+                    y2={a.y2}
+                    stroke={a.color}
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                  <polygon points={a.arrow} fill={a.color} />
+                  <text
+                    x={a.lx}
+                    y={a.ly}
+                    fill={a.color}
+                    fontSize="10"
+                    fontWeight="700"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    style={{ letterSpacing: '0.04em' }}
+                  >
+                    {a.label}
+                  </text>
+                </g>
+              ))}
+              {scene.origin ? (
+                <circle
+                  cx={scene.origin.px}
+                  cy={scene.origin.py}
+                  r="2.5"
+                  fill="#fff"
+                  stroke="rgba(200, 220, 255, 0.85)"
+                  strokeWidth="1.25"
+                />
+              ) : null}
               {scene.planePoly ? (
                 <polygon
                   points={scene.planePoly}
@@ -1384,6 +1629,44 @@ export default function FormationGridModal({
                 </span>
               </div>
             ))}
+
+            {/* 축 색상 범례 (3D 뷰 Colors.axes와 동일) */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 10,
+                left: 10,
+                display: 'flex',
+                gap: 7,
+                padding: '4px 7px',
+                borderRadius: 6,
+                border: '1px solid rgba(130, 190, 255, 0.2)',
+                background: 'rgba(12, 16, 24, 0.72)',
+                pointerEvents: 'none',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+              }}
+            >
+              {[
+                ['X', AXIS_COLORS.x],
+                ['Y', AXIS_COLORS.y],
+                ['Z', AXIS_COLORS.z],
+              ].map(([label, color]) => (
+                <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, color }}>
+                  <i
+                    style={{
+                      display: 'block',
+                      width: 10,
+                      height: 2,
+                      borderRadius: 1,
+                      background: color,
+                    }}
+                  />
+                  {label}
+                </span>
+              ))}
+            </div>
 
             {/* 대기중 드론 UI 스택 */}
             <div
@@ -1558,6 +1841,10 @@ export default function FormationGridModal({
                     '대기 드론은 바닥 직선 스택과 하단 UI에 모입니다. 스택에서 드론을 고른 뒤 격자를 누르면 바로 배치됩니다. 빈 격자만 눌러도 가장 가까운 대기 드론이 올라갑니다.',
                   ],
                   [
+                    '뷰 조작',
+                    '빈 배경을 드래그하거나 우클릭 드래그로 회전하고, 마우스 휠로 확대·축소합니다. 왼쪽 슬라이더로도 동일하게 조절할 수 있습니다.',
+                  ],
+                  [
                     isEdit ? 'Phase 수정 적용' : 'Phase로 추가',
                     isEdit
                       ? '배치를 마친 뒤 Phase 수정 적용을 누르면 이 phase 좌표가 갱신되고 3D 씬에 반영됩니다.'
@@ -1614,9 +1901,21 @@ FormationGridModal.propTypes = {
       x: PropTypes.number,
       y: PropTypes.number,
       z: PropTypes.number,
+      fromPhase: PropTypes.bool,
     })
   ),
   onConfirm: PropTypes.func,
   mode: PropTypes.oneOf(['create', 'edit']),
   title: PropTypes.string,
+  initialLattice: PropTypes.shape({
+    nx: PropTypes.number,
+    ny: PropTypes.number,
+    nz: PropTypes.number,
+    sx: PropTypes.number,
+    sy: PropTypes.number,
+    sz: PropTypes.number,
+    ax: PropTypes.number,
+    ay: PropTypes.number,
+    az: PropTypes.number,
+  }),
 };
