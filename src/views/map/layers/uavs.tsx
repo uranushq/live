@@ -2,13 +2,13 @@ import React from 'react';
 
 import { connect } from 'react-redux';
 
-import { Status } from '~/components/semantics';
 import {
   UAVsLayer as BaseUAVsLayerPresentation,
   UAVsLayerSettings as UAVsLayerSettingsPresentation,
   type UAVsLayerProps,
   type UAVsLayerSettingsProps,
 } from '~/components/map/layers/uavs';
+import { getVisibleUAVIdList } from '~/features/drone-groups/selectors';
 import { setLayerParametersById } from '~/features/map/layers';
 import {
   getGeofencePolygonInWorldCoordinates,
@@ -47,6 +47,7 @@ export const UAVsLayer = connect(
     geofencePoints: hasActiveGeofencePolygon(state)
       ? getGeofencePolygonInWorldCoordinates(state)
       : undefined,
+    visibleUAVIds: getVisibleUAVIdList(state),
   }),
   // mapDispatchToProps
   {}

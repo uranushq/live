@@ -65,6 +65,10 @@ type ShowSliceState = {
     open: boolean;
   };
 
+  showStartPermissionDialog: {
+    open: boolean;
+  };
+
   preflight: {
     manualChecksSignedOffAt?: number;
     onboardChecksSignedOffAt?: number;
@@ -181,6 +185,10 @@ const initialState: ShowSliceState = {
     open: false,
   },
 
+  showStartPermissionDialog: {
+    open: false,
+  },
+
   preflight: {
     manualChecksSignedOffAt: undefined,
     onboardChecksSignedOffAt: undefined,
@@ -268,6 +276,10 @@ const { actions, reducer } = createSlice({
 
     closeOnboardPreflightChecksDialog: noPayload<ShowSliceState>((state) => {
       state.onboardPreflightChecksDialog.open = false;
+    }),
+
+    closeShowStartPermissionDialog: noPayload<ShowSliceState>((state) => {
+      state.showStartPermissionDialog.open = false;
     }),
 
     closeStartTimeDialog(
@@ -367,6 +379,10 @@ const { actions, reducer } = createSlice({
 
     openOnboardPreflightChecksDialog: noPayload<ShowSliceState>((state) => {
       state.onboardPreflightChecksDialog.open = true;
+    }),
+
+    openShowStartPermissionDialog: noPayload<ShowSliceState>((state) => {
+      state.showStartPermissionDialog.open = true;
     }),
 
     openStartTimeDialog: noPayload<ShowSliceState>((state) => {
@@ -565,6 +581,7 @@ export const {
   closeLoadShowFromCloudDialog,
   closeManualPreflightChecksDialog,
   closeOnboardPreflightChecksDialog,
+  closeShowStartPermissionDialog,
   closeStartTimeDialog,
   closeTakeoffAreaSetupDialog,
   loadingProgress,
@@ -574,6 +591,7 @@ export const {
   openLoadShowFromCloudDialog,
   openManualPreflightChecksDialog,
   openOnboardPreflightChecksDialog,
+  openShowStartPermissionDialog,
   openStartTimeDialog,
   openTakeoffAreaSetupDialog,
   revokeTakeoffAreaApproval,

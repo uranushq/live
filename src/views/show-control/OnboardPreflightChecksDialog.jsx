@@ -105,6 +105,8 @@ const PreflightCheckList = connect(
   {}
 )(PreflightCheckListPresentation);
 
+export { PreflightCheckList };
+
 /**
  * Presentation component for the dialog that allows the user to inspect the
  * status of the automatic onboard preflight checks (and the error codes in

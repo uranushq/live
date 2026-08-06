@@ -16,7 +16,7 @@ import { type Latitude, type Longitude } from '~/utils/geography';
 import { type Coordinate3D } from '~/utils/math';
 
 import { GPSFixType } from './enums';
-import { type GPSFix, type GPSPosition } from './geography';
+import { isGPSPositionValid, type GPSFix, type GPSPosition } from './geography';
 import { type VelocityNED, type VelocityXYZ } from './velocity';
 
 /**
@@ -220,8 +220,8 @@ export default class UAV {
    * Returns the position object if it is available, `undefined` otherwise.
    */
   get position(): GPSPosition | undefined {
-    /* Null Island is treated as "no position info" */
-    return this._position?.lat && this._position?.lon
+    /* Null Island / non-finite coords are treated as "no position info" */
+    return isGPSPositionValid(this._position)
       ? this._positionMemoizer(this._position)
       : undefined;
   }
@@ -229,8 +229,15 @@ export default class UAV {
   /**
    * Replaces the position object of the UAV if the new value is actually
    * different from the current one.
+   *
+   * Invalid coordinates (NaN, Null Island) are ignored so a brief GPS dropout
+   * cannot wipe the last-known good location used by the map.
    */
   set position(value) {
+    if (value != null && !isGPSPositionValid(value)) {
+      return;
+    }
+
     if (!shallowEqual(this._position, value)) {
       this._position = value;
     }
@@ -269,27 +276,35 @@ export default class UAV {
       updated = true;
     }
 
-    if (position) {
-      this.position = {
+    if (Array.isArray(position) && position.length >= 2) {
+      const lat = Number(position[0]) / 1e7;
+      const lon = Number(position[1]) / 1e7;
+      const nextPosition: GPSPosition = {
         // NOTE: Type assertion justified by `flockwave-spec`:
         // UAVStatusInfo['position'] is supposed to be of type `GPSCoordinate`,
         // which is at least a `[Latitude, Longitude]` pair
-        lat: (position[0] / 1e7) as Latitude,
-        lon: (position[1] / 1e7) as Longitude,
-        amsl: isNil(position[2]) ? undefined : position[2] / 1e3,
-        ahl: isNil(position[3]) ? undefined : position[3] / 1e3,
-        agl: isNil(position[4]) ? undefined : position[4] / 1e3,
+        lat: lat as Latitude,
+        lon: lon as Longitude,
+        amsl: isNil(position[2]) ? undefined : Number(position[2]) / 1e3,
+        ahl: isNil(position[3]) ? undefined : Number(position[3]) / 1e3,
+        agl: isNil(position[4]) ? undefined : Number(position[4]) / 1e3,
       };
-      updated = true;
+
+      // Skip Null Island / NaN so map markers keep the last-good fix.
+      if (isGPSPositionValid(nextPosition)) {
+        this.position = nextPosition;
+        updated = true;
+      }
     }
 
     if (positionXYZ && Array.isArray(positionXYZ) && positionXYZ.length >= 3) {
-      this.localPosition = [
-        positionXYZ[0] / 1e3,
-        positionXYZ[1] / 1e3,
-        positionXYZ[2] / 1e3,
-      ];
-      updated = true;
+      const x = Number(positionXYZ[0]) / 1e3;
+      const y = Number(positionXYZ[1]) / 1e3;
+      const z = Number(positionXYZ[2]) / 1e3;
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        this.localPosition = [x, y, z];
+        updated = true;
+      }
     }
 
     if (heading !== undefined && this.heading !== heading / 10) {

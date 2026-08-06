@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
@@ -50,6 +51,12 @@ const ParametersTextFieldPresentation = ({ onChange, optimizeUIForTouch }) => {
     return true;
   };
 
+  const addToManifest = () => {
+    if (validateValue(parameterString, true)) {
+      setParameterString('');
+    }
+  };
+
   const handleKeyPress = (event) => {
     if (event.shiftKey && event.key === 'Enter') {
       if (validateValue(event.target.value, true)) {
@@ -61,7 +68,7 @@ const ParametersTextFieldPresentation = ({ onChange, optimizeUIForTouch }) => {
   };
 
   return (
-    <>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
       <TextField
         fullWidth
         multiline
@@ -76,12 +83,53 @@ const ParametersTextFieldPresentation = ({ onChange, optimizeUIForTouch }) => {
         onChange={handleChange}
         onKeyPress={handleKeyPress}
       />
-      <Typography variant='caption' color='textSecondary' component='div'>
-        값에 <code>$id</code>를 쓰면 드론별 수식으로 계산됩니다 (드론 id의
-        숫자 부분). 예: <code>SYSID_THISMAV=$id</code>,{' '}
-        <code>SYSID_THISMAV=$id+1</code>, <code>GRP=($id-1)%4</code>
-      </Typography>
-    </>
+
+      <Box
+        sx={{
+          alignItems: 'center',
+          display: 'flex',
+          gap: 1.5,
+          justifyContent: 'space-between',
+        }}
+      >
+        <Typography
+          color='text.secondary'
+          component='div'
+          sx={{ flex: 1, minWidth: 0 }}
+          variant='body2'
+        >
+          <Trans
+            i18nKey='parameterUploadMainPanel.parameterUploadHint'
+            components={{ kbd: <kbd /> }}
+          />
+        </Typography>
+        <Button
+          color='primary'
+          disabled={!parameterString.trim()}
+          sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+          variant='contained'
+          onClick={addToManifest}
+        >
+          {t('parameterUploadMainPanel.addToManifest', 'Add to manifest')}
+        </Button>
+      </Box>
+
+      <Box
+        sx={{
+          bgcolor: 'action.hover',
+          borderRadius: 1,
+          px: 1.5,
+          py: 1,
+        }}
+      >
+        <Typography color='text.secondary' component='div' variant='caption'>
+          {t(
+            'parameterUploadMainPanel.expressionHint',
+            'Use $id in values for per-drone formulas (numeric part of the drone id). Examples: SYSID_THISMAV=$id, SYSID_THISMAV=$id+1, GRP=($id-1)%4'
+          )}
+        </Typography>
+      </Box>
+    </Box>
   );
 };
 
@@ -113,25 +161,15 @@ const ParameterUploadMainPanel = () => {
   };
 
   return (
-    <Box sx={{ pt: 1 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
       <ParametersTextField onChange={handleManifestChange} />
-      <Box sx={{ pt: 1 }}>
-        <Typography variant='body1'>
-          <Trans
-            i18nKey='parameterUploadMainPanel.parameterUploadHint'
-            components={{ kbd: <kbd /> }}
-          />
-        </Typography>
-      </Box>
-      <Box sx={{ pt: 1 }}>
-        <FormControlLabel
-          style={{ margin: '0' }}
-          control={
-            <Switch checked={shouldReboot} onChange={handleRebootStateChange} />
-          }
-          label={t('parameterUploadMainPanel.rebootAfterUpload')}
-        />
-      </Box>
+      <FormControlLabel
+        style={{ margin: 0 }}
+        control={
+          <Switch checked={shouldReboot} onChange={handleRebootStateChange} />
+        }
+        label={t('parameterUploadMainPanel.rebootAfterUpload')}
+      />
     </Box>
   );
 };

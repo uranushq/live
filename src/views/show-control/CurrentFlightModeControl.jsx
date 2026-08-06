@@ -48,10 +48,10 @@ const useStyles = makeStyles((theme) => ({
   labelBottomBar: {
     color: theme.palette.text.primary,
     flexShrink: 0,
-    fontSize: '0.78rem',
-    fontWeight: 500,
+    fontSize: '0.9rem',
+    fontWeight: 600,
     lineHeight: 1,
-    minWidth: 44,
+    minWidth: 52,
     whiteSpace: 'nowrap',
   },
   select: {
@@ -87,13 +87,13 @@ const useStyles = makeStyles((theme) => ({
     backgroundColor: theme.palette.common.white,
     borderRadius: 4,
     flex: 1,
-    fontSize: '0.8rem',
-    fontWeight: 500,
-    height: 32,
+    fontSize: '0.95rem',
+    fontWeight: 600,
+    height: 44,
     minWidth: 0,
 
     '& .MuiSelect-select': {
-      padding: theme.spacing(0.625, 3, 0.625, 1.25),
+      padding: theme.spacing(1, 4, 1, 1.5),
     },
 
     '& .MuiOutlinedInput-notchedOutline': {
@@ -123,12 +123,12 @@ const useStyles = makeStyles((theme) => ({
     borderRadius: 4,
     color: theme.palette.common.white,
     flexShrink: 0,
-    fontSize: '0.76rem',
-    fontWeight: 600,
+    fontSize: '0.9rem',
+    fontWeight: 700,
     lineHeight: 1,
-    minHeight: 32,
-    minWidth: 56,
-    padding: theme.spacing(0.625, 1.25),
+    minHeight: 44,
+    minWidth: 72,
+    padding: theme.spacing(1, 2),
     textTransform: 'none',
 
     '&:hover': {
@@ -158,14 +158,21 @@ const CurrentFlightModeControl = ({
   const [applying, setApplying] = useState(false);
 
   const targetUAVIds = useMemo(() => {
+    // Bottom-bar Drone Control always applies to the current selection only.
+    if (isBottomBar) {
+      return selectedUAVIds;
+    }
+
     if (broadcast) {
       return missionUAVIds.length > 0 ? missionUAVIds : activeUAVIds;
     }
 
     return selectedUAVIds;
-  }, [activeUAVIds, broadcast, missionUAVIds, selectedUAVIds]);
+  }, [activeUAVIds, broadcast, isBottomBar, missionUAVIds, selectedUAVIds]);
 
-  const canApply = broadcast || selectedUAVIds.length > 0;
+  const canApply = isBottomBar
+    ? selectedUAVIds.length > 0
+    : broadcast || selectedUAVIds.length > 0;
 
   const modeOptions = useMemo(
     () =>

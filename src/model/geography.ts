@@ -41,12 +41,16 @@ export const isGPSPosition = (position: unknown): position is GPSPosition =>
 
 /**
  * Return whether the given (optional) GPS position is valid, meaning it is not
- * `undefined` or `null` and not the null island.
+ * `undefined` or `null`, has finite coordinates, and is not the null island.
  */
 export const isGPSPositionValid = (
   pos: GPSPosition | undefined | null
 ): pos is GPSPosition =>
-  pos !== undefined && pos !== null && !isNullIsland(pos);
+  pos !== undefined &&
+  pos !== null &&
+  Number.isFinite(pos.lat) &&
+  Number.isFinite(pos.lon) &&
+  !isNullIsland(pos);
 
 /* ----- Heading ------------------------------------------------------------ */
 

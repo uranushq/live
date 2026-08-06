@@ -2,6 +2,7 @@ import Add from '@mui/icons-material/Add';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import GpsFixed from '@mui/icons-material/GpsFixed';
+import GridOn from '@mui/icons-material/GridOn';
 import Groups from '@mui/icons-material/Groups';
 import KeyboardArrowDown from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
@@ -517,6 +518,8 @@ export default function DroneInfoPanel({
   formationSendStartedAt = null,
   formationDeliveryStatus = '',
   onAddFormationPhase = () => {},
+  onOpenFormationGrid = () => {},
+  onEditFormationPhaseGrid = () => {},
   onAppendReversedFormationPhases = () => {},
   onRecoverReversedFormationPhases = () => {},
   canRecoverReversedFormationPhases = false,
@@ -1280,13 +1283,21 @@ export default function DroneInfoPanel({
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <FormationActionButton
-              title="현재 모든 드론의 위치를 새 phase로 캡처"
-              onClick={onAddFormationPhase}
+              title="격자 툴로 새 formation phase 만들기"
+              onClick={onOpenFormationGrid}
               variant="primary"
               style={{ flex: '1 1 160px', padding: '10px 12px', borderRadius: 9, fontSize: 12.5 }}
             >
               <Add sx={{ fontSize: 16, color: 'inherit' }} />
-              현재 배치로 Phase 추가
+              그리드로 Phase 추가
+            </FormationActionButton>
+            <FormationActionButton
+              title="현재 모든 드론의 위치를 새 phase로 캡처"
+              onClick={onAddFormationPhase}
+              variant="secondary"
+              style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12 }}
+            >
+              현재 배치 캡처
             </FormationActionButton>
             <FormationActionButton
               title="이미지를 올려 내용·구조를 대표하는 점들을 추출하고, 정면 수직 평면 phase로 추가"
@@ -1356,8 +1367,9 @@ export default function DroneInfoPanel({
                 borderStyle: 'dashed',
               }}
             >
-              아직 phase가 없습니다. 드론을 배치하고{' '}
-              <b style={{ color: '#c9cbd1' }}>현재 배치로 Phase 추가</b>를 눌러주세요.
+              아직 phase가 없습니다.{' '}
+              <b style={{ color: '#c9cbd1' }}>그리드로 Phase 추가</b>로 모양을 그리거나{' '}
+              <b style={{ color: '#c9cbd1' }}>현재 배치 캡처</b>를 눌러주세요.
             </div>
           ) : (
             formationPhases.map((phase, idx) => {
@@ -1933,6 +1945,15 @@ export default function DroneInfoPanel({
                       전체 드론 ({droneCount}대)
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                      <FormationActionButton
+                        title="격자 툴로 이 phase 대형 수정"
+                        onClick={() => onEditFormationPhaseGrid(phase.id)}
+                        variant="primary"
+                        disabled={droneCount === 0}
+                      >
+                        <GridOn sx={iconSx} />
+                        그리드 수정
+                      </FormationActionButton>
                       <FormationActionButton
                         title="이 phase에 저장된 좌표로 등록된 모든 드론 이동"
                         onClick={() => onApplyAllDronesInPhase(phase.id)}
@@ -2515,6 +2536,8 @@ DroneInfoPanel.propTypes = {
   formationSendStartedAt: PropTypes.number,
   formationDeliveryStatus: PropTypes.string,
   onAddFormationPhase: PropTypes.func,
+  onOpenFormationGrid: PropTypes.func,
+  onEditFormationPhaseGrid: PropTypes.func,
   onAppendReversedFormationPhases: PropTypes.func,
   onRecoverReversedFormationPhases: PropTypes.func,
   canRecoverReversedFormationPhases: PropTypes.bool,

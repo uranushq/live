@@ -9,7 +9,7 @@ import { configure as configureHotkeys, GlobalHotKeys } from 'react-hotkeys';
 import { connect } from 'react-redux';
 
 import { removeSelectedFeatures } from '~/features/map-features/actions';
-import { selectAllUAVs } from '~/features/map/selection';
+import { selectAllVisibleUAVs } from '~/features/drone-groups/actions';
 import { removeSelectedMissionItems } from '~/features/mission/actions';
 import { getPreferredCommunicationChannelIndex } from '~/features/mission/selectors';
 import { togglePreferredChannel } from '~/features/mission/slice';
@@ -153,7 +153,7 @@ export default connect(
           dispatch(removeSelectedFeatures());
           dispatch(removeSelectedMissionItems());
         }),
-        SELECT_ALL_DRONES: selectAllUAVs,
+        SELECT_ALL_DRONES: selectAllVisibleUAVs,
         SEND_FLASH_LIGHTS_COMMAND: handlePendingUAVIdThenDispatch(
           callUAVActionOnSelection('flashLight')
         ),

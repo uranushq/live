@@ -16,6 +16,24 @@ body .lm_content:has(a-scene) {
   overflow: hidden;
 }
 
+/* Ensure embedded A-Frame scenes fill the flex host (avoids 0×0 canvas on remount) */
+.three-d-scene-host {
+  min-height: 0;
+}
+
+.three-d-scene-host > div,
+.three-d-scene-host a-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.three-d-scene-host .a-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 /* Fix the background color of the panel bodies and the tabs */
 body .lm_header {
   .lm_tab {

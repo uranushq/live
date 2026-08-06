@@ -12,6 +12,7 @@ import {
   isShowingEmptyMissionSlots,
   isShowingMissionIds,
 } from '~/features/settings/selectors';
+import { getActiveNamedUAVGroupMemberIdSet } from '~/features/drone-groups/selectors';
 import {
   getUAVIdList,
   getUAVIdToStateMapping,
@@ -130,6 +131,21 @@ const getUnprocessedItems: AppSelector<Item[]> = (state: RootState) =>
     : getUnprocessedItemsSortedByUavId(state);
 
 /**
+ * Applies the active named UAV group filter to list items.
+ * Empty mission slots are hidden while a group filter is active.
+ */
+const filterItemsByActiveGroup = (
+  items: Item[],
+  memberSet: Set<string> | null
+): Item[] => {
+  if (!memberSet) {
+    return items;
+  }
+
+  return items.filter(([uavId]) => uavId !== undefined && memberSet.has(uavId));
+};
+
+/**
  * Selector that provides the list of UAV IDs and mission slots to show in the
  * UAV list, after applying the sorting and filtering criteria that the user
  * requested.
@@ -139,7 +155,14 @@ export const getDisplayedItems: AppSelector<Item[]> = createSelector(
   getUAVListSortPreference,
   getUnprocessedItems,
   getUAVIdToStateMappingForSortAndFilter,
-  applyFiltersAndSortDisplayedUAVIdList
+  getActiveNamedUAVGroupMemberIdSet,
+  (filters, sortBy, items, uavsById, memberSet) =>
+    applyFiltersAndSortDisplayedUAVIdList(
+      filters,
+      sortBy,
+      filterItemsByActiveGroup(items, memberSet),
+      uavsById
+    )
 );
 
 /**
@@ -261,7 +284,17 @@ export const getDisplayedGroups: AppSelector<UAVGroup[]> = createSelector(
   getUAVListSortPreference,
   getUnprocessedGroups,
   getUAVIdToStateMappingForSortAndFilter,
-  applyFiltersAndSortDisplayedUAVGroups
+  getActiveNamedUAVGroupMemberIdSet,
+  (filters, sortBy, groups, uavsById, memberSet) =>
+    applyFiltersAndSortDisplayedUAVGroups(
+      filters,
+      sortBy,
+      groups.map((group) => ({
+        ...group,
+        items: filterItemsByActiveGroup(group.items, memberSet),
+      })),
+      uavsById
+    )
 );
 
 /**
