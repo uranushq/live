@@ -7,10 +7,7 @@ import { connect } from 'react-redux';
 import { colorForStatus, Status } from '@skybrush/app-theme-mui';
 import { GenericHeaderButton, SidebarBadge } from '@skybrush/mui-components';
 
-import {
-  isConnected,
-  supportsVirtualDrones,
-} from '~/features/servers/selectors';
+import { isConnected } from '~/features/servers/selectors';
 import type { RootState } from '~/store/reducers';
 import {
   getVirtualUavsStatus,
@@ -29,7 +26,6 @@ const buttonStyle = {
 
 type VirtualUavsHeaderButtonProps = Readonly<{
   isConnected: boolean;
-  supportsVirtualDrones: boolean;
 }>;
 
 const emptyStatus: VirtualUavsStatus = {
@@ -41,18 +37,20 @@ const emptyStatus: VirtualUavsStatus = {
 /**
  * Header button for the virtual UAV fleet REST API.
  * Opens a persistent popover on click (not hover).
+ *
+ * Always shown in the header; availability is determined by the REST endpoint
+ * rather than the optional Flockwave `virtual_uavs` feature flag.
  */
 const VirtualUavsHeaderButton = ({
   isConnected,
-  supportsVirtualDrones,
-}: VirtualUavsHeaderButtonProps): JSX.Element | null => {
+}: VirtualUavsHeaderButtonProps): JSX.Element => {
   const { t } = useTranslation();
   const [status, setStatus] = useState<VirtualUavsStatus>(emptyStatus);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
 
   const refresh = useCallback(async () => {
-    if (!isConnected || !supportsVirtualDrones) {
+    if (!isConnected) {
       setStatus(emptyStatus);
       return;
     }
@@ -62,10 +60,10 @@ const VirtualUavsHeaderButton = ({
     } catch {
       // Keep the last known status; the popover control surfaces errors.
     }
-  }, [isConnected, supportsVirtualDrones]);
+  }, [isConnected]);
 
   useEffect(() => {
-    if (!isConnected || !supportsVirtualDrones) {
+    if (!isConnected) {
       setStatus(emptyStatus);
       return;
     }
@@ -78,11 +76,7 @@ const VirtualUavsHeaderButton = ({
     return () => {
       window.clearInterval(timer);
     };
-  }, [isConnected, refresh, supportsVirtualDrones]);
-
-  if (!supportsVirtualDrones) {
-    return null;
-  }
+  }, [isConnected, refresh]);
 
   const badgeStatus = !isConnected
     ? null
@@ -144,5 +138,4 @@ const VirtualUavsHeaderButton = ({
 
 export default connect((state: RootState) => ({
   isConnected: isConnected(state),
-  supportsVirtualDrones: supportsVirtualDrones(state),
 }))(VirtualUavsHeaderButton);
