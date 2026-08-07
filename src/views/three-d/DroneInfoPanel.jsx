@@ -22,6 +22,18 @@ import {
   toFiniteDurationMs,
   toFiniteHoldMs,
 } from './utils/threeDViewUtils';
+import {
+  PROFILE_THICKNESS_MAX,
+  PROFILE_THICKNESS_MIN,
+  getProfileExp,
+  getProfileLog,
+  getVelocitySmoothing,
+  setProfileExp,
+  setProfileLog,
+  setVelocitySmoothing,
+  subscribeSmoothingKnobs,
+} from './utils/pathSmoothing';
+import VelocityProfileChart from './VelocityProfileChart';
 
 // 첫 번째 항목 ''은 "백엔드 기본값(.skyc 다운로드) 사용". payload에서 output 키를 생략.
 const FORMATION_OUTPUT_OPTIONS = [
@@ -570,6 +582,28 @@ export default function DroneInfoPanel({
   const [initialFields, setInitialFields] = useState({ ix: '', iy: '', iz: '' });
   const [formationPositionDrafts, setFormationPositionDrafts] = useState({});
   const [formationSettingsDrafts, setFormationSettingsDrafts] = useState({});
+
+  // 관성 속도 프로파일 노브 (전역 공유, localStorage에 저장되어 모든 생성
+  // 요청이 함께 쓴다): 스무딩 = 램프 비율, exp/log = 각 램프 곡률.
+  const [profileSmoothing, setProfileSmoothingState] = useState(() =>
+    getVelocitySmoothing()
+  );
+  const [profileExp, setProfileExpState] = useState(() => getProfileExp());
+  const [profileLog, setProfileLogState] = useState(() => getProfileLog());
+  const handleProfileSmoothing = (value) =>
+    setProfileSmoothingState(setVelocitySmoothing(value));
+  const handleProfileExp = (value) => setProfileExpState(setProfileExp(value));
+  const handleProfileLog = (value) => setProfileLogState(setProfileLog(value));
+  // 재생바 등 다른 UI에서 같은 전역값을 바꾸면 여기도 실시간 반영
+  useEffect(
+    () =>
+      subscribeSmoothingKnobs(() => {
+        setProfileSmoothingState(getVelocitySmoothing());
+        setProfileExpState(getProfileExp());
+        setProfileLogState(getProfileLog());
+      }),
+    []
+  );
 
   // 드론 바뀔 때 경로 초기화 / JSON에서 path가 오면 반영
   useEffect(() => {
@@ -2137,6 +2171,101 @@ export default function DroneInfoPanel({
                 </div>
               );
             })}
+          </div>
+
+          {/* 관성 속도 프로파일: cruise_speed 아래에서 곡선을 직접 보며
+              램프 비율(스무딩)과 지수/로그 곡률을 조절한다. 전역 공유값이라
+              모든 생성 요청(plan/delivery/skyc 패치)에 함께 적용된다. */}
+          <div
+            style={{
+              marginTop: 10,
+              padding: '10px 10px 8px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.09)',
+              background: 'rgba(255,255,255,0.03)',
+            }}
+          >
+            <VelocityProfileChart
+              smoothing={profileSmoothing}
+              kExp={profileExp}
+              kLog={profileLog}
+              width={252}
+              height={104}
+            />
+            {[
+              {
+                label: '스무딩 (램프 비율)',
+                value: profileSmoothing,
+                min: 0,
+                max: 1,
+                step: 0.05,
+                onChange: handleProfileSmoothing,
+                title:
+                  '가속·감속 램프가 구간에서 차지하는 비율. 0 = 등속(관성 없음), 1 = 양쪽 각 40%까지 램프.',
+              },
+              {
+                label: '지수 곡률 kₑ (가속)',
+                value: profileExp,
+                min: PROFILE_THICKNESS_MIN,
+                max: PROFILE_THICKNESS_MAX,
+                step: 0.05,
+                onChange: handleProfileExp,
+                title:
+                  '가속 램프의 지수(exp) 곡률. 작을수록 직선 램프, 클수록 초반이 완만하고 등속 구간 직전에 가속이 몰립니다.',
+              },
+              {
+                label: '로그 곡률 kₗ (감속)',
+                value: profileLog,
+                min: PROFILE_THICKNESS_MIN,
+                max: PROFILE_THICKNESS_MAX,
+                step: 0.05,
+                onChange: handleProfileLog,
+                title:
+                  '감속 램프의 로그(log) 곡률. 작을수록 직선 램프, 클수록 초반에 빨리 줄고 도착 직전이 완만해집니다.',
+              },
+            ].map(({ label, value, min, max, step, onChange, title }) => (
+              <div
+                key={label}
+                title={title}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: FORMATION_DIM,
+                    width: 108,
+                    flexShrink: 0,
+                  }}
+                >
+                  {label}
+                </span>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  style={{ flex: 1, accentColor: '#67b4ff', cursor: 'pointer' }}
+                />
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: '#c9cbd2',
+                    width: 30,
+                    textAlign: 'right',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {Number(value).toFixed(2)}
+                </span>
+              </div>
+            ))}
           </div>
 
           <div

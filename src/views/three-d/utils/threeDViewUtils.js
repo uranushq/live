@@ -1,4 +1,8 @@
-import { getVelocitySmoothing } from './pathSmoothing';
+import {
+  getProfileExp,
+  getProfileLog,
+  getVelocitySmoothing,
+} from './pathSmoothing';
 
 export const getEffectiveScenery = (state, getSceneryForThreeDView, isShowIndoor) => {
   const scenery = getSceneryForThreeDView(state);
@@ -701,6 +705,8 @@ export const buildPathDeliveryPayloadFromConfig = (baseConfig) => {
         }),
       })),
     velocity_smoothing: getVelocitySmoothing(),
+    profile_exp: getProfileExp(),
+    profile_log: getProfileLog(),
     output: 'skyc',
     download: true,
   };

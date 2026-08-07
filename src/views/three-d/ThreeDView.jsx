@@ -10,6 +10,7 @@ import SunCalc from 'suncalc';
 
 import CoordinateSystemAxes from './CoordinateSystemAxes';
 import DroneShapeMarkers from './DroneShapeMarkers';
+import DroneSphereMarkers from './DroneSphereMarkers';
 import DronePathTrajectories from './DronePathTrajectories';
 import HomePositionMarkers from './HomePositionMarkers';
 import LandingPositionMarkers from './LandingPositionMarkers';
@@ -41,6 +42,11 @@ import {
   parsePositionLike,
   slicePathByElapsedMs,
 } from './utils/threeDViewUtils';
+import {
+  getProfileExp,
+  getProfileLog,
+  getVelocitySmoothing,
+} from './utils/pathSmoothing';
 import { exportPatchedSkycFromShow } from './utils/skycExportUtils';
 import { getShowSpecDroneConfigForThreeDView } from './showSpecDroneConfig';
 
@@ -68,6 +74,7 @@ import {
   setPlaying,
   setThreeDSync,
   setFormationSync,
+  upsertImageBoard,
 } from '~/features/led-editor/slice';
 import {
   getPlayheadSec,
@@ -680,6 +687,13 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const playbackClockRef = useRef({ startElapsedMs: 0, startedAt: 0 });
   const playbackActiveDroneIdsRef = useRef([]);
   const playbackFinishedDroneIdsRef = useRef(new Set());
+
+  // 시뮬레이션용 고속 구체 렌더: 켜면 드론 전체를 InstancedMesh 하나로
+  // 즉시 그려 100대 이상에서도 프레임을 유지한다 (LED 쇼 색 반영).
+  // 렌더링만 바뀐다 — 보이지 않는 프록시 엔티티가 OBJ 마커와 동일한
+  // 데이터/이벤트 계약을 유지하므로 클릭 선택·기즈모·phase 캡처 등
+  // 편집 기능은 그대로 동작한다.
+  const [sphereSimRender, setSphereSimRender] = useState(false);
 
   const [formationPhases, setFormationPhases] = useState([]);
   const [lastReversedPhaseIds, setLastReversedPhaseIds] = useState([]);
@@ -1505,6 +1519,16 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const currentPositionMs =
     maxPathDurationMs * (Math.min(100, Math.max(0, Number(pathProgress) || 0)) / 100);
 
+  // 구체 렌더 활성 조건: 편집 모드에서 토글 ON이면 즉시 구체로 표시
+  // (재생 여부와 무관 — 체크하면 바로 바뀌어야 알아보기 쉽다). 구체
+  // 표시 중에는 개별 OBJ 엔티티가 없으므로 클릭/기즈모 편집은 쉬고,
+  // 끄면 즉시 복귀한다.
+  const sphereModeActive = isCreateMode && sphereSimRender;
+  const sphereModeActiveRef = useRef(false);
+  sphereModeActiveRef.current = sphereModeActive;
+  const pathProgressLatestRef = useRef(0);
+  pathProgressLatestRef.current = pathProgress;
+
   // Same pose driver as the playbar scrubber: sample the path at elapsed time and
   // snap via drone-move-request. PLAY used to drive a separate segment animation
   // (drone-path-request); that fought React re-renders from pathProgress updates
@@ -1519,6 +1543,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const progress = Math.min(100, Math.max(0, Number(progressPercent) || 0)) / 100;
       const elapsedMs = maxPathDurationMs * progress;
 
+      const updates = [];
       base.drones.forEach((d) => {
         if (!Array.isArray(d.path) || !d.path.length || !d.id) return;
 
@@ -1538,16 +1563,39 @@ const ThreeDView = React.forwardRef((props, ref) => {
         if (Number.isFinite(yaw)) {
           detail.yaw = yaw;
         }
+        updates.push(detail);
+      });
+      if (!updates.length) return;
 
+      // 구체 모드에서도 드론별 이동 이벤트는 그대로 흘린다 — 구체는
+      // "렌더링만" 다르고, 프록시 엔티티가 OBJ 마커와 동일하게 이 이벤트를
+      // 소비한다 (구체 메시는 프록시 위치를 매 프레임 미러링). tSec 이벤트는
+      // LED 동기화 없이 재생할 때 구체 색을 진행 시각에 맞추는 용도.
+      updates.forEach((detail) => {
+        window.dispatchEvent(new CustomEvent('drone-move-request', { detail }));
+      });
+      if (sphereModeActiveRef.current) {
         window.dispatchEvent(
-          new CustomEvent('drone-move-request', {
-            detail,
+          new CustomEvent('drone-sphere-frame', {
+            detail: { tSec: elapsedMs / 1000 },
           })
         );
-      });
+      }
     },
     [effectiveConfig, maxPathDurationMs]
   );
+
+  // 구체/OBJ 전환 시 새로 마운트된 마커(프록시 포함)는 초기 위치로
+  // 나타나므로, 잠시 뒤 현재 진행 위치를 재적용해 점프를 없앤다 (양방향
+  // 공통). 프록시 엔티티의 A-Frame 초기화가 끝나도록 두 프레임 기다린다.
+  useEffect(() => {
+    let rafId = requestAnimationFrame(() => {
+      rafId = requestAnimationFrame(() => {
+        applyProgressToAll(pathProgressLatestRef.current);
+      });
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [sphereModeActive, applyProgressToAll]);
 
   const handlePathProgressChange = (nextValue) => {
     if (syncActive) {
@@ -2153,18 +2201,44 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // ── 이미지 → 점 formation ─────────────────────────────────────────────
   const [imageDotsModalOpen, setImageDotsModalOpen] = useState(false);
 
-  const handleAddFormationPhaseFromImage = useCallback((name, points) => {
-    if (!points || !Object.keys(points).length) return;
-    setFormationPhases((prev) => [
-      ...prev,
-      {
-        id: generateFormationPhaseId(),
-        name: String(name || '').trim() || `image-${prev.length + 1}`,
-        holdMs: 3000,
-        points,
-      },
-    ]);
-  }, []);
+  const handleAddFormationPhaseFromImage = useCallback(
+    (name, points) => {
+      if (!points || !Object.keys(points).length) return;
+      const holdMs = 3000;
+      const phaseName = String(name || '').trim();
+      setFormationPhases((prev) => [
+        ...prev,
+        {
+          id: generateFormationPhaseId(),
+          name: phaseName || `image-${prev.length + 1}`,
+          holdMs,
+          points,
+        },
+      ]);
+
+      // 이미지에서 뽑은 드론별 색을 JR LED 쇼에도 반영: 드론 인덱스 순서
+      // (= LED 보드/3D 구체 렌더의 인덱스 순서)로 색 배열을 만들어 phase
+      // 이름의 보드를 생성/갱신한다. 색 정보가 없으면(3D 모델 소스 등)
+      // 보드를 만들지 않는다.
+      const droneList = Array.isArray(effectiveConfig?.drones)
+        ? effectiveConfig.drones
+        : [];
+      const colors = droneList.map((d) => {
+        const c = points[String(d?.id)]?.color;
+        return Array.isArray(c) && c.length === 3 ? c : null;
+      });
+      if (colors.some(Boolean)) {
+        store.dispatch(
+          upsertImageBoard({
+            name: `LED · ${phaseName || 'image'}`,
+            colors,
+            durationSec: holdMs / 1000,
+          })
+        );
+      }
+    },
+    [effectiveConfig]
+  );
 
   const handleRemoveClusterFromPhase = useCallback((phaseId, clusterIndex) => {
     const pid = phaseId != null ? String(phaseId) : '';
@@ -2385,6 +2459,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
       cruise_speed: sanitized.cruise_speed,
       auto_upload: sanitized.auto_upload,
       min_separation: sanitized.min_separation,
+      // 관성 프로파일 (전역 공유값): 스무딩 = 램프 비율, exp/log = 곡률
+      velocity_smoothing: getVelocitySmoothing(),
+      profile_exp: getProfileExp(),
+      profile_log: getProfileLog(),
     };
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.
     if (sanitized.output) {
@@ -2594,6 +2672,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
         isPlaybackRunning={syncActive ? ledPlaying : isPlaybackRunning}
         ledSyncEnabled={threeDSync}
         onLedSyncToggle={handleLedSyncToggle}
+        sphereRender={sphereSimRender}
+        onSphereRenderChange={setSphereSimRender}
         droneCount={
           effectiveConfig && Array.isArray(effectiveConfig.drones)
             ? effectiveConfig.drones.length
@@ -2717,8 +2797,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
             drones={effectiveConfig && Array.isArray(effectiveConfig.drones) ? effectiveConfig.drones : undefined}
             selectedDroneId={selectedPathDroneId}
           />
-          {isCreateMode && (
+          {isCreateMode && !sphereModeActive && (
             <DroneShapeMarkers
+              drones={
+                effectiveConfig && Array.isArray(effectiveConfig.drones)
+                  ? effectiveConfig.drones
+                  : undefined
+              }
+            />
+          )}
+          {isCreateMode && sphereModeActive && (
+            <DroneSphereMarkers
               drones={
                 effectiveConfig && Array.isArray(effectiveConfig.drones)
                   ? effectiveConfig.drones

@@ -10,7 +10,14 @@ import Tooltip from '@mui/material/Tooltip';
 import PropTypes from 'prop-types';
 import React from 'react';
 
-import { getVelocitySmoothing, setVelocitySmoothing } from './utils/pathSmoothing';
+import VelocityProfileChart from './VelocityProfileChart';
+import {
+  getProfileExp,
+  getProfileLog,
+  getVelocitySmoothing,
+  setVelocitySmoothing,
+  subscribeSmoothingKnobs,
+} from './utils/pathSmoothing';
 
 const formatMs = (ms) => {
   const safe = Math.max(0, Math.round(Number(ms) || 0));
@@ -83,6 +90,8 @@ export default function PathControlPanel({
   isPlaybackRunning,
   ledSyncEnabled,
   onLedSyncToggle,
+  sphereRender = true,
+  onSphereRenderChange = () => {},
   droneCount,
   onPlayAll,
   onPausePlayback,
@@ -104,6 +113,23 @@ export default function PathControlPanel({
   const handleSmoothingChange = (value) => {
     setSmoothing(setVelocitySmoothing(value));
   };
+
+  // 관성 속도 프로파일 그래프 (스무딩·곡률 값에 따라 실시간 갱신)
+  const [profileOpen, setProfileOpen] = React.useState(false);
+  const [profileKnobs, setProfileKnobs] = React.useState(() => ({
+    exp: getProfileExp(),
+    log: getProfileLog(),
+  }));
+
+  // formation 탭 등 다른 UI에서 같은 전역값을 바꾸면 여기도 실시간 반영
+  React.useEffect(
+    () =>
+      subscribeSmoothingKnobs(() => {
+        setSmoothing(getVelocitySmoothing());
+        setProfileKnobs({ exp: getProfileExp(), log: getProfileLog() });
+      }),
+    []
+  );
 
   return (
     <>
@@ -187,6 +213,26 @@ export default function PathControlPanel({
           </div>
         )}
 
+        {profileOpen && (
+          <div
+            style={{
+              pointerEvents: 'auto',
+              alignSelf: 'flex-end',
+              padding: '10px 12px',
+              borderRadius: 10,
+              ...panelSurface,
+            }}
+          >
+            <VelocityProfileChart
+              smoothing={smoothing}
+              kExp={profileKnobs.exp}
+              kLog={profileKnobs.log}
+              width={320}
+              height={140}
+            />
+          </div>
+        )}
+
         <div
           style={{
             pointerEvents: 'auto',
@@ -222,6 +268,35 @@ export default function PathControlPanel({
                 style={{ accentColor: '#67b4ff', cursor: 'pointer' }}
               />
               LED 동기화
+            </label>
+          </Tooltip>
+
+          <Tooltip
+            title="켜면 드론 전체를 InstancedMesh 구체 하나로 그려 100대 이상에서도 프레임을 유지합니다 (LED 쇼 색 반영). 렌더링만 바뀌고 클릭 선택·기즈모 이동·phase 편집 등 모든 기능은 동일하게 동작합니다."
+            placement="top"
+          >
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexShrink: 0,
+                paddingRight: 8,
+                borderRight: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.75)',
+                cursor: 'pointer',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={sphereRender}
+                onChange={(e) => onSphereRenderChange(e.target.checked)}
+                style={{ accentColor: '#67b4ff', cursor: 'pointer' }}
+              />
+              시뮬 구체
             </label>
           </Tooltip>
 
@@ -354,6 +429,24 @@ export default function PathControlPanel({
               >
                 {smoothing.toFixed(2)}
               </span>
+              <button
+                type="button"
+                onClick={() => setProfileOpen((v) => !v)}
+                title="관성 속도 프로파일 그래프 (지수 가속 · 로그 감속 곡선)"
+                style={{
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  background: profileOpen
+                    ? 'rgba(103, 180, 255, 0.25)'
+                    : 'rgba(255,255,255,0.08)',
+                  color: 'rgba(255,255,255,0.85)',
+                  borderRadius: 5,
+                  fontSize: 10,
+                  padding: '1px 7px',
+                  cursor: 'pointer',
+                }}
+              >
+                곡선
+              </button>
             </div>
           </Tooltip>
 
@@ -428,6 +521,8 @@ PathControlPanel.propTypes = {
   isPlaybackRunning: PropTypes.bool.isRequired,
   ledSyncEnabled: PropTypes.bool.isRequired,
   onLedSyncToggle: PropTypes.func.isRequired,
+  sphereRender: PropTypes.bool,
+  onSphereRenderChange: PropTypes.func,
   droneCount: PropTypes.number.isRequired,
   onPlayAll: PropTypes.func.isRequired,
   onPausePlayback: PropTypes.func.isRequired,

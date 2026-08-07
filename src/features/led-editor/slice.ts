@@ -193,6 +193,75 @@ const { actions, reducer } = createSlice({
       state.selectedPixels = [];
     },
 
+    /**
+     * 이미지 → 점 formation에서 추출한 드론별 색으로 보드를 만들거나
+     * 갱신한다. 같은 이름의 보드가 있으면 색만 교체(타임라인 위치 유지),
+     * 없으면 타임라인 끝에 새로 추가한다. 각 드론의 k×k 패널은 그 드론이
+     * 맡은 이미지 점의 색으로 단색 채움; 색이 없는 드론은 검정(꺼짐).
+     */
+    upsertImageBoard(
+      state,
+      action: PayloadAction<{
+        name: string;
+        colors: Array<RGB | null | undefined>;
+        durationSec?: number;
+      }>
+    ) {
+      const { name, colors, durationSec } = action.payload;
+      if (!name || !Array.isArray(colors) || colors.length === 0) {
+        return;
+      }
+
+      // 드론 수가 모자라면 전역 드론 수를 늘리고 기존 보드도 맞춰 확장
+      // (setDroneCount 와 동일한 규칙).
+      if (colors.length > state.droneCount) {
+        state.droneCount = colors.length;
+        for (const board of state.boards) {
+          while (board.drones.length < state.droneCount) {
+            board.drones.push(makeBlackDrone(state.ledsPerDrone));
+          }
+          if (board.rows * board.cols < state.droneCount) {
+            const fit = defaultFormation(state.droneCount);
+            board.rows = fit.rows;
+            board.cols = fit.cols;
+          }
+        }
+      }
+
+      const k = state.ledsPerDrone;
+      const drones = Array.from({ length: state.droneCount }, (_, i) => {
+        const c = colors[i];
+        if (!Array.isArray(c) || c.length !== 3) {
+          return makeBlackDrone(k);
+        }
+        const solid: RGB = [c[0], c[1], c[2]];
+        return Array.from({ length: k * k }, () => [...solid] as RGB);
+      });
+
+      const existing = state.boards.find((b) => b.name === name);
+      if (existing) {
+        existing.drones = drones;
+        if (durationSec !== undefined) {
+          existing.durationSec = Math.max(0.1, durationSec);
+        }
+        state.selectedBoardIds = [existing.id];
+      } else {
+        const fit = defaultFormation(state.droneCount);
+        const board: Board = {
+          id: nanoid(),
+          name,
+          rows: fit.rows,
+          cols: fit.cols,
+          drones,
+          startSec: timelineDurationSec(state.boards),
+          durationSec: Math.max(0.1, durationSec ?? DEFAULT_BOARD_DURATION_SEC),
+        };
+        state.boards.push(board);
+        state.selectedBoardIds = [board.id];
+      }
+      state.selectedPixels = [];
+    },
+
     removeBoard(state, action: PayloadAction<string>) {
       state.boards = state.boards.filter((b) => b.id !== action.payload);
       state.selectedBoardIds = state.selectedBoardIds.filter(
@@ -503,6 +572,7 @@ export const {
   setBoardArrangement,
   setActiveColor,
   addBoard,
+  upsertImageBoard,
   removeBoard,
   removeSelectedBoards,
   selectBoard,

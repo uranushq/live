@@ -13,9 +13,11 @@ import React from 'react';
 import { Line } from 'react-chartjs-2';
 
 import {
-  MAX_THICKNESS,
+  DEFAULT_PROFILE_EXP,
+  DEFAULT_PROFILE_LOG,
+  peakFactor,
+  rampFromSmoothing,
   sampleProfile,
-  thicknessFromSmoothing,
 } from './utils/velocityProfile';
 
 ChartJS.register(
@@ -29,18 +31,25 @@ ChartJS.register(
 );
 
 /**
- * Interactive plot of the inertia model's velocity profile for the current
- * smoothing value. Shows the exponential ease-in / logarithmic ease-out speed
- * curve of a rest-to-rest move (normalized so the average speed = 1), the
- * cruise-speed reference line, and the underlying formula + thickness k.
- *
- * The curve updates live as `smoothing` changes.
+ * Interactive plot of the inertia model's trapezoid velocity profile:
+ * exponential ease-in ramp → CONSTANT plateau → logarithmic ease-out ramp.
+ * `smoothing` sets the ramp fraction, `kExp` / `kLog` the curvature of each
+ * ramp. The curve updates live as the knobs change; the flat middle shows
+ * the profile has no pointy apex.
  */
-export default function VelocityProfileChart({ smoothing, width = 320, height = 180 }) {
-  const k = thicknessFromSmoothing(smoothing);
-
+export default function VelocityProfileChart({
+  smoothing,
+  kExp = DEFAULT_PROFILE_EXP,
+  kLog = DEFAULT_PROFILE_LOG,
+  width = 320,
+  height = 180,
+}) {
   const { eased, cruise } = React.useMemo(() => {
-    const samples = sampleProfile(k, { v0: 0, v1: 0, nSamples: 120 });
+    const samples = sampleProfile(smoothing, kExp, kLog, {
+      v0: 0,
+      v1: 0,
+      nSamples: 140,
+    });
     return {
       eased: samples.map((p) => ({ x: p.t, y: p.v })),
       cruise: [
@@ -48,7 +57,10 @@ export default function VelocityProfileChart({ smoothing, width = 320, height = 
         { x: 1, y: 1 },
       ],
     };
-  }, [k]);
+  }, [smoothing, kExp, kLog]);
+
+  const factor = peakFactor(smoothing, kExp, kLog);
+  const ramp = rampFromSmoothing(smoothing);
 
   const data = {
     datasets: [
@@ -115,7 +127,7 @@ export default function VelocityProfileChart({ smoothing, width = 320, height = 
       <div style={{ fontSize: 11, marginBottom: 6, lineHeight: 1.5 }}>
         <div style={{ fontWeight: 600, marginBottom: 2 }}>관성 속도 프로파일</div>
         <div style={{ color: 'rgba(255,255,255,0.6)' }}>
-          시작 = 지수(exp) ease-in · 도달 = 로그(log) ease-out
+          지수(exp) 가속 램프 → 등속 유지 구간 → 로그(log) 감속 램프
         </div>
         <div
           style={{
@@ -125,9 +137,7 @@ export default function VelocityProfileChart({ smoothing, width = 320, height = 
             marginTop: 2,
           }}
         >
-          v(τ)=v₀(1−τ)+v₁τ+C·B(τ;k)
-          <br />
-          E(u)=(e^(k·u)−1)/(e^k−1), L(u)=ln(1+(e^k−1)u)/k
+          E(u)=(e^(kₑu)−1)/(e^kₑ−1), L(u)=ln(1+(e^kₗ−1)u)/kₗ
         </div>
       </div>
       <div style={{ width, height }}>
@@ -143,9 +153,10 @@ export default function VelocityProfileChart({ smoothing, width = 320, height = 
         }}
       >
         <span>
-          두께 k = {k.toFixed(3)} / {MAX_THICKNESS.toFixed(1)}
+          램프 {(ramp * 100).toFixed(0)}%/측 · kₑ {Number(kExp).toFixed(2)} · kₗ{' '}
+          {Number(kLog).toFixed(2)}
         </span>
-        <span>피크 = 2.0 × 평균</span>
+        <span>등속 구간 = {factor.toFixed(2)} × 평균</span>
       </div>
     </div>
   );
@@ -153,6 +164,8 @@ export default function VelocityProfileChart({ smoothing, width = 320, height = 
 
 VelocityProfileChart.propTypes = {
   smoothing: PropTypes.number.isRequired,
+  kExp: PropTypes.number,
+  kLog: PropTypes.number,
   width: PropTypes.number,
   height: PropTypes.number,
 };

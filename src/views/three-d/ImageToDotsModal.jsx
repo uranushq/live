@@ -383,7 +383,10 @@ export default function ImageToDotsModal({
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         radius = 2.2 + t * 2.3;
       } else {
-        ctx.fillStyle = '#5ad1ff';
+        const c = dots[i]?.color;
+        ctx.fillStyle = Array.isArray(c)
+          ? `rgb(${c[0]},${c[1]},${c[2]})`
+          : '#5ad1ff';
       }
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);

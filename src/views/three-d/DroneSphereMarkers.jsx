@@ -12,10 +12,16 @@ const { THREE } = AFrame;
 
 // Simulation render: draw all drones as one InstancedMesh of coloured spheres
 // instead of a per-drone OBJ model, so 100+ drones stay fast (one draw call, no
-// per-drone point light, no per-drone LED-panel meshes). The sphere colour
-// comes from the LED show (which an image-to-path import populates), so each
-// drone still shows "이미지에 맞는" colour. Only used while simulation mode is
-// ON; normal authoring keeps the OBJ DroneShapeMarkers.
+// per-drone point light, no per-drone LED-panel meshes).
+//
+// IMPORTANT: only the VISUAL changes. Every drone still gets an invisible
+// per-drone "proxy" a-entity carrying the exact same data-* attributes and
+// position as the OBJ markers, so the whole existing event/data layer —
+// drone-move-bridge (move/path/yaw/initial-pos events), the axis gizmo,
+// position collection for formation payloads, hover/selection consumers —
+// keeps working unchanged. A per-frame sync loop mirrors the proxies'
+// positions into the instanced mesh, and clicking a sphere raycasts the
+// instance and emits the same `drone-selected` event as click-pick.
 const SPHERE_RADIUS = 0.5; // metres
 const SPHERE_SEGMENTS_W = 10;
 const SPHERE_SEGMENTS_H = 8;
@@ -26,6 +32,8 @@ const SPHERE_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 // DRONE_BODY_COLOR orange).
 const DEFAULT_BODY_COLOR = 0xff8c00;
 
+// DroneShapeMarkers와 동일한 정규화 — 프록시 엔티티가 OBJ 마커와 같은
+// 속성(data-*)을 노출해야 기존 소비자들이 차이를 못 느낀다.
 function normalizeDrones(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
 
@@ -35,6 +43,9 @@ function normalizeDrones(drones) {
         d.id !== undefined && d.id !== null && String(d.id).trim() !== ''
           ? String(d.id)
           : `drone-${index + 1}`;
+      const name = d.name || id;
+      const battery = Number.isFinite(Number(d.battery)) ? Number(d.battery) : 100;
+      const status = d.status || 'Idle';
       const firstPathPoint = Array.isArray(d.path) && d.path.length ? d.path[0] : null;
       const fallbackPos =
         firstPathPoint &&
@@ -54,8 +65,26 @@ function normalizeDrones(drones) {
         : Array.isArray(d.pos) && d.pos.length === 3
           ? d.pos
           : initialPosArray;
+      const pathYaw =
+        firstPathPoint && Number.isFinite(Number(firstPathPoint.yaw))
+          ? Number(firstPathPoint.yaw)
+          : null;
+      const yaw = Number.isFinite(Number(d.yaw))
+        ? Number(d.yaw)
+        : Number.isFinite(Number(d.heading))
+          ? Number(d.heading)
+          : pathYaw ?? 0;
 
-      return { id, pos: posArray };
+      return {
+        id,
+        name,
+        battery,
+        status,
+        pos: posArray,
+        initialPos: initialPosArray,
+        path: Array.isArray(d.path) ? d.path : [],
+        yaw,
+      };
     })
     .filter((d) => d.id);
 }
@@ -85,8 +114,16 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
   const items = React.useMemo(() => normalizeDrones(drones), [drones]);
   const elRef = React.useRef(null);
   const meshRef = React.useRef(null);
+  const proxyRefs = React.useRef(new Map()); // drone id -> a-entity
 
-  // Build (and rebuild on count/position change) the instanced sphere mesh.
+  const setProxyRef = React.useCallback((id) => {
+    return (el) => {
+      if (el) proxyRefs.current.set(id, el);
+      else proxyRefs.current.delete(id);
+    };
+  }, []);
+
+  // Build (and rebuild on count change) the instanced sphere mesh.
   React.useEffect(() => {
     const el = elRef.current;
     if (!el) return undefined;
@@ -95,7 +132,6 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
 
     const build = () => {
       if (disposed || !el.object3D) return;
-      // Remove any previous mesh.
       if (meshRef.current) {
         el.removeObject3D('sphere-flock');
         meshRef.current.geometry.dispose();
@@ -146,10 +182,46 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
     };
   }, [items]);
 
+  // Per-frame sync: mirror each proxy entity's (local) position into its
+  // instance matrix. The proxies are the single source of truth and are moved
+  // by the exact same events as the OBJ markers (drone-move-bridge, gizmo,
+  // playback), so the spheres follow every interaction for free.
+  React.useEffect(() => {
+    const matrix = new THREE.Matrix4();
+    let rafId = null;
+
+    const tick = () => {
+      const mesh = meshRef.current;
+      if (mesh) {
+        let changed = false;
+        for (let i = 0; i < items.length; i++) {
+          const proxy = proxyRefs.current.get(items[i].id);
+          const p = proxy?.object3D?.position;
+          if (!p) continue;
+          matrix.makeTranslation(p.x, p.y, p.z + SPHERE_CENTER_Z);
+          mesh.setMatrixAt(i, matrix);
+          changed = true;
+        }
+        if (changed) mesh.instanceMatrix.needsUpdate = true;
+      }
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [items]);
+
   // Drive per-instance colour from the LED show, updating only when the show or
   // the playhead actually changes (cheap: one Float32Array write per drone).
+  // `drone-sphere-frame` events (dispatched by the 3D playback tick) carry the
+  // dance-elapsed time so colours follow plain 3D playback even when the LED
+  // clock is not the master.
   React.useEffect(() => {
+    let overrideSec = null;
     let lastKey = '';
+
     const applyColors = () => {
       const mesh = meshRef.current;
       if (!mesh) return;
@@ -157,15 +229,17 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       const boards = led?.boards;
       const hasShow = Array.isArray(boards) && boards.length > 0;
       const syncEnabled = led?.threeDSync !== false;
-      const playheadSec = led?.playheadSec ?? 0;
+      const playheadSec =
+        overrideSec !== null && !syncEnabled
+          ? overrideSec
+          : led?.playheadSec ?? 0;
       const key = `${hasShow ? boards.length : 0}:${playheadSec}:${syncEnabled}`;
       if (key === lastKey) return;
       lastKey = key;
 
-      const frame =
-        hasShow && syncEnabled
-          ? computePlaybackFrame(boards, led.droneCount, led.ledsPerDrone, playheadSec)
-          : null;
+      const frame = hasShow
+        ? computePlaybackFrame(boards, led.droneCount, led.ledsPerDrone, playheadSec)
+        : null;
       const color = new THREE.Color();
       for (let i = 0; i < items.length; i++) {
         const rep = frame?.drones ? representativeColor(frame.drones[i]) : null;
@@ -179,12 +253,117 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     };
 
+    const onFrame = (event) => {
+      const tSec = Number(event?.detail?.tSec);
+      if (Number.isFinite(tSec)) {
+        overrideSec = tSec;
+        applyColors();
+      }
+    };
+
     applyColors();
     const unsubscribe = store.subscribe(applyColors);
-    return unsubscribe;
+    window.addEventListener('drone-sphere-frame', onFrame);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('drone-sphere-frame', onFrame);
+    };
   }, [items]);
 
-  return <a-entity ref={elRef} data-sphere-flock="true" />;
+  // 구체 클릭 = 드론 선택. InstancedMesh는 click-pick의 '.three-d-clickable'
+  // 레이캐스트에 걸리지 않으므로 자체 레이캐스트로 instanceId를 찾아 기존
+  // 선택 이벤트(drone-selected)를 같은 형식으로 쏜다. 빈 곳 클릭은 해제.
+  // 카메라 드래그(5px 이상 이동)와 기즈모 드래그 중에는 무시.
+  React.useEffect(() => {
+    const sceneEl = document.querySelector('a-scene');
+    const canvas = sceneEl?.canvas || sceneEl?.querySelector('canvas');
+    if (!canvas) return undefined;
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let downX = 0;
+    let downY = 0;
+
+    const onPointerDown = (event) => {
+      downX = event.clientX;
+      downY = event.clientY;
+    };
+
+    const onClick = (event) => {
+      if (window.__droneAxisGizmoDragging) return;
+      if (Math.hypot(event.clientX - downX, event.clientY - downY) > 5) return;
+      const mesh = meshRef.current;
+      const camera = sceneEl?.camera;
+      if (!mesh || !camera) return;
+
+      const rect = canvas.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, camera);
+
+      const hit = raycaster
+        .intersectObject(mesh, false)
+        .find((h) => h.instanceId !== undefined);
+      if (!hit) {
+        window.dispatchEvent(new CustomEvent('drone-deselected'));
+        return;
+      }
+      const item = items[hit.instanceId];
+      if (!item) return;
+
+      // click-pick과 동일한 detail 형식으로 발행 — 프록시 엔티티에서 현재
+      // 위치/초기 위치를 읽는다 (기즈모·패널이 같은 방식으로 반응).
+      const proxy = proxyRefs.current.get(item.id);
+      const p = proxy?.object3D?.position;
+      window.dispatchEvent(
+        new CustomEvent('drone-selected', {
+          detail: {
+            id: item.id,
+            name: item.name,
+            source: null,
+            status: item.status,
+            heading: String(item.yaw),
+            currentPosition: p ? { x: p.x, y: p.y, z: p.z } : null,
+            initialPosition: {
+              x: Number(item.initialPos[0]) || 0,
+              y: Number(item.initialPos[1]) || 0,
+              z: Number(item.initialPos[2]) || 0,
+            },
+          },
+        })
+      );
+    };
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('click', onClick);
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('click', onClick);
+    };
+  }, [items]);
+
+  return (
+    <>
+      {/* 보이지 않는 프록시 엔티티: OBJ 마커와 동일한 데이터 계약
+          (data-*, position, rotation) — 시각 자식만 없다. 이동 브리지,
+          기즈모, 위치 수집 등 기존 레이어가 이 엔티티들을 그대로 쓴다. */}
+      {items.map((d) => (
+        <a-entity
+          key={d.id}
+          ref={setProxyRef(d.id)}
+          position={d.pos.join(' ')}
+          data-drone-id={d.id}
+          data-drone-name={d.name}
+          data-battery={d.battery}
+          data-status={d.status}
+          data-heading={d.yaw}
+          data-initial-pos={d.initialPos.join(' ')}
+          data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
+        />
+      ))}
+      <a-entity ref={elRef} data-sphere-flock="true" />
+    </>
+  );
 });
 
 DroneSphereMarkers.displayName = 'DroneSphereMarkers';
@@ -193,6 +372,11 @@ DroneSphereMarkers.propTypes = {
   drones: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string,
+      name: PropTypes.string,
+      battery: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+      status: PropTypes.string,
+      yaw: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+      heading: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
       pos: PropTypes.arrayOf(PropTypes.number),
       initialPos: PropTypes.arrayOf(PropTypes.number),
       initial_position: PropTypes.arrayOf(PropTypes.number),

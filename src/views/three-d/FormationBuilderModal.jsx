@@ -1,9 +1,12 @@
 import PropTypes from 'prop-types';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import {
+  getProfileExp,
+  getProfileLog,
   getVelocitySmoothing,
   setVelocitySmoothing,
+  subscribeSmoothingKnobs,
 } from './utils/pathSmoothing';
 
 const DEFAULT_URL = '/api/v1/path-planner/plan';
@@ -78,6 +81,12 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
     setSmoothing(setVelocitySmoothing(value));
   };
 
+  // 다른 UI(재생바, formation 탭)에서 바꾸면 실시간 반영
+  useEffect(
+    () => subscribeSmoothingKnobs(() => setSmoothing(getVelocitySmoothing())),
+    []
+  );
+
   const droneCountLabel = `${droneIds.length}대`;
 
   const canSend = useMemo(
@@ -148,6 +157,8 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
       takeoff_time:
         Number.isFinite(Number(takeoffTime)) && Number(takeoffTime) >= 0 ? Number(takeoffTime) : 5,
       velocity_smoothing: smoothing,
+      profile_exp: getProfileExp(),
+      profile_log: getProfileLog(),
       auto_upload: !!autoUpload,
       output,
     };

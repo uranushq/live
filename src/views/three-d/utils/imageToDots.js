@@ -231,9 +231,47 @@ export function extractDots(
     }
   }
 
+  // 클러스터별 가중 평균 색 — 각 점(=드론)의 LED 색으로 쓴다. 수렴한
+  // 중심 기준 최근접 배정을 한 번 더 돌며 픽셀 색을 중요도 가중으로 누적.
+  const sumR = new Float64Array(count);
+  const sumG = new Float64Array(count);
+  const sumB = new Float64Array(count);
+  const sumC = new Float64Array(count);
+  const { data } = image;
+  for (let p = 0; p < px.length; p++) {
+    const i = px[p];
+    const x = (i % width) + 0.5;
+    const y = Math.floor(i / width) + 0.5;
+    let best = 0;
+    let bestD = Infinity;
+    for (let k = 0; k < count; k++) {
+      const dx = x - cx[k];
+      const dy = y - cy[k];
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = k;
+      }
+    }
+    const w = weights[i];
+    const o = i * 4;
+    sumR[best] += data[o] * w;
+    sumG[best] += data[o + 1] * w;
+    sumB[best] += data[o + 2] * w;
+    sumC[best] += w;
+  }
+
   const dots = [];
   for (let k = 0; k < count; k++) {
-    dots.push({ u: cx[k] / width, v: cy[k] / height });
+    const color =
+      sumC[k] > 0
+        ? [
+            Math.round(sumR[k] / sumC[k]),
+            Math.round(sumG[k] / sumC[k]),
+            Math.round(sumB[k] / sumC[k]),
+          ]
+        : null;
+    dots.push({ u: cx[k] / width, v: cy[k] / height, color });
   }
   return dots;
 }
@@ -266,6 +304,7 @@ export function layoutDotsOnPlane(
   const pts = dots.map((d) => ({
     y: (0.5 - d.u) * widthM,
     z: bottomZ + (1 - d.v) * heightM,
+    color: d.color ?? null,
   }));
 
   const sep =
@@ -459,6 +498,7 @@ export function layoutDotsInVolume(
     x: planeX + (0.5 - (depths[i] ?? 0.5)) * depthM,
     y: (0.5 - d.u) * widthM,
     z: bottomZ + (1 - d.v) * heightM,
+    color: d.color ?? null,
   }));
 
   const sep =
@@ -583,12 +623,18 @@ export function assignDotsToDrones(points, droneIds, { planeX = 0 } = {}) {
   const n = Math.min(sorted.length, droneIds.length);
   for (let i = 0; i < n; i++) {
     const x = Number.isFinite(sorted[i].x) ? sorted[i].x : planeX;
-    result[String(droneIds[i])] = {
+    const entry = {
       x: Math.round(x * 10000) / 10000,
       y: Math.round(sorted[i].y * 10000) / 10000,
       z: Math.round(sorted[i].z * 10000) / 10000,
       yaw: 0,
     };
+    if (Array.isArray(sorted[i].color) && sorted[i].color.length === 3) {
+      entry.color = sorted[i].color.map((c) =>
+        Math.max(0, Math.min(255, Math.round(Number(c) || 0)))
+      );
+    }
+    result[String(droneIds[i])] = entry;
   }
   return result;
 }

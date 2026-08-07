@@ -1,9 +1,12 @@
 import PropTypes from 'prop-types';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import {
+  getProfileExp,
+  getProfileLog,
   getVelocitySmoothing,
   setVelocitySmoothing,
+  subscribeSmoothingKnobs,
 } from './utils/pathSmoothing';
 
 const DEFAULT_PATH_PLANNER_URL = 'http://localhost:5001/api/v1/path-planner/plan';
@@ -236,6 +239,12 @@ export default function PathGeneratorModal({ open, onClose }) {
     setSmoothing(clamped);
   };
 
+  // 다른 UI(재생바, formation 탭)에서 바꾸면 실시간 반영
+  useEffect(
+    () => subscribeSmoothingKnobs(() => setSmoothing(getVelocitySmoothing())),
+    []
+  );
+
   const summary = useMemo(
     () => `initial ${previewData.initial.length}개 / target ${previewData.target.length}개`,
     [previewData]
@@ -459,6 +468,8 @@ export default function PathGeneratorModal({ open, onClose }) {
                       step_size,
                       duration_ms,
                       velocity_smoothing: smoothing,
+                      profile_exp: getProfileExp(),
+                      profile_log: getProfileLog(),
                       output: 'skyc',
                       download: true,
                     }),
