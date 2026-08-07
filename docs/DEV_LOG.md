@@ -7,6 +7,24 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-07 15:29:07 +0900 — `e090d963` live path directing
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 파라미터 뷰어(parameterViewerDialog)의 영어 번역 키를 title 하나만 남기고 대량 삭제한 정리성 커밋.
+
+**주요 변경점**:
+- `parameterViewerDialog` 하위 번역 키 ~40개 제거(컬럼명, 필터, 토스트, 상태문구 등), `title`만 유지
+- Toolbox 메뉴의 `paramViewer`("Parameter viewer") 항목 제거
+- `en.json` 단일 파일만 변경(1줄 추가, 40줄 삭제)
+
+**의미/영향**: 최근 추가되던 "파라미터 조회·비교(Parameter viewer)" 기능(직전 커밋 40df2099 계열)의 UI 진입점과 번역 리소스를 걷어낸 것으로, 해당 기능을 롤백/비활성화하거나 재작업하기 위한 정리로 보인다. 커밋 메시지 "live path directing"과 실제 변경 내용(파라미터 뷰어 번역 제거)이 일치하지 않아, 다른 작업 중 함께 정리된 부수 변경일 가능성이 높다.
+
+**주의/리스크**: 코드에서 여전히 삭제된 키(`columnName`, `matchedToast` 등)를 `t()`로 참조 중이라면 런타임에 번역 누락(raw key 노출)이 발생할 수 있음. 또한 en.json만 수정되어 ko.json 등 다른 로케일과의 키 정합성 점검 필요. 커밋 메시지와 diff 불일치도 이력 추적 관점에서 확인 권장.
+
+---
+
+
 ## 2026-07-03 17:02:30 +0900 — `0be314b2` commit report mailing 기능
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
