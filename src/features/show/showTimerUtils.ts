@@ -8,14 +8,17 @@ import { getRoundedClockSkewInMilliseconds } from '~/features/servers/selectors'
 import type { RootState } from '~/store/reducers';
 
 import {
+  areShowStartTimesOnUAVs,
   getShowClockReference,
   getShowDuration,
+  getShowStartReadiness,
   getShowStartTime,
   hasLoadedShowFile,
   hasScheduledStartTime,
 } from './selectors';
+import type { ShowStartReadiness } from './types';
 
-export type ShowTimerPhase = 'waiting' | 'running';
+export type ShowTimerPhase = 'syncing' | 'waiting' | 'running';
 
 export type ShowTimerSnapshot = {
   durationSeconds: number;
@@ -24,6 +27,8 @@ export type ShowTimerSnapshot = {
   remainingSeconds: number;
   /** Total scheduled pre-show wait, in seconds (waiting phase only). */
   waitDurationSeconds?: number;
+  /** X-SHOW-READY status while start times are still syncing to UAVs. */
+  startReadiness?: ShowStartReadiness;
 };
 
 /**
@@ -98,6 +103,18 @@ export function getShowTimerSnapshot(
   }
 
   const rawElapsedSeconds = getShowElapsedSeconds(state, nowMs);
+
+  // Do not start the countdown until every mapped UAV has the start time.
+  if (hasScheduledStartTime(state) && !areShowStartTimesOnUAVs(state)) {
+    const startReadiness = getShowStartReadiness(state);
+    return {
+      durationSeconds,
+      elapsedSeconds: 0,
+      phase: 'syncing',
+      remainingSeconds: 0,
+      startReadiness,
+    };
+  }
 
   let untilStart: number | null = null;
   if (rawElapsedSeconds != null && rawElapsedSeconds < 0) {

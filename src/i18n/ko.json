@@ -194,10 +194,15 @@
     "title": "쇼 시작 예약"
   },
   "showTimerOverlay": {
+    "disconnectedUAVs": "연결 끊김: {{ids}}",
     "elapsedTime": "쇼 진행시간",
+    "missingStartTime": "시작 시간 미수신: {{ids}}",
     "remainingTime": "쇼 남은시간",
     "showInProgress": "쇼 진행 중",
+    "startTimeProgress": "{{ready}} / {{total}}대",
+    "syncingStartTime": "시작 시간 동기화 중",
     "untilStart": "시작까지",
+    "waitingForStartTimeOnUAVs": "모든 드론에 시작 시간이 들어갈 때까지 대기",
     "waitingToStart": "시작 대기"
   },
   "mapSourceToggle": {

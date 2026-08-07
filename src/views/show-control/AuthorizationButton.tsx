@@ -58,7 +58,6 @@ const AuthorizationButton = ({
 
   return (
     <ListItemButton
-      /* disabled={!isAuthorized && status === Status.OFF} */
       disabled={revocationDisabled}
       selected={isAuthorized}
       sx={buttonStyle}
@@ -83,12 +82,12 @@ const AuthorizationButton = ({
                     'Authorization cannot be revoked while drones are airborne'
                   )
                 : numUAVsTakingOffAutomatically <= 0
-                ? t('show.revokeAuthorization')
-                : numUAVsTakingOffAutomatically === 1
-                  ? t('show.takeOffOne')
-                  : t('show.takeOffMore', {
-                      quantity: numUAVsTakingOffAutomatically,
-                    })
+                  ? t('show.revokeAuthorization')
+                  : numUAVsTakingOffAutomatically === 1
+                    ? t('show.takeOffOne')
+                    : t('show.takeOffMore', {
+                        quantity: numUAVsTakingOffAutomatically,
+                      })
               : t('show.authorizationReq')}
           </Typography>
         }

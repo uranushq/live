@@ -66,15 +66,17 @@ import {
 
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
-import { isShowAuthorizedToStartLocally } from '~/features/show/selectors';
+import { scheduleShowStartWithDelay } from '~/features/show/actions';
 
-import { openStartTimeDialog } from '~/features/show/slice';
+import { isShowAuthorizedToStartLocally } from '~/features/show/selectors';
 
 import { getSelectedUAVIds, getShowStageFlightControlStatus, getUAVIdList } from '~/features/uavs/selectors';
 
 import { createUAVOperationThunks } from '~/utils/messaging';
 
 import { formatCommandTargetDrones } from './formatCommandTargetDrones';
+
+import ShowStartDelayDialog from './ShowStartDelayDialog';
 
 
 
@@ -794,9 +796,9 @@ const LargeControlButtonGroup = ({
 
   onChangeBroadcastMode,
 
-  onOpenStartTimeDialog,
-
   reverseMissionMapping,
+
+  scheduleShowStartWithDelay,
 
   selectedUAVIds,
 
@@ -820,6 +822,8 @@ const LargeControlButtonGroup = ({
 
   const [pendingCommand, setPendingCommand] = useState(null);
 
+  const [showStartDelayOpen, setShowStartDelayOpen] = useState(false);
+
   const stageStatusMessage = showStageFlightControlStatus?.statusMessageKey
 
     ? t(showStageFlightControlStatus.statusMessageKey)
@@ -833,22 +837,49 @@ const LargeControlButtonGroup = ({
   const hasSelection = selectedUAVIds.length > 0;
   const commandsDisabled = selectionOnly && !hasSelection;
 
+  const isCommandDisabled = useCallback(
+    (commandKey) => {
+      if (commandsDisabled) {
+        return true;
+      }
+      if (commandKey === 'turnMotorsOn' && isArmDisabled) {
+        return true;
+      }
+      // Show start requires prior authorization.
+      if (commandKey === 'startShow' && !isShowAuthorized) {
+        return true;
+      }
+      return false;
+    },
+    [commandsDisabled, isArmDisabled, isShowAuthorized]
+  );
+
   const requestCommand = useCallback((commandKey) => {
     if (commandsDisabled) {
       return;
     }
 
     if (commandKey === 'startShow') {
+      // Authorize first, then schedule the start time.
       if (!isShowAuthorized) {
         return;
       }
-      onOpenStartTimeDialog?.();
+      setShowStartDelayOpen(true);
       return;
     }
 
     setPendingCommand(commandKey);
     setConfirmOpen(true);
-  }, [commandsDisabled, isShowAuthorized, onOpenStartTimeDialog]);
+  }, [commandsDisabled, isShowAuthorized]);
+
+  const handleShowStartDelayClose = useCallback(() => {
+    setShowStartDelayOpen(false);
+  }, []);
+
+  const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
+    scheduleShowStartWithDelay(delaySeconds);
+    setShowStartDelayOpen(false);
+  }, [scheduleShowStartWithDelay]);
 
   const handleConfirmClose = useCallback(() => {
     setConfirmOpen(false);
@@ -927,10 +958,7 @@ const LargeControlButtonGroup = ({
               key={button.key}
               button={button}
               classes={classes}
-              disabled={
-                commandsDisabled ||
-                (button.key === 'turnMotorsOn' && isArmDisabled)
-              }
+              disabled={isCommandDisabled(button.key)}
               label={t(`largeControlButtonGroup.${button.labelKey}`)}
               onClick={() => requestCommand(button.key)}
             />
@@ -942,6 +970,12 @@ const LargeControlButtonGroup = ({
           message={confirmMessage}
           onConfirm={handleConfirmAction}
           onCancel={handleConfirmClose}
+        />
+
+        <ShowStartDelayDialog
+          open={showStartDelayOpen}
+          onCancel={handleShowStartDelayClose}
+          onConfirm={handleShowStartDelayConfirm}
         />
       </Box>
     );
@@ -1048,13 +1082,17 @@ const LargeControlButtonGroup = ({
 
                   classes={classes}
 
-                  disabled={button.key === 'turnMotorsOn' && isArmDisabled}
+                  disabled={isCommandDisabled(button.key)}
 
                   hint={
 
                     button.key === 'turnMotorsOn' && stageStatusMessage
 
                       ? stageStatusMessage
+
+                      : button.key === 'startShow' && !isShowAuthorized
+
+                        ? t('show.authorizationReq')
 
                       : t(`largeControlButtonGroup.${button.hintKey}`)
 
@@ -1088,6 +1126,12 @@ const LargeControlButtonGroup = ({
 
       />
 
+      <ShowStartDelayDialog
+        open={showStartDelayOpen}
+        onCancel={handleShowStartDelayClose}
+        onConfirm={handleShowStartDelayConfirm}
+      />
+
     </Box>
 
   );
@@ -1104,9 +1148,9 @@ LargeControlButtonGroup.propTypes = {
 
   onChangeBroadcastMode: PropTypes.func,
 
-  onOpenStartTimeDialog: PropTypes.func,
-
   reverseMissionMapping: PropTypes.object,
+
+  scheduleShowStartWithDelay: PropTypes.func.isRequired,
 
   selectedUAVIds: PropTypes.arrayOf(PropTypes.string),
 
@@ -1157,8 +1201,8 @@ export default connect(
         }
       },
 
-      onOpenStartTimeDialog: () => {
-        dispatch(openStartTimeDialog());
+      scheduleShowStartWithDelay: (delaySeconds) => {
+        dispatch(scheduleShowStartWithDelay(delaySeconds));
       },
 
       uavActions: bindActionCreators(

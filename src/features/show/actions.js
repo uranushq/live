@@ -111,7 +111,7 @@ export const scheduleShowStartWithDelay =
         time: getUnixTime(startOfSecond(startAt)),
       })
     );
-    dispatch(setShowAuthorization(true));
+    // Keep the existing authorization (operator must authorize before scheduling).
     dispatch(setCommandsAreBroadcast(true));
     dispatch(synchronizeShowSettings('toServer'));
   };
@@ -409,10 +409,8 @@ function processShowInJSONFormatAndDispatchActions(spec, dispatch) {
   dispatch(setShowAuthorization(false));
   dispatch(synchronizeShowSettings('toServer'));
 
-  // For indoor shows we use automatic start by default, not using an RC
-  if (environment.type === 'indoor') {
-    dispatch(setStartMethod(StartMethod.AUTO));
-  }
+  // Start automatically at the scheduled time without requiring an RC switch.
+  dispatch(setStartMethod(StartMethod.AUTO));
 }
 
 /**

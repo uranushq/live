@@ -321,7 +321,7 @@ type StartTimeDialogProps = Readonly<{
 const StartTimeDialog = ({
   authorizeWhenSettingStartTime = false,
   clock,
-  method = StartMethod.RC,
+  method = StartMethod.AUTO,
   open = false,
   onClose,
   onUpdateSettings,

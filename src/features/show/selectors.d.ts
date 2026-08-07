@@ -12,7 +12,11 @@ import type { AppSelector, RootState } from '~/store/reducers';
 import type { FlatEarthCoordinateSystem } from '~/utils/geography';
 import type { Coordinate2D, Coordinate3D } from '~/utils/math';
 
-import type { EnvironmentState, OutdoorCoordinateSystem } from './types';
+import type {
+  EnvironmentState,
+  OutdoorCoordinateSystem,
+  ShowStartReadiness,
+} from './types';
 import type { TakeoffHeadingSpecification } from './constants';
 
 type ShowValidationResult =
@@ -25,6 +29,7 @@ type ShowValidationResult =
 
 export const areManualPreflightChecksSignedOff: (state: RootState) => boolean;
 export const areOnboardPreflightChecksSignedOff: (state: RootState) => boolean;
+export const areShowStartTimesOnUAVs: (state: RootState) => boolean;
 export const areStartConditionsSyncedWithServer: (state: RootState) => boolean;
 export const countUAVsTakingOffAutomatically: (state: RootState) => number;
 export const didLastLoadingAttemptFail: (state: RootState) => boolean;
@@ -58,6 +63,9 @@ export const getShowSegments: AppSelector<
 >;
 export const getShowClockReference: (state: RootState) => string | null;
 export const getShowDuration: (state: RootState) => number;
+export const getShowStartReadiness: (
+  state: RootState
+) => ShowStartReadiness | undefined;
 export const getShowStartTime: (state: RootState) => number | null;
 export const getShowStartTimeAsString: (state: RootState) => string;
 export const getShowToFlatEarthCoordinateSystemTransformation: AppSelector<
@@ -86,6 +94,7 @@ export const isExternalShowUploaded: (state: RootState) => boolean;
 export const isLoadingShowFile: (state: RootState) => boolean;
 export const isShowAuthorizedToStart: (state: RootState) => boolean;
 export const isShowAuthorizedToStartLocally: (state: RootState) => boolean;
+export const isShowStartReadinessReady: (state: RootState) => boolean;
 export const isShowConvexHullInsideGeofence: (state: RootState) => boolean;
 export const isShowIndoor: (state: RootState) => boolean;
 export const isShowOutdoor: (state: RootState) => boolean;

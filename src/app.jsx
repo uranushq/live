@@ -47,6 +47,7 @@ import {
   shouldSidebarBeShown,
 } from './features/workbench/selectors';
 import BottomFlightControlBar from './views/show-control/BottomFlightControlBar';
+import ShowStartReadinessUpdater from './features/show/ShowStartReadinessUpdater';
 import ShowFileWatcher from './views/show-control/ShowFileWatcher';
 import ShowTimerOverlay from './views/show-control/ShowTimerOverlay';
 
@@ -228,6 +229,7 @@ const App = ({ onFirstRender }) => (
       <LanguageWatcher />
       <MissionProgressObserver />
       <MavlinkFlightModeUpdater />
+      <ShowStartReadinessUpdater />
       <ShowFileWatcher />
       {hasFeature('ledShow') && <LedPlaybackDriver />}
 
