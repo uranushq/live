@@ -16,6 +16,7 @@ import AltitudeSummaryHeaderButton from '~/features/uavs/AltitudeSummaryHeaderBu
 import BatteryStatusHeaderButton from '~/features/uavs/BatteryStatusHeaderButton';
 import DistanceSummaryHeaderButton from '~/features/uavs/DistanceSummaryHeaderButton';
 import VelocitySummaryHeaderButton from '~/features/uavs/VelocitySummaryHeaderButton';
+import VirtualUavsHeaderButton from '~/features/virtual-uavs/VirtualUavsHeaderButton';
 import WeatherHeaderButton from '~/features/weather/WeatherHeaderButton';
 import { shouldSidebarBeShown } from '~/features/workbench/selectors';
 import { hasFeature } from '~/utils/configuration';
@@ -68,6 +69,7 @@ const componentRegistry = {
   'toolbox-button': () => hasFeature('toolboxMenu') && <ToolboxButton />,
   'uav-status-summary': UAVStatusSummary,
   'velocity-summary-header-button': VelocitySummaryHeaderButton,
+  'virtual-uavs-header-button': VirtualUavsHeaderButton,
   'weather-header-button': WeatherHeaderButton,
 };
 

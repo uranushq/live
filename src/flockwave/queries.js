@@ -378,6 +378,28 @@ export async function getShowConfiguration(hub) {
 }
 
 /**
+ * Returns whether mapped show UAVs have received the scheduled start time and
+ * authorization (X-SHOW-READY / GET /api/v1/show/start-readiness).
+ *
+ * Uses the experimental X-SHOW-READY Flockwave message because SHOW-READY is
+ * not in the official schema and fails validation.
+ */
+export async function getShowStartReadiness(hub) {
+  const response = await hub.sendMessage({ type: 'X-SHOW-READY' });
+  const body = response?.body;
+
+  if (body && typeof body === 'object' && body.type === 'X-SHOW-READY') {
+    return body;
+  }
+
+  if (body && typeof body === 'object' && typeof body.ready === 'boolean') {
+    return body;
+  }
+
+  throw new Error('Unexpected response for show start readiness query');
+}
+
+/**
  * Returns the weather information at the given location from the server.
  *
  * @param position  the location to query, as a lon-lat pair
@@ -460,6 +482,7 @@ export class QueryHandler {
     getSelectedRTKPresetId,
     getServerPortMapping,
     getShowConfiguration,
+    getShowStartReadiness,
     getWeatherInformation,
     isExtensionLoaded,
     listExtensions,

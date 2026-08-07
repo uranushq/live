@@ -291,6 +291,7 @@ const StartTimeForm = ({
             <Button
               color='primary'
               type='submit'
+              variant='contained'
               disabled={invalid || (!alwaysAllowSubmission && !dirty)}
             >
               {t('startTimeDialog.setNewStartTime')}
@@ -320,7 +321,7 @@ type StartTimeDialogProps = Readonly<{
 const StartTimeDialog = ({
   authorizeWhenSettingStartTime = false,
   clock,
-  method = StartMethod.RC,
+  method = StartMethod.AUTO,
   open = false,
   onClose,
   onUpdateSettings,

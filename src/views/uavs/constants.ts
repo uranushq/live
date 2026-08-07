@@ -19,7 +19,7 @@ export const HEADER_HEIGHT = 38;
 /**
  * Height of the sort/filter chip toolbar above the UAV list.
  */
-export const FILTER_BAR_HEIGHT = 44;
+export const FILTER_BAR_HEIGHT = 52;
 
 /**
  * Fixed height of a single row in the list-based UAV layout.

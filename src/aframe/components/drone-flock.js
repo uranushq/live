@@ -12,7 +12,8 @@ import AFrame from '@skybrush/aframe-components';
 
 import { createSelectionHandlerThunk } from '~/components/helpers/lists';
 import { setSelectedUAVIds } from '~/features/uavs/actions';
-import { getSelectedUAVIds } from '~/features/uavs/selectors';
+import { getSelectedUAVIds, getUAVIdList } from '~/features/uavs/selectors';
+import { isUAVVisibleInActiveGroup } from '~/features/drone-groups/selectors';
 import { setFeatureIdForTooltip } from '~/features/session/slice';
 import UAVErrorCode from '~/flockwave/UAVErrorCode';
 import { getClockById } from '~/features/clocks/selectors';
@@ -189,6 +190,10 @@ AFrame.registerSystem('drone-flock', {
   },
 
   updateEntityFromUAV(entity, uav) {
+    if (!entity || !uav) {
+      return;
+    }
+
     const telemetry = getDroneTelemetryFromUAV(uav);
 
     entity.setAttribute('data-drone-id', uav.id);
@@ -211,19 +216,42 @@ AFrame.registerSystem('drone-flock', {
       this._applyEntityYaw(entity, yaw);
     }
 
+    // Only write a new pose when coordinates are valid. Invalid/missing GPS
+    // must not push the entity to NaN or wipe a previously good location
+    // (which looks like the drone "disappeared" after a remount or dropout).
+    let positionUpdated = false;
     if (uav.hasLocalPosition) {
-      this._updatePositionFromLocalCoordinates(
-        uav.localPosition,
-        entity.object3D.position
-      );
+      const [x, y, z] = uav.localPosition;
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        this._updatePositionFromLocalCoordinates(
+          uav.localPosition,
+          entity.object3D.position
+        );
+        positionUpdated = true;
+      }
     } else if (this._updatePositionFromGPSCoordinates) {
-      this._updatePositionFromGPSCoordinates(uav, entity.object3D.position);
+      // Prefer `position` getter so Null Island is treated as "no fix".
+      const gps = uav.position;
+      if (
+        gps &&
+        Number.isFinite(gps.lon) &&
+        Number.isFinite(gps.lat) &&
+        Number.isFinite(gps.ahl ?? 0)
+      ) {
+        this._updatePositionFromGPSCoordinates(uav, entity.object3D.position);
+        const { x, y, z } = entity.object3D.position;
+        positionUpdated =
+          Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z);
+      }
     }
-    entity.setAttribute('position', {
-      x: entity.object3D.position.x,
-      y: entity.object3D.position.y,
-      z: entity.object3D.position.z,
-    });
+
+    if (positionUpdated) {
+      entity.setAttribute('position', {
+        x: entity.object3D.position.x,
+        y: entity.object3D.position.y,
+        z: entity.object3D.position.z,
+      });
+    }
 
     const bodyColor = getDroneBodyColorFromUAV(uav);
     entity.originalColor = bodyColor;
@@ -323,9 +351,11 @@ AFrame.registerComponent('drone-flock', {
     this._onDroneSelected = this._onDroneSelected.bind(this);
     this._onDroneDeselected = this._onDroneDeselected.bind(this);
     this._onSelectionChanged = this._onSelectionChanged.bind(this);
+    this._onVisibleUAVIdsChanged = this._onVisibleUAVIdsChanged.bind(this);
 
     this._uavIdToEntity = {};
     this._selectedUAVIds = getSelectedUAVIds(store.getState());
+    this._visibleUAVIdSet = new Set(getUAVIdList(store.getState()));
 
     // mini-signals v2: detach()는 add()를 호출한 “그 MiniSignal 인스턴스”에서만 호출해야 한다.
     // Golden Layout 등으로 씬이 바뀌면 this.system이 새 시스템을 가리켜 심볼 불일치 오류가 난다.
@@ -342,8 +372,14 @@ AFrame.registerComponent('drone-flock', {
     this._unsubscribeSelection = store.subscribe(
       watch(selectionGetter)(this._onSelectionChanged)
     );
+    const visibleGetter = () => getUAVIdList(store.getState());
+    this._unsubscribeVisible = store.subscribe(
+      watch(visibleGetter)(this._onVisibleUAVIdsChanged)
+    );
 
-    this._pendingUAVsToAdd = flock.getAllUAVIds();
+    this._pendingUAVsToAdd = flock
+      .getAllUAVIds()
+      .filter((id) => this._isUAVVisible(id));
     window.addEventListener('drone-selected', this._onDroneSelected);
     window.addEventListener('drone-deselected', this._onDroneDeselected);
   },
@@ -355,6 +391,11 @@ AFrame.registerComponent('drone-flock', {
     if (this._unsubscribeSelection) {
       this._unsubscribeSelection();
       this._unsubscribeSelection = null;
+    }
+
+    if (this._unsubscribeVisible) {
+      this._unsubscribeVisible();
+      this._unsubscribeVisible = null;
     }
 
     if (!this._signals) {
@@ -375,9 +416,15 @@ AFrame.registerComponent('drone-flock', {
 
   tick() {
     if (this._pendingUAVsToAdd) {
+      // Scene remount / first mount: recreate entities AND bind the last known
+      // pose immediately. Creating shells without update leaves drones at
+      // origin (or invisible) until the next telemetry packet.
       for (const uavId of this._pendingUAVsToAdd) {
         const uav = flock.getUAVById(uavId);
-        this._ensureUAVEntityExists(uav);
+        if (!uav) {
+          continue;
+        }
+        this._syncUAVEntity(uav);
       }
 
       this._pendingUAVsToAdd = undefined;
@@ -398,7 +445,54 @@ AFrame.registerComponent('drone-flock', {
     return this._uavIdToEntity[id];
   },
 
+  _syncUAVEntity(uav) {
+    if (!this._isUAVVisible(uav?.id)) {
+      this._ensureUAVEntityDoesNotExist(uav);
+      return undefined;
+    }
+
+    const entity = this._ensureUAVEntityExists(uav);
+    if (entity) {
+      this.system.updateEntityFromUAV(entity, uav);
+    }
+    return entity;
+  },
+
+  _isUAVVisible(uavId) {
+    if (!uavId) {
+      return false;
+    }
+
+    return isUAVVisibleInActiveGroup(store.getState(), String(uavId));
+  },
+
+  _onVisibleUAVIdsChanged(newValue) {
+    this._visibleUAVIdSet = new Set(
+      Array.isArray(newValue) ? newValue.map(String) : []
+    );
+
+    // Remove entities that fell out of the active group.
+    for (const [uavId, entity] of Object.entries(this._uavIdToEntity)) {
+      if (!this._visibleUAVIdSet.has(String(uavId))) {
+        entity.remove();
+        delete this._uavIdToEntity[uavId];
+      }
+    }
+
+    // Add entities that became visible.
+    for (const uavId of this._visibleUAVIdSet) {
+      const uav = flock.getUAVById(uavId);
+      if (uav) {
+        this._syncUAVEntity(uav);
+      }
+    }
+  },
+
   _ensureUAVEntityExists(uav) {
+    if (!uav) {
+      return undefined;
+    }
+
     const existingEntity = this._getEntityForUAV(uav);
     if (existingEntity) {
       return existingEntity;
@@ -500,8 +594,7 @@ AFrame.registerComponent('drone-flock', {
 
   _onUAVsAdded(uavs) {
     for (const uav of uavs) {
-      const entity = this._ensureUAVEntityExists(uav);
-      this.system.updateEntityFromUAV(entity, uav);
+      this._syncUAVEntity(uav);
     }
   },
 
@@ -512,11 +605,11 @@ AFrame.registerComponent('drone-flock', {
   },
 
   _onUAVsUpdated(uavs) {
+    // Ensure+update so a remount race (update arrives before pending tick
+    // creates the entity, or the entity map was cleared) cannot leave drones
+    // permanently missing from the scene.
     for (const uav of uavs) {
-      const entity = this._getEntityForUAV(uav);
-      if (entity) {
-        this.system.updateEntityFromUAV(entity, uav);
-      }
+      this._syncUAVEntity(uav);
     }
   },
 

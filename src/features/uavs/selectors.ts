@@ -62,12 +62,70 @@ import {
 } from './vehicleMode';
 
 /**
+ * Returns every known UAV ID, ignoring the active group filter.
+ * Prefer {@link getUAVIdList} for UI surfaces that should respect the group filter.
+ */
+export const getAllUAVIdList = (state: RootState) => state.uavs.order;
+
+/**
  * Returns the list of UAV IDs that should be shown on the UI, in the
  * order preferred by the state of the application.
  *
+ * When a named UAV group filter is active, only members of that group are
+ * returned. Otherwise this is identical to {@link getAllUAVIdList}.
+ *
  * @param  {Object}  state  the state of the application
  */
-export const getUAVIdList = (state: RootState) => state.uavs.order;
+export const getUAVIdList: AppSelector<string[]> = createSelector(
+  getAllUAVIdList,
+  (state: RootState) => {
+    const droneGroups = state.droneGroups as
+      | {
+          activeGroupIds?: string[];
+          activeGroupId?: string | null;
+          byId: Record<string, { uavIds: string[] }>;
+        }
+      | undefined;
+    if (!droneGroups) {
+      return null;
+    }
+
+    const ids = Array.isArray(droneGroups.activeGroupIds)
+      ? droneGroups.activeGroupIds
+      : droneGroups.activeGroupId
+        ? [droneGroups.activeGroupId]
+        : [];
+
+    if (ids.length === 0) {
+      return null;
+    }
+
+    const memberSet = new Set<string>();
+    for (const id of ids) {
+      const group = droneGroups.byId[id];
+      if (!group) {
+        continue;
+      }
+
+      for (const uavId of group.uavIds) {
+        memberSet.add(uavId);
+      }
+    }
+
+    return memberSet.size > 0 ? memberSet : null;
+  },
+  (order, memberSet): string[] => {
+    if (!memberSet) {
+      return order;
+    }
+
+    if (order.length === 0) {
+      return EMPTY_ARRAY;
+    }
+
+    return order.filter((id) => memberSet.has(id));
+  }
+);
 
 /**
  * Key selector function for cached selectors that cache things by UAV ID.

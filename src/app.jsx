@@ -33,6 +33,7 @@ import ParameterViewerDialog from './features/parameters/ParameterViewerDialog';
 import PromptDialog from './features/prompt/PromptDialog';
 import RTKSetupDialog from './features/rtk/RTKSetupDialog';
 import SafetyDialog from './features/safety/SafetyDialog';
+import NamedUAVGroupEditorDialog from './features/drone-groups/NamedUAVGroupEditorDialog';
 import SavedLocationEditorDialog from './features/saved-locations/SavedLocationEditorDialog';
 import ShowConfiguratorDialog from './features/show-configurator/ShowConfiguratorDialog';
 import Sidebar from './features/sidebar/Sidebar';
@@ -46,6 +47,7 @@ import {
   shouldSidebarBeShown,
 } from './features/workbench/selectors';
 import BottomFlightControlBar from './views/show-control/BottomFlightControlBar';
+import ShowStartReadinessUpdater from './features/show/ShowStartReadinessUpdater';
 import ShowFileWatcher from './views/show-control/ShowFileWatcher';
 import ShowTimerOverlay from './views/show-control/ShowTimerOverlay';
 
@@ -227,6 +229,7 @@ const App = ({ onFirstRender }) => (
       <LanguageWatcher />
       <MissionProgressObserver />
       <MavlinkFlightModeUpdater />
+      <ShowStartReadinessUpdater />
       <ShowFileWatcher />
       {hasFeature('ledShow') && <LedPlaybackDriver />}
 
@@ -253,6 +256,7 @@ const App = ({ onFirstRender }) => (
       <PromptDialog />
       <RTKSetupDialog />
       <SafetyDialog />
+      <NamedUAVGroupEditorDialog />
       <SavedLocationEditorDialog />
       <ShowConfiguratorDialog />
       <UAVDetailsDialog />

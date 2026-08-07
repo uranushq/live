@@ -51,3 +51,28 @@ export type EnvironmentState = {
   indoor: IndoorEnvironment;
   type: EnvironmentType;
 };
+
+/** Per-UAV start-time / authorization readiness from X-SHOW-READY. */
+export type UAVShowStartReadiness = {
+  ready: boolean;
+  connected: boolean;
+  supportsScheduledTakeoff: boolean;
+  hasStartTime: boolean;
+  startTime: number | null;
+  hasAuthorization: boolean;
+  authorizationScope: string | null;
+};
+
+/** Aggregate show start readiness from X-SHOW-READY /start-readiness. */
+export type ShowStartReadiness = {
+  ready: boolean;
+  total: number;
+  readyCount: number;
+  missingStartTime: string[];
+  missingAuthorization: string[];
+  missing: string[];
+  disconnected: string[];
+  unsupported: string[];
+  uavs: Record<string, UAVShowStartReadiness>;
+  lastUpdatedAt?: number;
+};

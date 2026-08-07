@@ -6,7 +6,7 @@ import mapValues from 'lodash-es/mapValues';
 import { eventChannel } from 'redux-saga';
 import { all, call, delay, put, select, take } from 'redux-saga/effects';
 
-import { getUAVIdToStateMapping, getUAVIdList } from './selectors';
+import { getUAVIdToStateMapping, getAllUAVIdList } from './selectors';
 import {
   addUAVs,
   updateAgesOfUAVs,
@@ -368,7 +368,7 @@ function* uavAgingSaga(flock) {
     yield delay(1000);
 
     const uavs = yield select(getUAVIdToStateMapping);
-    const uavIds = yield select(getUAVIdList);
+    const uavIds = yield select(getAllUAVIdList);
     const clockSkew = (yield select(getRoundedClockSkewInMilliseconds)) || 0;
     const thresholds = yield select(getUAVAgingThresholds);
 

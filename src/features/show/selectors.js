@@ -116,6 +116,40 @@ export const getAbsolutePathOfShowFile = createSelector(
 export const hasScheduledStartTime = (state) => !isNil(getShowStartTime(state));
 
 /**
+ * Returns the latest X-SHOW-READY poll result, if any.
+ */
+export const getShowStartReadiness = (state) => state.show.startReadiness;
+
+/**
+ * Returns whether every mapped show UAV has received the scheduled start time.
+ * Disconnected / missing / unsupported UAVs block readiness.
+ */
+export const areShowStartTimesOnUAVs = (state) => {
+  const readiness = getShowStartReadiness(state);
+  if (!hasScheduledStartTime(state) || !readiness) {
+    return false;
+  }
+
+  if (!Number.isFinite(readiness.total) || readiness.total <= 0) {
+    return false;
+  }
+
+  return (
+    readiness.missingStartTime.length === 0 &&
+    readiness.disconnected.length === 0 &&
+    readiness.missing.length === 0 &&
+    readiness.unsupported.length === 0
+  );
+};
+
+/**
+ * Returns whether X-SHOW-READY reports the swarm as fully ready (start time and
+ * authorization on every mapped UAV).
+ */
+export const isShowStartReadinessReady = (state) =>
+  Boolean(getShowStartReadiness(state)?.ready);
+
+/**
  * Returns whether the show has changed externally since the time it was
  * loaded into the app.
  */

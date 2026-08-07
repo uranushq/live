@@ -8,6 +8,53 @@
       "title": "명령 확인"
     }
   },
+  "droneGroups": {
+    "allDrones": "전체 드론",
+    "availableDrones": "선택 가능 ({{count}})",
+    "badge": "그룹",
+    "chipLabel": "{{name}}",
+    "chipLabelAll": "그룹",
+    "clearAll": "전체 해제",
+    "clearGroupFilter": "전체 드론 보기",
+    "clearSelection": "선택 해제",
+    "create": "생성",
+    "createGroup": "그룹 생성…",
+    "createTitle": "드론 그룹 생성",
+    "currentGroup": "현재 그룹",
+    "delete": "삭제",
+    "deselectShown": "표시분 선택 해제",
+    "editGroup": "그룹 편집…",
+    "editTitle": "드론 그룹 편집",
+    "filter": "필터",
+    "filterAll": "전체",
+    "filterBy": "그룹 필터",
+    "filterByMulti": "그룹 다중 선택",
+    "filterFlying": "비행중",
+    "filterGround": "지상",
+    "filterLowBatt": "배터리 부족",
+    "filterSelected": "선택됨",
+    "fleetUnits": "편대 {{count}}대",
+    "invertShown": "표시분 반전",
+    "memberCount": "{{count}}대",
+    "multipleGroups": "{{count}}개 그룹",
+    "name": "그룹 이름",
+    "noAvailableDrones": "선택 가능한 드론이 없습니다",
+    "noDronesAvailable": "사용 가능한 드론이 없습니다",
+    "noneSelected": "선택된 드론이 없습니다",
+    "noSearchResults": "검색/필터 결과가 없습니다",
+    "save": "저장",
+    "searchLabel": "검색 — ID, 이름, 또는 12-40 범위",
+    "searchPlaceholder": "예: s14, 12-40",
+    "selectAll": "전체 선택",
+    "selectAllCount": "전체 {{count}}대 선택",
+    "selectDrones": "포함할 드론",
+    "selectShown": "표시분 {{count}}대 선택",
+    "selectedDrones": "선택됨 {{count}}",
+    "selectionHint": "Shift-클릭으로 범위 선택 · 그리드에서 드래그 선택",
+    "summary": "이 그룹 {{selected}} / {{total}}대",
+    "viewGrid": "그리드",
+    "viewList": "리스트"
+  },
   "UAVOpButtonGrp": {
     "confirmFlightCommandMessage": "드론 {{drones}}에 \"{{command}}\" 명령을 실행할까요?",
     "confirmFlightCommandMessageBroadcast": "모든 UAV에 \"{{command}}\" 명령을 브로드캐스트할까요?",
@@ -147,10 +194,15 @@
     "title": "쇼 시작 예약"
   },
   "showTimerOverlay": {
+    "disconnectedUAVs": "연결 끊김: {{ids}}",
     "elapsedTime": "쇼 진행시간",
+    "missingStartTime": "시작 시간 미수신: {{ids}}",
     "remainingTime": "쇼 남은시간",
     "showInProgress": "쇼 진행 중",
+    "startTimeProgress": "{{ready}} / {{total}}대",
+    "syncingStartTime": "시작 시간 동기화 중",
     "untilStart": "시작까지",
+    "waitingForStartTimeOnUAVs": "모든 드론에 시작 시간이 들어갈 때까지 대기",
     "waitingToStart": "시작 대기"
   },
   "mapSourceToggle": {
@@ -165,13 +217,12 @@
   },
   "navigationInstructions": {
     "altitude": "고도",
-    "flyMove": "비행 / 좌우 이동",
-    "leftDragLook": "좌클릭 드래그: 시점 회전",
-    "middleDrag": "휠 클릭 드래그",
+    "arrows": "방향키",
+    "flyForwardBackward": "전진 / 후진",
+    "lookAround": "시점 회전",
+    "moveSideways": "좌우 이동",
     "noInstruction": "이 탐색 모드에 대한 안내가 없습니다",
-    "rightDrag": "우클릭 드래그",
-    "run": "빠른 이동",
-    "shiftDrag": "Shift + 드래그",
+    "run": "빠르게 이동",
     "walkAround": "이동"
   },
   "threeDInteractionMode": {
@@ -183,6 +234,12 @@
   },
   "toolbox": {
     "paramViewer": "파라미터 조회"
+  },
+  "parameterUploadMainPanel": {
+    "addToManifest": "매니페스트에 추가",
+    "expressionHint": "값에 $id를 쓰면 드론별 수식으로 계산됩니다 (드론 id의 숫자 부분). 예: SYSID_THISMAV=$id, SYSID_THISMAV=$id+1, GRP=($id-1)%4",
+    "parameterUploadHint": "<kbd>⇧</kbd> + <kbd>Enter</kbd> 또는 매니페스트에 추가 버튼으로 파라미터를 추가하세요. 사이드바의 파라미터를 클릭하면 매니페스트에서 제거됩니다.",
+    "specifyEntries": "name=value 형식으로 한 줄에 하나씩 입력하세요."
   },
   "parameterViewerDialog": {
     "allGroups": "전체 그룹",
@@ -201,8 +258,10 @@
     "legendEdit": "미저장 편집",
     "legendMismatch": "불일치",
     "legendMissing": "— 기체에 없음",
+    "loadEmpty": "미수신",
     "loadFailed": "파라미터를 불러오지 못했습니다.",
     "loading": "파라미터 불러오는 중…",
+    "partialLoad": "{{ids}} 파라미터를 받지 못했습니다. 새로고침하거나 해당 기체 연결을 확인하세요.",
     "match": "맞춤",
     "matchTooltip": "기준(REF) 기체의 값을 선택한 모든 기체에 복사합니다",
     "matchedToast": "{{name}}을(를) {{uavId}} 기준으로 맞췄습니다",
@@ -211,6 +270,7 @@
     "pending": "{{count}}개 대기",
     "ref": "REF",
     "referenceOnly": "기준만",
+    "setReference": "이 기체를 기준(REF)으로 지정",
     "refresh": "새로고침",
     "retry": "다시 시도",
     "revert": "되돌리기",
@@ -220,9 +280,32 @@
     "selectUav": "파라미터를 볼 UAV를 하나 이상 선택하세요.",
     "statusLine": "불일치 {{mismatched}} · 미저장 {{pending}}",
     "title": "파라미터 조회",
+    "vehicleMetaLoaded": "{{count}}개 · {{voltage}}V · {{status}}",
     "vehicles": "기체",
     "write": "기체에 쓰기",
     "writeFailed": "파라미터를 기체에 쓰지 못했습니다.",
     "wroteToast": "파라미터 {{count}}개를 기체에 썼습니다"
+  },
+  "takeoffAreaSetupDialog": {
+    "placeVirtualDrones": "가상 드론을 이륙 위치에 배치",
+    "takeoffAreaSetup": "이륙 영역 설정"
+  },
+  "virtualUavsControl": {
+    "actionFailed": "가상 UAV 작업 실패: {{message}}",
+    "applyCount": "적용",
+    "count": "개수",
+    "countSuccess": "가상 UAV 개수를 변경했습니다.",
+    "disable": "끄기",
+    "disableSuccess": "가상 UAV 플릿을 껐습니다.",
+    "disabled": "꺼짐",
+    "droneCount": "{{count}}대",
+    "enable": "켜기",
+    "enableSuccess": "가상 UAV 플릿을 켰습니다.",
+    "enabled": "켜짐",
+    "invalidCount": "개수는 0 이상의 정수여야 합니다.",
+    "noUavs": "레지스트리에 가상 UAV가 없습니다.",
+    "refresh": "상태 새로고침",
+    "statusFailed": "가상 UAV 상태를 불러오지 못했습니다: {{message}}",
+    "title": "가상 UAV 플릿"
   }
 }

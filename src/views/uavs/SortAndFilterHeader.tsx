@@ -2,15 +2,21 @@
 import SortAscending from '@mui/icons-material/ArrowDownward';
 import SortDescending from '@mui/icons-material/ArrowUpward';
 import Check from '@mui/icons-material/Check';
+import ExpandMore from '@mui/icons-material/ExpandMore';
 import Filter from '@mui/icons-material/FilterList';
+import GroupWork from '@mui/icons-material/GroupWork';
 import GpsFixed from '@mui/icons-material/GpsFixed';
 import SatelliteAlt from '@mui/icons-material/SatelliteAlt';
 import Sort from '@mui/icons-material/Sort';
+import ButtonBase from '@mui/material/ButtonBase';
 import Chip, { type ChipProps } from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
 import MenuItem, { type MenuItemProps } from '@mui/material/MenuItem';
+import Typography from '@mui/material/Typography';
 import type { Theme } from '@mui/material/styles';
+import Clear from '@mui/icons-material/Clear';
 import clsx from 'clsx';
 import type { TFunction } from 'i18next';
 import {
@@ -19,13 +25,25 @@ import {
   usePopupState,
   type PopupState,
 } from 'material-ui-popup-state/hooks';
-import React, { useCallback, useRef, type SyntheticEvent } from 'react';
+import React, { useCallback, useMemo, useRef, type SyntheticEvent } from 'react';
 import { withTranslation } from 'react-i18next';
 import { connect } from 'react-redux';
 
 import { isThemeDark, makeStyles } from '@skybrush/app-theme-mui';
 
 import Colors from '~/components/colors';
+import {
+  clearActiveNamedUAVGroupIds,
+  setActiveNamedUAVGroupIds,
+  showCreateNamedUAVGroupDialog,
+  showEditNamedUAVGroupDialog,
+  toggleActiveNamedUAVGroupId,
+} from '~/features/drone-groups/actions';
+import {
+  getActiveNamedUAVGroupIds,
+  getNamedUAVGroupsInOrder,
+} from '~/features/drone-groups/selectors';
+import { type NamedUAVGroup } from '~/features/drone-groups/types';
 import { selectGpsFleetSummary } from '~/features/uavs/gpsFleetSummary';
 import {
   setSingleUAVListFilter,
@@ -55,6 +73,7 @@ import {
   shortLabelsForUAVSortKey,
 } from '~/model/sorting';
 import type { RootState } from '~/store/reducers';
+import type { Identifier } from '~/utils/collections';
 import type { Nullable } from '~/utils/types';
 
 import { FILTER_BAR_HEIGHT } from './constants';
@@ -191,6 +210,116 @@ const useStyles = makeStyles((theme: Theme) => {
       border: `1px solid ${dark ? 'rgba(255, 255, 255, 0.08)' : theme.palette.divider}`,
       color: dark ? 'rgba(255, 255, 255, 0.55)' : theme.palette.text.secondary,
     },
+
+    groupSelector: {
+      alignItems: 'center',
+      background: dark
+        ? 'linear-gradient(180deg, rgba(47, 128, 237, 0.18) 0%, rgba(47, 128, 237, 0.1) 100%)'
+        : 'linear-gradient(180deg, rgba(47, 128, 237, 0.12) 0%, rgba(47, 128, 237, 0.06) 100%)',
+      border: `1.5px solid ${
+        dark ? 'rgba(110, 182, 255, 0.45)' : theme.palette.primary.main
+      }`,
+      borderRadius: 10,
+      boxShadow: dark
+        ? '0 0 16px rgba(47, 128, 237, 0.2)'
+        : '0 2px 8px rgba(47, 128, 237, 0.16)',
+      display: 'flex',
+      flex: '0 0 auto',
+      gap: theme.spacing(0.75),
+      maxWidth: '100%',
+      minHeight: 40,
+      padding: theme.spacing(0.35, 0.5, 0.35, 0.75),
+    },
+
+    groupSelectorInactive: {
+      background: dark
+        ? 'rgba(255, 255, 255, 0.05)'
+        : theme.palette.common.white,
+      border: `1.5px solid ${
+        dark ? 'rgba(255, 255, 255, 0.16)' : theme.palette.divider
+      }`,
+      boxShadow: dark ? 'none' : '0 1px 4px rgba(15, 23, 42, 0.06)',
+    },
+
+    groupSelectorButton: {
+      alignItems: 'center',
+      borderRadius: 8,
+      display: 'flex',
+      flex: '1 1 auto',
+      gap: theme.spacing(1),
+      justifyContent: 'flex-start',
+      minWidth: 0,
+      padding: theme.spacing(0.35, 0.5),
+      textAlign: 'left',
+    },
+
+    groupBadge: {
+      alignItems: 'center',
+      backgroundColor: dark ? 'rgba(47, 128, 237, 0.85)' : theme.palette.primary.main,
+      borderRadius: 6,
+      color: theme.palette.common.white,
+      display: 'inline-flex',
+      flex: '0 0 auto',
+      fontSize: '0.65rem',
+      fontWeight: 800,
+      gap: 4,
+      letterSpacing: '0.08em',
+      lineHeight: 1,
+      padding: theme.spacing(0.55, 0.7),
+      textTransform: 'uppercase',
+    },
+
+    groupBadgeInactive: {
+      backgroundColor: dark ? 'rgba(255, 255, 255, 0.12)' : theme.palette.grey[700],
+    },
+
+    groupTextBlock: {
+      display: 'flex',
+      flexDirection: 'column',
+      minWidth: 0,
+    },
+
+    groupCaption: {
+      color: dark ? 'rgba(168, 212, 255, 0.75)' : theme.palette.primary.dark,
+      fontSize: '0.62rem',
+      fontWeight: 600,
+      letterSpacing: '0.04em',
+      lineHeight: 1.1,
+      textTransform: 'uppercase',
+    },
+
+    groupCaptionInactive: {
+      color: theme.palette.text.secondary,
+    },
+
+    groupName: {
+      color: dark ? '#dff0ff' : theme.palette.text.primary,
+      fontSize: '0.95rem',
+      fontWeight: 800,
+      letterSpacing: '0.01em',
+      lineHeight: 1.15,
+      maxWidth: 180,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+
+    groupCount: {
+      color: dark ? 'rgba(168, 212, 255, 0.9)' : theme.palette.primary.main,
+      flex: '0 0 auto',
+      fontSize: '0.78rem',
+      fontWeight: 700,
+      whiteSpace: 'nowrap',
+    },
+
+    groupCountInactive: {
+      color: theme.palette.text.secondary,
+    },
+
+    groupClearButton: {
+      color: dark ? '#a8d4ff' : theme.palette.primary.main,
+      padding: 4,
+    },
   };
 });
 
@@ -270,9 +399,16 @@ type GpsFleetSummaryProps = Readonly<{
 }>;
 
 type SortAndFilterHeaderProps = Readonly<{
+  activeGroupIds: Identifier[];
   filters: UAVFilter[];
+  groups: NamedUAVGroup[];
   gpsSummary: GpsFleetSummaryProps;
   layout: UAVListLayout;
+  onClearActiveGroups: () => void;
+  onCreateGroup: () => void;
+  onEditGroup: (groupId: Identifier) => void;
+  onSetActiveGroups: (groupIds: Identifier[]) => void;
+  onToggleActiveGroup: (groupId: Identifier) => void;
   onSetFilter: (filter: Nullable<UAVFilter>) => void;
   onSetSortBy: (sortBy: Partial<UAVSortKeyAndOrder>) => void;
   onToggleSortDirection: () => void;
@@ -282,9 +418,15 @@ type SortAndFilterHeaderProps = Readonly<{
 }>;
 
 const SortAndFilterHeader = ({
+  activeGroupIds,
   filters,
+  groups,
   gpsSummary,
   layout,
+  onClearActiveGroups,
+  onCreateGroup,
+  onEditGroup,
+  onToggleActiveGroup,
   onSetFilter,
   onSetSortBy,
   onToggleSortDirection,
@@ -301,6 +443,11 @@ const SortAndFilterHeader = ({
   const filterPopupState = usePopupState({
     variant: 'popover',
     popupId: 'uav-list-filter-options',
+  });
+  const groupChipRef = useRef<HTMLDivElement>();
+  const groupPopupState = usePopupState({
+    variant: 'popover',
+    popupId: 'uav-list-group-options',
   });
 
   const setFilter = useCallback(
@@ -333,12 +480,179 @@ const SortAndFilterHeader = ({
     },
     [onSetSortBy, sortPopupState]
   );
+  const clearActiveGroups = useCallback(() => {
+    onClearActiveGroups();
+  }, [onClearActiveGroups]);
+
+  const toggleGroup = useCallback(
+    (groupId: Identifier) => {
+      onToggleActiveGroup(groupId);
+    },
+    [onToggleActiveGroup]
+  );
+
+  const activeGroupIdSet = useMemo(
+    () => new Set(activeGroupIds),
+    [activeGroupIds]
+  );
+  const activeGroups = useMemo(
+    () => groups.filter((group) => activeGroupIdSet.has(group.id)),
+    [groups, activeGroupIdSet]
+  );
   const isSortActive = sortBy.key !== UAVSortKey.DEFAULT;
   const isFilterActive = Array.isArray(filters) && filters.length > 0;
+  const isGroupActive = activeGroups.length > 0;
+  const groupDisplayName =
+    activeGroups.length === 0
+      ? t('droneGroups.allDrones')
+      : activeGroups.length === 1
+        ? activeGroups[0]!.name
+        : activeGroups.length === 2
+          ? `${activeGroups[0]!.name} + ${activeGroups[1]!.name}`
+          : t('droneGroups.multipleGroups', { count: activeGroups.length });
+  const groupMemberCount = isGroupActive
+    ? new Set(activeGroups.flatMap((group) => group.uavIds)).size
+    : null;
 
   return (
     <div className={clsx(classes.root, classes.rootEmbedded)}>
       <div className={classes.toolbarInner}>
+        <div
+          className={clsx(
+            classes.groupSelector,
+            !isGroupActive && classes.groupSelectorInactive
+          )}
+        >
+          <ButtonBase
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            ref={groupChipRef as any}
+            className={classes.groupSelectorButton}
+            onClick={(event) => {
+              groupPopupState.open(groupChipRef.current ?? event.currentTarget);
+            }}
+          >
+            <span
+              className={clsx(
+                classes.groupBadge,
+                !isGroupActive && classes.groupBadgeInactive
+              )}
+            >
+              <GroupWork sx={{ fontSize: '0.85rem' }} />
+              {t('droneGroups.badge')}
+            </span>
+            <span className={classes.groupTextBlock}>
+              <Typography
+                className={clsx(
+                  classes.groupCaption,
+                  !isGroupActive && classes.groupCaptionInactive
+                )}
+                component='span'
+              >
+                {t('droneGroups.currentGroup')}
+              </Typography>
+              <Typography className={classes.groupName} component='span'>
+                {groupDisplayName}
+              </Typography>
+            </span>
+            {groupMemberCount !== null && (
+              <Typography
+                className={clsx(
+                  classes.groupCount,
+                  !isGroupActive && classes.groupCountInactive
+                )}
+                component='span'
+              >
+                {t('droneGroups.memberCount', { count: groupMemberCount })}
+              </Typography>
+            )}
+            <ExpandMore fontSize='small' sx={{ opacity: 0.8 }} />
+          </ButtonBase>
+          {isGroupActive && (
+            <IconButton
+              aria-label={t('droneGroups.clearGroupFilter')}
+              className={classes.groupClearButton}
+              size='small'
+              onClick={() => {
+                clearActiveGroups();
+              }}
+            >
+              <Clear fontSize='small' />
+            </IconButton>
+          )}
+          <Menu
+            {...bindMenu(groupPopupState)}
+            slotProps={{
+              paper: {
+                ...menuPaperProps,
+                sx: { ...menuPaperProps.sx, minWidth: 220 },
+              },
+            }}
+          >
+            <MenuItem dense disabled>
+              {t('droneGroups.filterByMulti')}
+            </MenuItem>
+            <CheckableMenuItem
+              label={t('droneGroups.allDrones')}
+              selected={!isGroupActive}
+              onClick={() => {
+                clearActiveGroups();
+              }}
+            />
+            {groups.map((group) => {
+              const selected = activeGroupIdSet.has(group.id);
+              return (
+                <MenuItem
+                  key={group.id}
+                  dense
+                  selected={selected}
+                  onClick={() => {
+                    toggleGroup(group.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    groupPopupState.close();
+                    onEditGroup(group.id);
+                  }}
+                >
+                  {group.name}
+                  <Typography
+                    component='span'
+                    sx={{
+                      color: 'text.secondary',
+                      fontSize: '0.75rem',
+                      ml: 1,
+                    }}
+                  >
+                    ({group.uavIds.length})
+                  </Typography>
+                  {selected ? check : null}
+                </MenuItem>
+              );
+            })}
+            <Divider style={{ margin: '4px 0' }} />
+            <MenuItem
+              dense
+              onClick={() => {
+                groupPopupState.close();
+                onCreateGroup();
+              }}
+            >
+              {t('droneGroups.createGroup')}
+            </MenuItem>
+            {activeGroups.length === 1 && (
+              <MenuItem
+                dense
+                onClick={() => {
+                  groupPopupState.close();
+                  onEditGroup(activeGroups[0]!.id);
+                }}
+              >
+                {t('droneGroups.editGroup')}
+              </MenuItem>
+            )}
+          </Menu>
+        </div>
+
         <div className={classes.group}>
           <Chip
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -468,13 +782,20 @@ const SortAndFilterHeader = ({
 
 export default connect(
   (state: RootState) => ({
+    activeGroupIds: getActiveNamedUAVGroupIds(state),
     filters: getUAVListFilters(state),
+    groups: getNamedUAVGroupsInOrder(state),
     gpsSummary: selectGpsFleetSummary(state),
     layout: getUAVListLayout(state),
     showMissionIds: isShowingMissionIds(state),
     sortBy: getUAVListSortPreference(state),
   }),
   {
+    onClearActiveGroups: clearActiveNamedUAVGroupIds,
+    onCreateGroup: showCreateNamedUAVGroupDialog,
+    onEditGroup: showEditNamedUAVGroupDialog,
+    onSetActiveGroups: setActiveNamedUAVGroupIds,
+    onToggleActiveGroup: toggleActiveNamedUAVGroupId,
     onSetFilter: setSingleUAVListFilter,
     onSetSortBy: setUAVListSortPreference,
     onToggleSortDirection: toggleUAVListSortDirection,

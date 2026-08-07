@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
 import Typography from '@mui/material/Typography';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSelector } from 'react-redux';
 import { useHarmonicIntervalFn, useUpdate } from 'react-use';
@@ -37,6 +37,11 @@ const useStyles = makeStyles((theme) => ({
     padding: theme.spacing(1.5, 1.75, 1.25),
     width: 248,
   },
+  syncingRoot: {
+    minWidth: 280,
+    padding: theme.spacing(1.5, 1.75, 1.25),
+    width: 300,
+  },
   runningRoot: {
     minWidth: 280,
     padding: theme.spacing(1.75, 2, 1.5),
@@ -59,11 +64,20 @@ const useStyles = makeStyles((theme) => ({
     height: 8,
     width: 8,
   },
+  statusDotSyncing: {
+    backgroundColor: '#5dade2',
+  },
   statusDotWaiting: {
     backgroundColor: '#f9a84d',
   },
   statusDotRunning: {
     backgroundColor: '#3ecf6e',
+  },
+  statusLabelSyncing: {
+    color: '#5dade2',
+    fontSize: '0.875rem',
+    fontWeight: 700,
+    lineHeight: 1.2,
   },
   statusLabelWaiting: {
     color: '#f9a84d',
@@ -107,6 +121,35 @@ const useStyles = makeStyles((theme) => ({
     letterSpacing: '-0.02em',
     lineHeight: 1,
   },
+  syncingBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(0.75),
+    marginBottom: theme.spacing(1),
+  },
+  syncingCount: {
+    color: theme.palette.common.white,
+    fontFamily: '"ProggyVector", monospace',
+    fontSize: '1.5rem',
+    fontVariantNumeric: 'tabular-nums',
+    fontWeight: 700,
+    lineHeight: 1,
+  },
+  syncingHint: {
+    color: '#95a5a6',
+    fontSize: '0.75rem',
+    lineHeight: 1.3,
+  },
+  syncingList: {
+    color: '#f9a84d',
+    fontFamily: '"ProggyVector", monospace',
+    fontSize: '0.75rem',
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1.35,
+    maxHeight: 72,
+    overflow: 'hidden',
+    wordBreak: 'break-word',
+  },
   runningBody: {
     display: 'grid',
     gap: theme.spacing(0.75),
@@ -137,6 +180,15 @@ const useStyles = makeStyles((theme) => ({
     fontWeight: 700,
     lineHeight: 1,
   },
+  progressBarSyncing: {
+    '& .MuiLinearProgress-bar': {
+      backgroundColor: '#5dade2',
+      borderRadius: 999,
+    },
+    backgroundColor: '#34495e',
+    borderRadius: 999,
+    height: 4,
+  },
   progressBarWaiting: {
     '& .MuiLinearProgress-bar': {
       backgroundColor: '#f9a84d',
@@ -160,16 +212,40 @@ const useStyles = makeStyles((theme) => ({
 const phaseAccentClass = (
   phase: ShowTimerPhase,
   classes: ReturnType<typeof useStyles>
-): string =>
-  phase === 'waiting' ? classes.statusDotWaiting : classes.statusDotRunning;
+): string => {
+  if (phase === 'syncing') {
+    return classes.statusDotSyncing;
+  }
+
+  return phase === 'waiting'
+    ? classes.statusDotWaiting
+    : classes.statusDotRunning;
+};
 
 const phaseLabelClass = (
   phase: ShowTimerPhase,
   classes: ReturnType<typeof useStyles>
-): string =>
-  phase === 'waiting'
+): string => {
+  if (phase === 'syncing') {
+    return classes.statusLabelSyncing;
+  }
+
+  return phase === 'waiting'
     ? classes.statusLabelWaiting
     : classes.statusLabelRunning;
+};
+
+const formatIdList = (ids: string[] | undefined, limit = 8): string => {
+  if (!ids || ids.length === 0) {
+    return '';
+  }
+
+  if (ids.length <= limit) {
+    return ids.join(', ');
+  }
+
+  return `${ids.slice(0, limit).join(', ')} +${ids.length - limit}`;
+};
 
 const ShowTimerOverlay = (): React.JSX.Element | null => {
   const classes = useStyles();
@@ -204,6 +280,32 @@ const ShowTimerOverlay = (): React.JSX.Element | null => {
     initialWaitSecondsRef.current = null;
   }, [snapshot]);
 
+  const syncStats = useMemo(() => {
+    const readiness = snapshot?.startReadiness;
+    if (!readiness) {
+      return {
+        withStartTime: 0,
+        total: 0,
+        missingStartTime: [] as string[],
+        disconnected: [] as string[],
+      };
+    }
+
+    const missingStartTime = readiness.missingStartTime ?? [];
+    const disconnected = readiness.disconnected ?? [];
+    const withStartTime = Math.max(
+      0,
+      readiness.total - missingStartTime.length
+    );
+
+    return {
+      withStartTime,
+      total: readiness.total,
+      missingStartTime,
+      disconnected,
+    };
+  }, [snapshot?.startReadiness]);
+
   if (!snapshot) {
     return null;
   }
@@ -216,28 +318,55 @@ const ShowTimerOverlay = (): React.JSX.Element | null => {
     remainingSeconds;
   const totalLabel = `TOTAL ${formatShowTimer(durationSeconds)}`;
   const progress =
-    phase === 'waiting'
-      ? waitDurationSeconds > 0
+    phase === 'syncing'
+      ? syncStats.total > 0
         ? Math.min(
             100,
-            Math.max(
-              0,
-              ((waitDurationSeconds - remainingSeconds) / waitDurationSeconds) *
-                100
-            )
+            Math.max(0, (syncStats.withStartTime / syncStats.total) * 100)
           )
         : 0
-      : durationSeconds > 0
-        ? Math.min(100, Math.max(0, (elapsedSeconds / durationSeconds) * 100))
-        : 0;
+      : phase === 'waiting'
+        ? waitDurationSeconds > 0
+          ? Math.min(
+              100,
+              Math.max(
+                0,
+                ((waitDurationSeconds - remainingSeconds) /
+                  waitDurationSeconds) *
+                  100
+              )
+            )
+          : 0
+        : durationSeconds > 0
+          ? Math.min(100, Math.max(0, (elapsedSeconds / durationSeconds) * 100))
+          : 0;
+
+  const rootSizeClass =
+    phase === 'syncing'
+      ? classes.syncingRoot
+      : phase === 'waiting'
+        ? classes.waitingRoot
+        : classes.runningRoot;
+
+  const progressClass =
+    phase === 'syncing'
+      ? classes.progressBarSyncing
+      : phase === 'waiting'
+        ? classes.progressBarWaiting
+        : classes.progressBarRunning;
+
+  const statusLabel =
+    phase === 'syncing'
+      ? t('showTimerOverlay.syncingStartTime')
+      : phase === 'waiting'
+        ? t('showTimerOverlay.waitingToStart')
+        : t('showTimerOverlay.showInProgress');
+
+  const missingLabel = formatIdList(syncStats.missingStartTime);
+  const disconnectedLabel = formatIdList(syncStats.disconnected);
 
   return (
-    <Box
-      className={`${classes.root} ${
-        phase === 'waiting' ? classes.waitingRoot : classes.runningRoot
-      }`}
-      style={{ left: leftOffset }}
-    >
+    <Box className={`${classes.root} ${rootSizeClass}`} style={{ left: leftOffset }}>
       <Box className={classes.header}>
         <Box className={classes.statusRow}>
           <Box
@@ -247,17 +376,41 @@ const ShowTimerOverlay = (): React.JSX.Element | null => {
             className={phaseLabelClass(phase, classes)}
             component='span'
           >
-            {phase === 'waiting'
-              ? t('showTimerOverlay.waitingToStart')
-              : t('showTimerOverlay.showInProgress')}
+            {statusLabel}
           </Typography>
         </Box>
         <Typography className={classes.totalLabel} component='span'>
-          {totalLabel}
+          {phase === 'syncing'
+            ? `${syncStats.withStartTime}/${syncStats.total}`
+            : totalLabel}
         </Typography>
       </Box>
 
-      {phase === 'waiting' ? (
+      {phase === 'syncing' ? (
+        <Box className={classes.syncingBody}>
+          <Typography className={classes.syncingCount} component='span'>
+            {t('showTimerOverlay.startTimeProgress', {
+              ready: syncStats.withStartTime,
+              total: syncStats.total,
+            })}
+          </Typography>
+          <Typography className={classes.syncingHint} component='span'>
+            {t('showTimerOverlay.waitingForStartTimeOnUAVs')}
+          </Typography>
+          {missingLabel ? (
+            <Typography className={classes.syncingList} component='span'>
+              {t('showTimerOverlay.missingStartTime', { ids: missingLabel })}
+            </Typography>
+          ) : null}
+          {disconnectedLabel ? (
+            <Typography className={classes.syncingList} component='span'>
+              {t('showTimerOverlay.disconnectedUAVs', {
+                ids: disconnectedLabel,
+              })}
+            </Typography>
+          ) : null}
+        </Box>
+      ) : phase === 'waiting' ? (
         <Box className={classes.waitingBody}>
           <Typography className={classes.waitingLabel} component='span'>
             {t('showTimerOverlay.untilStart')}
@@ -289,11 +442,7 @@ const ShowTimerOverlay = (): React.JSX.Element | null => {
       )}
 
       <LinearProgress
-        className={
-          phase === 'waiting'
-            ? classes.progressBarWaiting
-            : classes.progressBarRunning
-        }
+        className={progressClass}
         value={progress}
         variant='determinate'
       />

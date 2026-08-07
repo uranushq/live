@@ -10,8 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { makeStyles } from '@skybrush/app-theme-mui';
 
 import CurrentFlightModeControl from './CurrentFlightModeControl';
-import FlightCommandTargetToggle from './FlightCommandTargetToggle';
-import FlightModeControl from './FlightModeControl';
+import DroneSelectionButtons from './DroneSelectionButtons';
 import LargeControlButtonGroup from './LargeControlButtonGroup';
 import MissionSetupStrip from './MissionSetupStrip';
 import PreflightStartStrip from './PreflightStartStrip';
@@ -53,11 +52,7 @@ const useStyles = makeStyles((theme) => ({
     display: 'grid',
     gap: theme.spacing(1),
     gridAutoRows: 'auto',
-    gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 0.95fr)',
-
-    [theme.breakpoints.down('xl')]: {
-      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 0.9fr)',
-    },
+    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.7fr)',
 
     [theme.breakpoints.down('md')]: {
       gridTemplateColumns: 'minmax(0, 1fr)',
@@ -135,9 +130,18 @@ const useStyles = makeStyles((theme) => ({
   modeControlsRow: {
     alignItems: 'center',
     display: 'flex',
+    flexWrap: 'nowrap',
     gap: theme.spacing(1),
-    padding: theme.spacing(0, 1.25, 0.625),
+    padding: theme.spacing(0, 1.25, 0.75),
     width: '100%',
+  },
+  currentControl: {
+    flex: '1 1 auto',
+    minWidth: 0,
+  },
+  selectionToggle: {
+    flexShrink: 0,
+    marginLeft: 'auto',
   },
   panelHeaderControls: {
     alignItems: 'center',
@@ -211,11 +215,14 @@ const BottomFlightControlBar = () => {
                   <Typography className={classes.panelTitle} component='div'>
                     {t('bottomBar.droneControl')}
                   </Typography>
-                  <FlightCommandTargetToggle />
                 </Box>
                 <Box className={classes.modeControlsRow}>
-                  <CurrentFlightModeControl variant='bottomBar' />
-                  <FlightModeControl variant='bottomBar' />
+                  <Box className={classes.currentControl}>
+                    <CurrentFlightModeControl variant='bottomBar' />
+                  </Box>
+                  <Box className={classes.selectionToggle}>
+                    <DroneSelectionButtons />
+                  </Box>
                 </Box>
                 <LargeControlButtonGroup variant='bottomBar' />
               </Box>

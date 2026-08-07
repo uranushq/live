@@ -8,14 +8,17 @@ import { getRoundedClockSkewInMilliseconds } from '~/features/servers/selectors'
 import type { RootState } from '~/store/reducers';
 
 import {
+  areShowStartTimesOnUAVs,
   getShowClockReference,
   getShowDuration,
+  getShowStartReadiness,
   getShowStartTime,
   hasLoadedShowFile,
   hasScheduledStartTime,
 } from './selectors';
+import type { ShowStartReadiness } from './types';
 
-export type ShowTimerPhase = 'waiting' | 'running';
+export type ShowTimerPhase = 'syncing' | 'waiting' | 'running';
 
 export type ShowTimerSnapshot = {
   durationSeconds: number;
@@ -24,6 +27,8 @@ export type ShowTimerSnapshot = {
   remainingSeconds: number;
   /** Total scheduled pre-show wait, in seconds (waiting phase only). */
   waitDurationSeconds?: number;
+  /** X-SHOW-READY status while start times are still syncing to UAVs. */
+  startReadiness?: ShowStartReadiness;
 };
 
 /**
@@ -50,8 +55,11 @@ export function getSecondsUntilShowStart(
   }
 
   const clockRef = getShowClockReference(state);
+  const skew = getRoundedClockSkewInMilliseconds(state) || 0;
+
   if (!clockRef) {
-    return startTime - nowMs / 1000;
+    // Absolute UTC start times are authored against the server clock.
+    return startTime - (nowMs + skew) / 1000;
   }
 
   const clock = getClockById(state, clockRef);
@@ -59,11 +67,9 @@ export function getSecondsUntilShowStart(
     return null;
   }
 
-  const skew = isClockAffectedByClockSkew(clock)
-    ? getRoundedClockSkewInMilliseconds(state) || 0
-    : 0;
+  const clockSkew = isClockAffectedByClockSkew(clock) ? skew : 0;
   const currentSeconds =
-    getTickCountOnClockAt(clock, nowMs + skew) / clock.ticksPerSecond;
+    getTickCountOnClockAt(clock, nowMs + clockSkew) / clock.ticksPerSecond;
 
   return startTime - currentSeconds;
 }
@@ -97,6 +103,18 @@ export function getShowTimerSnapshot(
   }
 
   const rawElapsedSeconds = getShowElapsedSeconds(state, nowMs);
+
+  // Do not start the countdown until every mapped UAV has the start time.
+  if (hasScheduledStartTime(state) && !areShowStartTimesOnUAVs(state)) {
+    const startReadiness = getShowStartReadiness(state);
+    return {
+      durationSeconds,
+      elapsedSeconds: 0,
+      phase: 'syncing',
+      remainingSeconds: 0,
+      startReadiness,
+    };
+  }
 
   let untilStart: number | null = null;
   if (rawElapsedSeconds != null && rawElapsedSeconds < 0) {

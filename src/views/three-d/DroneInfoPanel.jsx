@@ -2,6 +2,7 @@ import Add from '@mui/icons-material/Add';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import GpsFixed from '@mui/icons-material/GpsFixed';
+import GridOn from '@mui/icons-material/GridOn';
 import Groups from '@mui/icons-material/Groups';
 import KeyboardArrowDown from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
@@ -514,8 +515,11 @@ export default function DroneInfoPanel({
   formationPhases = [],
   formationSettings = null,
   isSendingFormation = false,
+  formationSendStartedAt = null,
   formationDeliveryStatus = '',
   onAddFormationPhase = () => {},
+  onOpenFormationGrid = () => {},
+  onEditFormationPhaseGrid = () => {},
   onAppendReversedFormationPhases = () => {},
   onRecoverReversedFormationPhases = () => {},
   canRecoverReversedFormationPhases = false,
@@ -533,6 +537,7 @@ export default function DroneInfoPanel({
   multiSelectedDroneIds = [],
   onAddClusterToPhase = () => {},
   onRemoveClusterFromPhase = () => {},
+  onOpenImageDots = () => {},
   onApplyDronePositionInPhase = () => {},
   onApplyAllDronesInPhase = () => {},
   onUpdateFormationSettings = () => {},
@@ -542,6 +547,22 @@ export default function DroneInfoPanel({
   skycDownloadStatus = '',
 }) {
   const [activeTab, setActiveTab] = useState('path');
+
+  // 포메이션 전송 중 경과 시간 (0.5초 간격 갱신)
+  const [sendElapsedSec, setSendElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!isSendingFormation || !formationSendStartedAt) {
+      setSendElapsedSec(0);
+      return undefined;
+    }
+    const update = () =>
+      setSendElapsedSec(
+        Math.floor((Date.now() - formationSendStartedAt) / 1000)
+      );
+    update();
+    const timer = setInterval(update, 500);
+    return () => clearInterval(timer);
+  }, [isSendingFormation, formationSendStartedAt]);
   const [pathPoints, setPathPoints] = useState([
     { x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false },
   ]);
@@ -1089,6 +1110,7 @@ export default function DroneInfoPanel({
     takeoff_time: 0,
     auto_upload: false,
     output: '',
+    min_separation: 1.45,
   };
 
   const renderPathTab = () => (
@@ -1261,13 +1283,30 @@ export default function DroneInfoPanel({
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <FormationActionButton
-              title="현재 모든 드론의 위치를 새 phase로 캡처"
-              onClick={onAddFormationPhase}
+              title="격자 툴로 새 formation phase 만들기"
+              onClick={onOpenFormationGrid}
               variant="primary"
               style={{ flex: '1 1 160px', padding: '10px 12px', borderRadius: 9, fontSize: 12.5 }}
             >
               <Add sx={{ fontSize: 16, color: 'inherit' }} />
-              현재 배치로 Phase 추가
+              그리드로 Phase 추가
+            </FormationActionButton>
+            <FormationActionButton
+              title="현재 모든 드론의 위치를 새 phase로 캡처"
+              onClick={onAddFormationPhase}
+              variant="secondary"
+              style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12 }}
+            >
+              현재 배치 캡처
+            </FormationActionButton>
+            <FormationActionButton
+              title="이미지를 올려 내용·구조를 대표하는 점들을 추출하고, 정면 수직 평면 phase로 추가"
+              onClick={onOpenImageDots}
+              disabled={droneCount === 0}
+              variant="secondary"
+              style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12 }}
+            >
+              이미지 → 점
             </FormationActionButton>
             <FormationActionButton
               title="기존 phase를 역순으로 복제해 뒤에 추가"
@@ -1328,8 +1367,9 @@ export default function DroneInfoPanel({
                 borderStyle: 'dashed',
               }}
             >
-              아직 phase가 없습니다. 드론을 배치하고{' '}
-              <b style={{ color: '#c9cbd1' }}>현재 배치로 Phase 추가</b>를 눌러주세요.
+              아직 phase가 없습니다.{' '}
+              <b style={{ color: '#c9cbd1' }}>그리드로 Phase 추가</b>로 모양을 그리거나{' '}
+              <b style={{ color: '#c9cbd1' }}>현재 배치 캡처</b>를 눌러주세요.
             </div>
           ) : (
             formationPhases.map((phase, idx) => {
@@ -1906,6 +1946,15 @@ export default function DroneInfoPanel({
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
                       <FormationActionButton
+                        title="격자 툴로 이 phase 대형 수정"
+                        onClick={() => onEditFormationPhaseGrid(phase.id)}
+                        variant="primary"
+                        disabled={droneCount === 0}
+                      >
+                        <GridOn sx={iconSx} />
+                        그리드 수정
+                      </FormationActionButton>
+                      <FormationActionButton
                         title="이 phase에 저장된 좌표로 등록된 모든 드론 이동"
                         onClick={() => onApplyAllDronesInPhase(phase.id)}
                         disabled={droneCount === 0}
@@ -2029,6 +2078,15 @@ export default function DroneInfoPanel({
                 label: 'takeoff_time',
                 placeholder: '0 = 생략',
                 title: '0이면 페이로드에 포함되지 않습니다 (옵션값)',
+              },
+              {
+                key: 'min_separation',
+                label: '최소 간격 (m)',
+                placeholder: '1.45',
+                title:
+                  '드론 간 최소 간격 (모든 축 기준, m). 절대 하한 1.45 m — ' +
+                  '그보다 작은 값을 입력해도 1.45로 강제됩니다. ' +
+                  '초기 배치·모든 phase 좌표·비행 중 경로 전부에 적용됩니다.',
               },
             ].map(({ key, label, placeholder, title }) => {
               const displayValue =
@@ -2157,7 +2215,9 @@ export default function DroneInfoPanel({
             }}
           >
             <Send sx={{ fontSize: 16, color: 'inherit' }} />
-            {isSendingFormation ? '전달 중...' : '포메이션 전달'}
+            {isSendingFormation
+              ? `전달 중... ${sendElapsedSec}s (계획 계산에는 수 분이 걸릴 수 있습니다)`
+              : '포메이션 전달'}
           </FormationActionButton>
         </div>
 
@@ -2467,13 +2527,17 @@ DroneInfoPanel.propTypes = {
   formationSettings: PropTypes.shape({
     step_size: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     cruise_speed: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    min_separation: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     takeoff_time: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     auto_upload: PropTypes.bool,
     output: PropTypes.string,
   }),
   isSendingFormation: PropTypes.bool,
+  formationSendStartedAt: PropTypes.number,
   formationDeliveryStatus: PropTypes.string,
   onAddFormationPhase: PropTypes.func,
+  onOpenFormationGrid: PropTypes.func,
+  onEditFormationPhaseGrid: PropTypes.func,
   onAppendReversedFormationPhases: PropTypes.func,
   onRecoverReversedFormationPhases: PropTypes.func,
   canRecoverReversedFormationPhases: PropTypes.bool,
@@ -2491,6 +2555,7 @@ DroneInfoPanel.propTypes = {
   multiSelectedDroneIds: PropTypes.arrayOf(PropTypes.string),
   onAddClusterToPhase: PropTypes.func,
   onRemoveClusterFromPhase: PropTypes.func,
+  onOpenImageDots: PropTypes.func,
   onApplyDronePositionInPhase: PropTypes.func,
   onApplyAllDronesInPhase: PropTypes.func,
   onUpdateFormationSettings: PropTypes.func,

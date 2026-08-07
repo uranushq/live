@@ -5,6 +5,7 @@ import mean from 'lodash-es/mean';
 import { createSelector } from '@reduxjs/toolkit';
 
 import { Status } from '~/components/semantics';
+import { getActiveNamedUAVGroupMemberIdSet } from '~/features/drone-groups/selectors';
 import { JOB_TYPE as FIRMWARE_UPDATE_JOB_TYPE } from '~/features/firmware-update/constants';
 import { getSupportingObjectIdsForTargetId } from '~/features/firmware-update/selectors';
 import { getMissionMapping as _getFullMissionMapping } from '~/features/mission/selectors';
@@ -389,11 +390,15 @@ const getMissionUAVIdsForUploadJob = createSelector(
 
 /**
  * Returns the list of UAV IDs that should be shown in the upload dialog.
+ *
+ * When a named UAV group filter is active, the result is intersected with
+ * that group's members so path/show uploads only target the filtered fleet.
  */
 export const getUploadDialogIdList = createSelector(
   (state: RootState) => state,
   getScopeOfSelectedJobInUploadDialog,
-  (state, scope): string[] => {
+  getActiveNamedUAVGroupMemberIdSet,
+  (state, scope, memberSet): string[] => {
     let selector;
 
     switch (scope) {
@@ -419,8 +424,11 @@ export const getUploadDialogIdList = createSelector(
     }
 
     const result = selector(state);
+    if (!memberSet) {
+      return result;
+    }
 
-    return result;
+    return result.filter((id) => memberSet.has(id));
   }
 );
 

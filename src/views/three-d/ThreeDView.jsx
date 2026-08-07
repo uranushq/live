@@ -19,8 +19,10 @@ import Scenery from './Scenery';
 import SelectedTrajectories from './SelectedTrajectories';
 import DroneInfoPanel from './DroneInfoPanel';
 import DroneSelectPanel from './DroneSelectPanel';
+import ImageToDotsModal from './ImageToDotsModal';
 import PathControlPanel from './PathControlPanel';
 import AddDroneModal from './AddDroneModal';
+import FormationGridModal from './FormationGridModal';
 import PathGeneratorModal from './PathGeneratorModal';
 import useThreeDViewDroneEvents from './hooks/useThreeDViewDroneEvents';
 import {
@@ -106,6 +108,10 @@ const FORMATION_COLORS = Object.freeze([
   '#ec407a',
 ]);
 
+// 드론 간 최소 간격의 절대 하한 (m). 백엔드 HARD_MIN_SEPARATION과 동일 —
+// 어떤 축에서도 이보다 가까워질 수 없고, 사용자 설정으로도 낮출 수 없다.
+export const HARD_MIN_SEPARATION_M = 1.45;
+
 const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   step_size: 1.0,
   // duration_ms를 보내면 서버가 cruise_speed를 무시하므로 cruise_speed만 사용.
@@ -114,6 +120,8 @@ const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   auto_upload: false,
   // 빈 문자열 = 백엔드 기본값(.skyc 다운로드) 사용. payload에서 output 키를 생략.
   output: '',
+  // 드론 간 최소 간격 (모든 축, m). 1.5 미만으로는 내려갈 수 없다.
+  min_separation: HARD_MIN_SEPARATION_M,
 });
 
 // 첫 번째 항목('')은 "백엔드 기본값(=skyc) 사용". 그 외 값을 선택하면 명시적으로 전송.
@@ -224,6 +232,11 @@ const sanitizeFormationSettings = (settings) => {
   const output = FORMATION_OUTPUT_OPTIONS.includes(rawOutput)
     ? rawOutput
     : DEFAULT_FORMATION_SETTINGS.output;
+  // 최소 간격: 어떤 입력이 와도 절대 하한(1.5 m) 밑으로는 내려가지 않는다.
+  const minSeparation = Number(merged.min_separation);
+  const resolvedMinSeparation = Number.isFinite(minSeparation)
+    ? Math.max(HARD_MIN_SEPARATION_M, minSeparation)
+    : HARD_MIN_SEPARATION_M;
   return {
     step_size: resolvedStepSize,
     cruise_speed: Number.isFinite(cruiseSpeed) && cruiseSpeed > 0
@@ -234,6 +247,7 @@ const sanitizeFormationSettings = (settings) => {
       : DEFAULT_FORMATION_SETTINGS.takeoff_time,
     auto_upload: !!merged.auto_upload,
     output,
+    min_separation: resolvedMinSeparation,
   };
 };
 
@@ -309,7 +323,47 @@ const normalizeFormationPhaseForImport = (raw, index) => {
   if (clusters.length) {
     phase.clusters = clusters;
   }
+  const lattice = normalizeFormationLattice(raw?.lattice);
+  if (lattice) {
+    phase.lattice = lattice;
+  }
   return phase;
+};
+
+/** 그리드 툴이 저장한 격자 파라미터 정규화 */
+const normalizeFormationLattice = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const nx = Math.round(Number(raw.nx));
+  const ny = Math.round(Number(raw.ny));
+  const nz = Math.round(Number(raw.nz));
+  const sx = Number(raw.sx);
+  const sy = Number(raw.sy);
+  const sz = Number(raw.sz);
+  const ax = Number(raw.ax);
+  const ay = Number(raw.ay);
+  const az = Number(raw.az);
+  if (
+    ![nx, ny, nz, sx, sy, sz, ax, ay, az].every((v) => Number.isFinite(v)) ||
+    nx < 1 ||
+    ny < 1 ||
+    nz < 1 ||
+    sx <= 0 ||
+    sy <= 0 ||
+    sz <= 0
+  ) {
+    return null;
+  }
+  return {
+    nx: Math.min(14, Math.max(1, nx)),
+    ny: Math.min(14, Math.max(1, ny)),
+    nz: Math.min(10, Math.max(1, nz)),
+    sx,
+    sy,
+    sz,
+    ax,
+    ay,
+    az: Math.max(0, az),
+  };
 };
 
 const stripFormationFromDroneConfigRoot = (parsed) => {
@@ -606,6 +660,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   // 드론 추가 모달
   const [addDroneModalOpen, setAddDroneModalOpen] = useState(false);
+  const [formationGridModalOpen, setFormationGridModalOpen] = useState(false);
+  const [formationGridEditPhaseId, setFormationGridEditPhaseId] = useState(null);
   const [pathGeneratorModalOpen, setPathGeneratorModalOpen] = useState(false);
   const [isSendingPaths, setIsSendingPaths] = useState(false);
   const [pathDeliveryStatus, setPathDeliveryStatus] = useState('');
@@ -629,6 +685,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const [lastReversedPhaseIds, setLastReversedPhaseIds] = useState([]);
   const [formationSettings, setFormationSettings] = useState(DEFAULT_FORMATION_SETTINGS);
   const [isSendingFormation, setIsSendingFormation] = useState(false);
+  const [formationSendStartedAt, setFormationSendStartedAt] = useState(null);
   const [formationDeliveryStatus, setFormationDeliveryStatus] = useState('');
   // 백엔드 plan 응답의 실제 phase 타이밍(절대 초). phase/설정이 바뀌면
   // 무효화되고, 없으면 아래 formationTimeline 휴리스틱으로 폴백한다.
@@ -786,9 +843,6 @@ const ThreeDView = React.forwardRef((props, ref) => {
       fly: navigation && navigation.mode === 'fly',
       minAltitude: 0.5,
       reverseMouseDrag: true,
-      wsEnabled: false,
-      adEnabled: false,
-      ecEnabled: false,
     }),
     'look-controls': objectToString({ enabled: false }),
     'wasd-controls': objectToString({ enabled: false }),
@@ -956,6 +1010,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
           }
           if (Array.isArray(p.clusters) && p.clusters.length) {
             phase.clusters = p.clusters.map((c) => [...c]);
+          }
+          const lattice = normalizeFormationLattice(p.lattice);
+          if (lattice) {
+            phase.lattice = lattice;
           }
           return phase;
         }),
@@ -1775,6 +1833,149 @@ const ThreeDView = React.forwardRef((props, ref) => {
     });
   }, []);
 
+  const closeFormationGridModal = useCallback(() => {
+    setFormationGridModalOpen(false);
+    setFormationGridEditPhaseId(null);
+  }, []);
+
+  const openFormationGridCreate = useCallback(() => {
+    setFormationGridEditPhaseId(null);
+    setFormationGridModalOpen(true);
+  }, []);
+
+  const openFormationGridEdit = useCallback((phaseId) => {
+    if (!phaseId) return;
+    setFormationGridEditPhaseId(String(phaseId));
+    setFormationGridModalOpen(true);
+  }, []);
+
+  /** Lattice 그리드 툴로 새 phase 추가 또는 기존 phase 좌표 수정 후 씬에 반영 */
+  const handleConfirmFormationGridPhase = useCallback(
+    (pointsByDroneId, latticeRaw) => {
+      if (!pointsByDroneId || typeof pointsByDroneId !== 'object') return;
+      const points = {};
+      for (const [droneId, pos] of Object.entries(pointsByDroneId)) {
+        if (!droneId || !pos || typeof pos !== 'object') continue;
+        const x = Number(pos.x);
+        const y = Number(pos.y);
+        const z = Number(pos.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        points[droneId] = {
+          x: roundCoord(x),
+          y: roundCoord(y),
+          z: roundCoord(z),
+        };
+      }
+      if (!Object.keys(points).length) return;
+      const lattice = normalizeFormationLattice(latticeRaw);
+
+      const editId = formationGridEditPhaseId;
+      if (editId) {
+        setFormationPhases((prev) =>
+          prev.map((phase) => {
+            if (String(phase.id) !== String(editId)) return phase;
+            // 그리드에 배치된 드론만 유지 (대기 스택으로 뺀 드론은 phase에서 제거).
+            // yaw 등 기존 속성은 남은 드론에 한해 보존한다.
+            const nextPoints = {};
+            Object.entries(points).forEach(([id, pos]) => {
+              const prevPoint = phase.points?.[id];
+              nextPoints[id] =
+                prevPoint && typeof prevPoint === 'object' && !Array.isArray(prevPoint)
+                  ? { ...prevPoint, ...pos }
+                  : pos;
+            });
+            const next = { ...phase, points: nextPoints };
+            if (lattice) next.lattice = lattice;
+            else delete next.lattice;
+            return next;
+          })
+        );
+      } else {
+        setFormationPhases((prev) => [
+          ...prev,
+          {
+            id: generateFormationPhaseId(),
+            name: `phase-${prev.length + 1}`,
+            holdMs: 3000,
+            points,
+            ...(lattice ? { lattice } : {}),
+          },
+        ]);
+      }
+
+      Object.entries(points).forEach(([id, pos]) => {
+        window.dispatchEvent(
+          new CustomEvent('drone-move-request', {
+            detail: { id, x: pos.x, y: pos.y, z: pos.z },
+          })
+        );
+      });
+    },
+    [formationGridEditPhaseId]
+  );
+
+  const formationGridDrones = useMemo(() => {
+    const drones = Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [];
+    const editPhase = formationGridEditPhaseId
+      ? formationPhases.find((p) => String(p.id) === String(formationGridEditPhaseId))
+      : null;
+    const phasePoints =
+      editPhase?.points && typeof editPhase.points === 'object' ? editPhase.points : null;
+    const domPoints = readAllDronePositionsFromDom();
+    return drones
+      .filter((d) => d?.id != null && String(d.id).trim() !== '')
+      .map((d) => {
+        const id = String(d.id);
+        const fromPhase = phasePoints?.[id];
+        if (
+          fromPhase &&
+          Number.isFinite(Number(fromPhase.x)) &&
+          Number.isFinite(Number(fromPhase.y)) &&
+          Number.isFinite(Number(fromPhase.z))
+        ) {
+          return {
+            id,
+            x: Number(fromPhase.x),
+            y: Number(fromPhase.y),
+            z: Number(fromPhase.z),
+            fromPhase: true,
+          };
+        }
+        const fromDom = domPoints[id];
+        if (
+          fromDom &&
+          Number.isFinite(Number(fromDom.x)) &&
+          Number.isFinite(Number(fromDom.y)) &&
+          Number.isFinite(Number(fromDom.z))
+        ) {
+          return { id, x: Number(fromDom.x), y: Number(fromDom.y), z: Number(fromDom.z) };
+        }
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id, x, y, z };
+      });
+  }, [
+    effectiveConfig,
+    formationGridModalOpen,
+    formationGridEditPhaseId,
+    formationPhases,
+  ]);
+
+  const formationGridEditLattice = useMemo(() => {
+    if (!formationGridEditPhaseId) return null;
+    const phase = formationPhases.find(
+      (p) => String(p.id) === String(formationGridEditPhaseId)
+    );
+    return normalizeFormationLattice(phase?.lattice);
+  }, [formationGridEditPhaseId, formationPhases]);
+
+  const formationGridEditPhaseName = useMemo(() => {
+    if (!formationGridEditPhaseId) return '';
+    const phase = formationPhases.find(
+      (p) => String(p.id) === String(formationGridEditPhaseId)
+    );
+    return phase?.name ? String(phase.name) : '';
+  }, [formationGridEditPhaseId, formationPhases]);
+
   /** 기존 phase(a,b,c)의 역순(c,b,a)을 복제해 뒤에 추가 */
   const handleAppendReversedFormationPhases = useCallback(() => {
     setFormationPhases((prev) => {
@@ -1797,6 +1998,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
         }
         if (Array.isArray(phase.clusters) && phase.clusters.length) {
           reversedPhase.clusters = phase.clusters.map((c) => [...c]);
+        }
+        const lattice = normalizeFormationLattice(phase.lattice);
+        if (lattice) {
+          reversedPhase.lattice = lattice;
         }
         return reversedPhase;
       });
@@ -1945,6 +2150,22 @@ const ThreeDView = React.forwardRef((props, ref) => {
     }
   }, [selectedPhaseId, handleAddClusterToPhase]);
 
+  // ── 이미지 → 점 formation ─────────────────────────────────────────────
+  const [imageDotsModalOpen, setImageDotsModalOpen] = useState(false);
+
+  const handleAddFormationPhaseFromImage = useCallback((name, points) => {
+    if (!points || !Object.keys(points).length) return;
+    setFormationPhases((prev) => [
+      ...prev,
+      {
+        id: generateFormationPhaseId(),
+        name: String(name || '').trim() || `image-${prev.length + 1}`,
+        holdMs: 3000,
+        points,
+      },
+    ]);
+  }, []);
+
   const handleRemoveClusterFromPhase = useCallback((phaseId, clusterIndex) => {
     const pid = phaseId != null ? String(phaseId) : '';
     if (!pid) return;
@@ -1995,6 +2216,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
       }
       if (Array.isArray(phase.clusters) && phase.clusters.length) {
         copy.clusters = phase.clusters.map((c) => [...c]);
+      }
+      const lattice = normalizeFormationLattice(phase.lattice);
+      if (lattice) {
+        copy.lattice = lattice;
       }
       const next = prev.slice();
       next.splice(index + 1, 0, copy);
@@ -2159,6 +2384,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       step_size: sanitized.step_size,
       cruise_speed: sanitized.cruise_speed,
       auto_upload: sanitized.auto_upload,
+      min_separation: sanitized.min_separation,
     };
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.
     if (sanitized.output) {
@@ -2197,8 +2423,45 @@ const ThreeDView = React.forwardRef((props, ref) => {
     // eslint-disable-next-line no-console
     console.log('[Formation] POST', usedUrl, payload);
 
+    const sendStartedAt = Date.now();
     setIsSendingFormation(true);
+    setFormationSendStartedAt(sendStartedAt);
     setFormationDeliveryStatus('');
+    const totalElapsedText = () =>
+      `${((Date.now() - sendStartedAt) / 1000).toFixed(1)}s`;
+
+    // 계획 진행률 폴링: 서버의 그리디 계산이 어느 세그먼트/스텝까지
+    // 왔는지, 구간별 예상 잔여 시간과 함께 상태창에 실시간 표시한다.
+    const progressTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/v1/path-planner/progress');
+        if (!res.ok) return;
+        const p = await res.json();
+        if (!p || !p.active) return;
+        let line = `계획 진행 중 · ${p.segment || '준비'}`;
+        if (Number.isFinite(Number(p.phases_total)) && p.segment_index) {
+          line += ` (세그먼트 ${p.segment_index})`;
+        }
+        if (Number.isFinite(Number(p.percent))) {
+          line += ` · ${p.percent}%`;
+        }
+        if (Number.isFinite(Number(p.step)) && p.step > 0) {
+          line += ` · 스텝 ${p.step}`;
+        }
+        if (Number.isFinite(Number(p.remaining_m))) {
+          line += ` · 잔여 ${p.remaining_m}m`;
+        }
+        if (Number.isFinite(Number(p.elapsed_sec))) {
+          line += `\n경과 ${p.elapsed_sec}s`;
+        }
+        if (Number.isFinite(Number(p.segment_eta_sec))) {
+          line += ` · 이 구간 예상 잔여 ~${Math.ceil(p.segment_eta_sec)}s`;
+        }
+        setFormationDeliveryStatus(line);
+      } catch {
+        // 폴링 실패는 무시 (본 요청이 상태를 최종 결정)
+      }
+    }, 1000);
 
     try {
       const response = await fetch(usedUrl, {
@@ -2220,6 +2483,14 @@ const ThreeDView = React.forwardRef((props, ref) => {
         const json = await response.json().catch(() => null);
         if (json && typeof json === 'object') {
           summaryDetail = `\n응답: ${JSON.stringify(json).slice(0, 240)}`;
+          const planningSec = Number(json.timing?.planning_sec);
+          const verifySec = Number(json.timing?.build_verify_sec);
+          if (Number.isFinite(planningSec)) {
+            summaryDetail += `\n서버 계산: 계획 ${planningSec}s`;
+            if (Number.isFinite(verifySec)) {
+              summaryDetail += ` · 생성/검증 ${verifySec}s`;
+            }
+          }
           // 백엔드가 계산한 phase별 실제 도착/종료 시각(절대 초)을 LED
           // 타임라인 마커로 반영. staging-grid / return-to-start 구간은
           // 회색 'transit' 구간으로 구분한다.
@@ -2279,7 +2550,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       }
 
       setFormationDeliveryStatus(
-        `포메이션 전달 완료: ${payload.initial.length}대 · phase ${payload.phases.length}개${summaryDetail}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}`
+        `포메이션 전달 완료 (총 ${totalElapsedText()}): ${payload.initial.length}대 · phase ${payload.phases.length}개${summaryDetail}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}`
       );
     } catch (error) {
       const baseMsg = error instanceof Error ? error.message : '알 수 없는 오류';
@@ -2288,10 +2559,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
         ? '\n\n[힌트] 백엔드가 phase-based 포맷(initial+phases)을 인식하지 못합니다.\n→ localhost:5001 path-planner 서버를 새 버전으로 업데이트/재시작해주세요.'
         : '';
       setFormationDeliveryStatus(
-        `포메이션 전달 실패: ${baseMsg}${hint}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}\n\n[보낸 페이로드]\n${payloadPreview}`
+        `포메이션 전달 실패 (총 ${totalElapsedText()}): ${baseMsg}${hint}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}\n\n[보낸 페이로드]\n${payloadPreview}`
       );
     } finally {
+      clearInterval(progressTimer);
       setIsSendingFormation(false);
+      setFormationSendStartedAt(null);
     }
   }, [buildFormationPayload, formationPhases]);
 
@@ -2348,6 +2621,23 @@ const ThreeDView = React.forwardRef((props, ref) => {
           effectiveConfig && Array.isArray(effectiveConfig.drones)
             ? effectiveConfig.drones.map((d) => d.id)
             : []
+        }
+      />
+      )}
+      {isCreateMode && (
+      <FormationGridModal
+        open={formationGridModalOpen}
+        onClose={closeFormationGridModal}
+        drones={formationGridDrones}
+        onConfirm={handleConfirmFormationGridPhase}
+        mode={formationGridEditPhaseId ? 'edit' : 'create'}
+        initialLattice={formationGridEditLattice}
+        title={
+          formationGridEditPhaseId
+            ? `Formation · 수정${
+                formationGridEditPhaseName ? ` · ${formationGridEditPhaseName}` : ''
+              }`
+            : undefined
         }
       />
       )}
@@ -2466,8 +2756,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
         formationPhases={formationPhases}
         formationSettings={formationSettings}
         isSendingFormation={isSendingFormation}
+        formationSendStartedAt={formationSendStartedAt}
         formationDeliveryStatus={formationDeliveryStatus}
         onAddFormationPhase={handleAddFormationPhase}
+        onOpenFormationGrid={openFormationGridCreate}
+        onEditFormationPhaseGrid={openFormationGridEdit}
         onAppendReversedFormationPhases={handleAppendReversedFormationPhases}
         onRecoverReversedFormationPhases={handleRecoverReversedFormationPhases}
         canRecoverReversedFormationPhases={lastReversedPhaseIds.length > 0}
@@ -2485,6 +2778,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         multiSelectedDroneIds={multiSelectedDroneIds}
         onAddClusterToPhase={handleAddClusterToPhase}
         onRemoveClusterFromPhase={handleRemoveClusterFromPhase}
+        onOpenImageDots={() => setImageDotsModalOpen(true)}
         onApplyDronePositionInPhase={handleApplyDronePositionInPhase}
         onApplyAllDronesInPhase={handleApplyAllDronesInPhase}
         onUpdateFormationSettings={handleUpdateFormationSettings}
@@ -2528,6 +2822,37 @@ const ThreeDView = React.forwardRef((props, ref) => {
           onRemoveCluster={(clusterIndex) =>
             handleRemoveClusterFromPhase(selectedPhaseId, clusterIndex)
           }
+        />
+      )}
+      {isCreateMode && (
+        <ImageToDotsModal
+          open={imageDotsModalOpen}
+          droneIds={(Array.isArray(effectiveConfig?.drones)
+            ? effectiveConfig.drones
+            : []
+          )
+            .filter((d) => d?.id != null)
+            .map((d) => String(d.id))}
+          minSeparation={
+            sanitizeFormationSettings(formationSettings).min_separation
+          }
+          suggestedPlaneX={(() => {
+            // 대형(초기 위치 기준) 최북단 + 10m: 그림 평면이 이륙 지역을
+            // 관통하지 않도록 앞쪽에 세운다.
+            const drones = Array.isArray(effectiveConfig?.drones)
+              ? effectiveConfig.drones
+              : [];
+            let maxX = 0;
+            for (const d of drones) {
+              const x = Number(
+                Array.isArray(d?.initialPos) ? d.initialPos[0] : d?.pos?.[0]
+              );
+              if (Number.isFinite(x) && x > maxX) maxX = x;
+            }
+            return maxX + 10;
+          })()}
+          onCreatePhase={handleAddFormationPhaseFromImage}
+          onClose={() => setImageDotsModalOpen(false)}
         />
       )}
 

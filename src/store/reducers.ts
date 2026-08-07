@@ -41,6 +41,7 @@ import connectionsReducer from '~/features/connections/slice';
 import datasetsReducer from '~/features/datasets/slice';
 import detachablePanelsReducer from '~/features/detachable-panels/slice';
 import docksReducer from '~/features/docks/slice';
+import droneGroupsReducer from '~/features/drone-groups/slice';
 import fieldNotesReducer from '~/features/field-notes/slice';
 import firmwareUpdateReducer from '~/features/firmware-update/slice';
 import hotkeysReducer from '~/features/hotkeys/slice';
@@ -119,6 +120,7 @@ const reducer = combineReducers({
   detachablePanels: detachablePanelsReducer,
   dialogs: dialogsReducer,
   docks: docksReducer,
+  droneGroups: droneGroupsReducer,
   features: featuresReducer,
   fieldNotes: fieldNotesReducer,
   firmwareUpdate: firmwareUpdateReducer,

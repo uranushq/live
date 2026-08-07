@@ -30,7 +30,7 @@ import {
   SettingsSynchronizationStatus,
   StartMethod,
 } from './enums';
-import type { EnvironmentState } from './types';
+import type { EnvironmentState, ShowStartReadiness } from './types';
 
 type ShowSliceState = {
   data?: ShowSpecification;
@@ -62,6 +62,10 @@ type ShowSliceState = {
   };
 
   onboardPreflightChecksDialog: {
+    open: boolean;
+  };
+
+  showStartPermissionDialog: {
     open: boolean;
   };
 
@@ -107,6 +111,12 @@ type ShowSliceState = {
     /** Whether the state variables in this object are synced with the server */
     syncStatusWithServer: SettingsSynchronizationStatus;
   };
+
+  /**
+   * Latest X-SHOW-READY poll result for mapped mission UAVs. Cleared when there
+   * is no scheduled start time.
+   */
+  startReadiness?: ShowStartReadiness;
 
   startTimeDialog: {
     open: boolean;
@@ -181,6 +191,10 @@ const initialState: ShowSliceState = {
     open: false,
   },
 
+  showStartPermissionDialog: {
+    open: false,
+  },
+
   preflight: {
     manualChecksSignedOffAt: undefined,
     onboardChecksSignedOffAt: undefined,
@@ -192,10 +206,12 @@ const initialState: ShowSliceState = {
     clock: undefined,
     utcTime: undefined,
     timeOnClock: undefined,
-    method: StartMethod.RC,
+    method: StartMethod.AUTO,
     uavIds: [],
     syncStatusWithServer: SettingsSynchronizationStatus.NOT_SYNCED,
   },
+
+  startReadiness: undefined,
 
   startTimeDialog: {
     open: false,
@@ -227,6 +243,7 @@ const { actions, reducer } = createSlice({
       state.preflight.takeoffAreaApprovedAt = undefined;
 
       state.start.authorized = false;
+      state.startReadiness = undefined;
 
       // Last upload result cleared in the upload feature as it also handles
       // this action
@@ -251,8 +268,13 @@ const { actions, reducer } = createSlice({
     clearStartTimeAndMethod(state) {
       state.start.utcTime = undefined;
       state.start.timeOnClock = undefined;
-      state.start.method = StartMethod.RC;
+      state.start.method = StartMethod.AUTO;
+      state.startReadiness = undefined;
     },
+
+    clearShowStartReadiness: noPayload<ShowSliceState>((state) => {
+      state.startReadiness = undefined;
+    }),
 
     closeEnvironmentEditorDialog: noPayload<ShowSliceState>((state) => {
       state.environment.editing = false;
@@ -268,6 +290,10 @@ const { actions, reducer } = createSlice({
 
     closeOnboardPreflightChecksDialog: noPayload<ShowSliceState>((state) => {
       state.onboardPreflightChecksDialog.open = false;
+    }),
+
+    closeShowStartPermissionDialog: noPayload<ShowSliceState>((state) => {
+      state.showStartPermissionDialog.open = false;
     }),
 
     closeStartTimeDialog(
@@ -367,6 +393,10 @@ const { actions, reducer } = createSlice({
 
     openOnboardPreflightChecksDialog: noPayload<ShowSliceState>((state) => {
       state.onboardPreflightChecksDialog.open = true;
+    }),
+
+    openShowStartPermissionDialog: noPayload<ShowSliceState>((state) => {
+      state.showStartPermissionDialog.open = true;
     }),
 
     openStartTimeDialog: noPayload<ShowSliceState>((state) => {
@@ -476,6 +506,34 @@ const { actions, reducer } = createSlice({
       state.start.authorized = (action.payload as unknown) === true;
     },
 
+    setShowStartReadiness(state, action: PayloadAction<ShowStartReadiness>) {
+      const payload = action.payload;
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+
+      const asIdList = (value: unknown): string[] =>
+        Array.isArray(value)
+          ? value.filter((id): id is string => typeof id === 'string')
+          : [];
+
+      state.startReadiness = {
+        ready: payload.ready === true,
+        total: Number.isFinite(payload.total) ? Number(payload.total) : 0,
+        readyCount: Number.isFinite(payload.readyCount)
+          ? Number(payload.readyCount)
+          : 0,
+        missingStartTime: asIdList(payload.missingStartTime),
+        missingAuthorization: asIdList(payload.missingAuthorization),
+        missing: asIdList(payload.missing),
+        disconnected: asIdList(payload.disconnected),
+        unsupported: asIdList(payload.unsupported),
+        uavs:
+          payload.uavs && typeof payload.uavs === 'object' ? payload.uavs : {},
+        lastUpdatedAt: Date.now(),
+      };
+    },
+
     setShowSettingsSynchronizationStatus(
       state,
       action: PayloadAction<SettingsSynchronizationStatus>
@@ -513,6 +571,9 @@ const { actions, reducer } = createSlice({
           isNil(timeFromPayload) || typeof timeFromPayload !== 'number'
             ? undefined
             : timeFromPayload;
+        if (state.start.timeOnClock === undefined) {
+          state.startReadiness = undefined;
+        }
       } else {
         const dateTime =
           timeFromPayload instanceof Date
@@ -522,6 +583,7 @@ const { actions, reducer } = createSlice({
           state.start.utcTime = dateTime;
         } else {
           state.start.utcTime = undefined;
+          state.startReadiness = undefined;
         }
       }
     },
@@ -561,10 +623,12 @@ export const {
   clearManualPreflightChecks,
   clearOnboardPreflightChecks,
   clearStartTimeAndMethod,
+  clearShowStartReadiness,
   closeEnvironmentEditorDialog,
   closeLoadShowFromCloudDialog,
   closeManualPreflightChecksDialog,
   closeOnboardPreflightChecksDialog,
+  closeShowStartPermissionDialog,
   closeStartTimeDialog,
   closeTakeoffAreaSetupDialog,
   loadingProgress,
@@ -574,6 +638,7 @@ export const {
   openLoadShowFromCloudDialog,
   openManualPreflightChecksDialog,
   openOnboardPreflightChecksDialog,
+  openShowStartPermissionDialog,
   openStartTimeDialog,
   openTakeoffAreaSetupDialog,
   revokeTakeoffAreaApproval,
@@ -588,6 +653,7 @@ export const {
   setRoomCorners,
   setRoomVisibility,
   setShowAuthorization,
+  setShowStartReadiness,
   setShowSettingsSynchronizationStatus,
   setStartMethod,
   setStartTime,

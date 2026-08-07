@@ -75,7 +75,7 @@ export const UAVsLayerSettings = ({
 
 // === Layer ===
 
-type UAVsLayerSourceProps = {
+export type UAVsLayerSourceProps = {
   selection: Identifier[];
   labelColor?: string;
   flock: FlockModel;
@@ -83,6 +83,8 @@ type UAVsLayerSourceProps = {
   projection?: CoordinateTransformationFunction;
   labelHidden?: boolean;
   scale?: number;
+  /** When set, only these UAV IDs are rendered on the map. */
+  visibleUAVIds?: Identifier[];
 };
 
 export type UAVsLayerProps = {
@@ -93,6 +95,7 @@ export type UAVsLayerProps = {
   projection?: CoordinateTransformationFunction;
   zIndex?: number;
   labelHidden?: boolean;
+  visibleUAVIds?: Identifier[];
 };
 
 export const UAVsLayer = ({
@@ -103,6 +106,7 @@ export const UAVsLayer = ({
   selection,
   zIndex,
   labelHidden,
+  visibleUAVIds,
 }: UAVsLayerProps) => (
   <olLayer.Vector updateWhileAnimating updateWhileInteracting zIndex={zIndex}>
     <LayerSource
@@ -115,6 +119,7 @@ export const UAVsLayer = ({
       flock={flock}
       projection={projection}
       labelHidden={labelHidden}
+      visibleUAVIds={visibleUAVIds}
     />
   </olLayer.Vector>
 );
