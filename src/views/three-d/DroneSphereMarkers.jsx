@@ -31,6 +31,9 @@ const SPHERE_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 // Default body colour when no LED show drives the colour (matches the flock's
 // DRONE_BODY_COLOR orange).
 const DEFAULT_BODY_COLOR = 0xff8c00;
+// Selected drones are painted red, matching the OBJ marker's selection tint
+// (fbx-model `_select`), so the "드론 선택" panel and the 3D view agree.
+const SELECTED_BODY_COLOR = 0xff0000;
 
 // DroneShapeMarkers와 동일한 정규화 — 프록시 엔티티가 OBJ 마커와 같은
 // 속성(data-*)을 노출해야 기존 소비자들이 차이를 못 느낀다.
@@ -110,11 +113,21 @@ function representativeColor(pixels) {
   return [r / cnt / 255, g / cnt / 255, b / cnt / 255];
 }
 
-const DroneSphereMarkers = React.memo(({ drones }) => {
+const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
   const items = React.useMemo(() => normalizeDrones(drones), [drones]);
   const elRef = React.useRef(null);
   const meshRef = React.useRef(null);
   const proxyRefs = React.useRef(new Map()); // drone id -> a-entity
+
+  const selectedSet = React.useMemo(
+    () => new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String)),
+    [selectedIds]
+  );
+  // Stable signature so the colour pass can cache on the selection as well.
+  const selectionKey = React.useMemo(
+    () => [...selectedSet].sort().join(','),
+    [selectedSet]
+  );
 
   const setProxyRef = React.useCallback((id) => {
     return (el) => {
@@ -233,7 +246,7 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
         overrideSec !== null && !syncEnabled
           ? overrideSec
           : led?.playheadSec ?? 0;
-      const key = `${hasShow ? boards.length : 0}:${playheadSec}:${syncEnabled}`;
+      const key = `${hasShow ? boards.length : 0}:${playheadSec}:${syncEnabled}:${selectionKey}`;
       if (key === lastKey) return;
       lastKey = key;
 
@@ -243,7 +256,9 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       const color = new THREE.Color();
       for (let i = 0; i < items.length; i++) {
         const rep = frame?.drones ? representativeColor(frame.drones[i]) : null;
-        if (rep) {
+        if (selectedSet.has(items[i].id)) {
+          color.setHex(SELECTED_BODY_COLOR);
+        } else if (rep) {
           color.setRGB(rep[0], rep[1], rep[2]);
         } else {
           color.setHex(DEFAULT_BODY_COLOR);
@@ -268,7 +283,7 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       unsubscribe();
       window.removeEventListener('drone-sphere-frame', onFrame);
     };
-  }, [items]);
+  }, [items, selectedSet, selectionKey]);
 
   // 구체 클릭 = 드론 선택. InstancedMesh는 click-pick의 '.three-d-clickable'
   // 레이캐스트에 걸리지 않으므로 자체 레이캐스트로 instanceId를 찾아 기존
@@ -301,11 +316,18 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
       raycaster.setFromCamera(pointer, camera);
 
+      // Ctrl/Cmd/Shift = 다중 선택 토글. 토글 클릭으로 빈 곳을 눌러도 기존
+      // 선택은 유지한다 (click-pick과 동일 규칙).
+      const additive = Boolean(event.ctrlKey || event.metaKey || event.shiftKey);
+
       const hit = raycaster
         .intersectObject(mesh, false)
         .find((h) => h.instanceId !== undefined);
       if (!hit) {
-        window.dispatchEvent(new CustomEvent('drone-deselected'));
+        if (!additive) {
+          window.dispatchEvent(new CustomEvent('drone-deselected'));
+        }
+
         return;
       }
       const item = items[hit.instanceId];
@@ -318,6 +340,7 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
       window.dispatchEvent(
         new CustomEvent('drone-selected', {
           detail: {
+            additive,
             id: item.id,
             name: item.name,
             source: null,
@@ -369,6 +392,7 @@ const DroneSphereMarkers = React.memo(({ drones }) => {
 DroneSphereMarkers.displayName = 'DroneSphereMarkers';
 
 DroneSphereMarkers.propTypes = {
+  selectedIds: PropTypes.arrayOf(PropTypes.string),
   drones: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string,

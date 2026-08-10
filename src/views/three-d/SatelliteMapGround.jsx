@@ -1,120 +1,33 @@
 import PropTypes from 'prop-types';
 import React, { memo, useMemo } from 'react';
 import { connect } from 'react-redux';
-import SunCalc from 'suncalc';
 
 import { objectToString } from '~/aframe/utils';
-import { LayerType } from '~/model/layers';
-import { Source } from '~/model/sources';
+
 import {
-  getOutdoorShowOrigin,
-  getOutdoorShowToWorldCoordinateSystemTransformationObject,
-  hasShowOrigin,
-  isShowIndoor,
-} from '~/features/show/selectors';
-import { getFlatEarthCoordinateTransformer } from '~/selectors/map';
-
-const TILE_ZOOM = 19;
-const TILE_RADIUS = 2;
-const SATELLITE_SOURCES = new Set([
-  Source.ESRI_WORLD_IMAGERY,
-  Source.MAPBOX.SATELLITE,
-  Source.MAPTILER.SATELLITE,
-  Source.MAPTILER.HYBRID,
-  Source.GOOGLE.SATELLITE,
-  Source.BING.AERIAL_WITH_LABELS,
-]);
-
-const getBaseLayer = (layers) =>
-  layers.order
-    .map((layerId) => layers.byId[layerId])
-    .find((layer) => layer?.type === LayerType.BASE);
-
-const tileUrl = (x, y, zoom) =>
-  `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
-
-const lonLatToTile = ([lon, lat], zoom) => {
-  const n = 2 ** zoom;
-  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
-  const latRad = (clampedLat * Math.PI) / 180;
-
-  return {
-    x: Math.floor(((lon + 180) / 360) * n),
-    y: Math.floor(
-      ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
-        n
-    ),
-  };
-};
-
-const tileToLonLat = (x, y, zoom) => {
-  const n = 2 ** zoom;
-  const lon = (x / n) * 360 - 180;
-  const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n)));
-  return [lon, (latRad * 180) / Math.PI];
-};
-
-const localPointFromLonLat = (transformer, lonLat) => {
-  const [x, y] = transformer.fromLonLat(lonLat);
-  return [x, transformer.type === 'nwu' ? y : -y];
-};
-
-const getTileCorners = (transformer, x, y, zoom) => ({
-  nw: localPointFromLonLat(transformer, tileToLonLat(x, y, zoom)),
-  ne: localPointFromLonLat(transformer, tileToLonLat(x + 1, y, zoom)),
-  sw: localPointFromLonLat(transformer, tileToLonLat(x, y + 1, zoom)),
-  se: localPointFromLonLat(transformer, tileToLonLat(x + 1, y + 1, zoom)),
-});
+  canRenderSatelliteGround,
+  createSatelliteTiles,
+  getSatelliteGroundParams,
+  isCurrentlyDark,
+} from './utils/satelliteTiles';
 
 const distance = ([x1, y1], [x2, y2]) => Math.hypot(x2 - x1, y2 - y1);
 
 const angleBetween = ([x1, y1], [x2, y2]) =>
   (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
 
-const isCurrentlyDark = (origin, fallbackLighting) => {
-  if (!Array.isArray(origin)) {
-    return fallbackLighting === 'dark';
-  }
-
-  const [lon, lat] = origin;
-  const sun = SunCalc.getPosition(new Date(), lat, lon);
-
-  return fallbackLighting === 'dark' || sun.altitude < -0.05;
-};
-
-const createSatelliteTiles = ({ origin, transformer }) => {
-  const centerTile = lonLatToTile(origin, TILE_ZOOM);
-  const tiles = [];
-  const worldTileCount = 2 ** TILE_ZOOM;
-
-  for (let dy = -TILE_RADIUS; dy <= TILE_RADIUS; dy++) {
-    for (let dx = -TILE_RADIUS; dx <= TILE_RADIUS; dx++) {
-      const x = (centerTile.x + dx + worldTileCount) % worldTileCount;
-      const y = centerTile.y + dy;
-
-      if (y < 0 || y >= worldTileCount) {
-        continue;
-      }
-
-      const corners = getTileCorners(transformer, x, y, TILE_ZOOM);
-      const center = [
-        (corners.nw[0] + corners.ne[0] + corners.sw[0] + corners.se[0]) / 4,
-        (corners.nw[1] + corners.ne[1] + corners.sw[1] + corners.se[1]) / 4,
-      ];
-
-      tiles.push({
-        key: `${TILE_ZOOM}/${x}/${y}`,
-        url: tileUrl(x, y, TILE_ZOOM),
-        center,
-        width: distance(corners.nw, corners.ne),
-        height: distance(corners.nw, corners.sw),
-        rotation: angleBetween(corners.nw, corners.ne),
-      });
-    }
-  }
-
-  return tiles;
-};
+/** Corner geometry → the centred, rotated plane a-frame wants. */
+const toPlaneProps = (tile) => ({
+  key: tile.key,
+  url: tile.url,
+  center: [
+    (tile.nw[0] + tile.ne[0] + tile.sw[0] + tile.se[0]) / 4,
+    (tile.nw[1] + tile.ne[1] + tile.sw[1] + tile.se[1]) / 4,
+  ],
+  width: distance(tile.nw, tile.ne),
+  height: distance(tile.nw, tile.sw),
+  rotation: angleBetween(tile.nw, tile.ne),
+});
 
 const SatelliteMapGround = ({
   currentSource,
@@ -124,10 +37,7 @@ const SatelliteMapGround = ({
   transformer,
 }) => {
   const shouldRender = Boolean(
-    enabled &&
-      transformer &&
-      Array.isArray(origin) &&
-      SATELLITE_SOURCES.has(currentSource)
+    enabled && canRenderSatelliteGround({ currentSource, origin, transformer })
   );
 
   const dark = useMemo(
@@ -136,7 +46,10 @@ const SatelliteMapGround = ({
   );
 
   const tiles = useMemo(
-    () => (shouldRender ? createSatelliteTiles({ origin, transformer }) : []),
+    () =>
+      shouldRender
+        ? createSatelliteTiles({ origin, transformer }).map(toPlaneProps)
+        : [],
     [origin, shouldRender, transformer]
   );
 
@@ -188,20 +101,6 @@ SatelliteMapGround.propTypes = {
   transformer: PropTypes.object,
 };
 
-export default connect((state) => {
-  const baseLayer = getBaseLayer(state.map.layers);
-  const showTransformer =
-    getOutdoorShowToWorldCoordinateSystemTransformationObject(state);
-  const useShowCoordinateFrame =
-    !isShowIndoor(state) && hasShowOrigin(state) && showTransformer;
-
-  return {
-    currentSource: baseLayer?.parameters?.source,
-    origin: useShowCoordinateFrame
-      ? getOutdoorShowOrigin(state)
-      : state.map.origin.position,
-    transformer: useShowCoordinateFrame
-      ? showTransformer
-      : getFlatEarthCoordinateTransformer(state),
-  };
-})(memo(SatelliteMapGround));
+export default connect((state) => getSatelliteGroundParams(state))(
+  memo(SatelliteMapGround)
+);

@@ -99,6 +99,39 @@ const getNaturalLightingForThreeDView = (state) => {
   return altitude < -0.05 ? 'dark' : 'light';
 };
 
+/** 드론 id로 씬의 마커 엔티티(또는 구체 모드의 프록시)를 찾는다. */
+const findDroneEntityById = (droneId) => {
+  if (droneId == null || typeof document === 'undefined') {
+    return null;
+  }
+
+  const id = String(droneId);
+  const safeId =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(id)
+      : id;
+  return document.querySelector(`a-scene [data-drone-id="${safeId}"]`);
+};
+
+/**
+ * 드론 엔티티에서 OBJ 모델 컴포넌트를 찾는다 — 선택 하이라이트(빨간 틴트)를
+ * 걸 대상. 시각 자식이 없는 구체 모드 프록시에서는 null이 나온다.
+ */
+const findFbxModelComponent = (el) => {
+  if (el?.components?.['fbx-model']) {
+    return el.components['fbx-model'];
+  }
+
+  for (const child of Array.from(el?.children ?? [])) {
+    const component = child?.components?.['fbx-model'];
+    if (component) {
+      return component;
+    }
+  }
+
+  return null;
+};
+
 const DEFAULT_PATH_DELIVERY_URL = '/api/v1/path-planner/plan';
 const PATH_DELIVERY_PROXY_TARGET = 'http://localhost:5001/api/v1/path-planner/plan';
 const PATH_DELIVERY_STATUS_DISMISS_MS = 5000;
@@ -1157,15 +1190,190 @@ const ThreeDView = React.forwardRef((props, ref) => {
   }, [showSpecDroneConfig]);
 
   // ── 드론 다중 선택 + 그룹 이동 ────────────────────────────────────────
-  // 좌측 "드론 선택" 탭에서 고른 드론 id 목록. 2대 이상 선택된 상태에서
-  // 선택된 드론의 기즈모를 드래그하면 나머지 선택 드론도 같은 벡터만큼
-  // 함께 이동한다.
+  // 좌측 "드론 선택" 탭과 3D 뷰 클릭이 공유하는 단일 선택 상태. 어느 쪽에서
+  // 골라도 같은 목록이 되고, 3D 뷰에서는 선택된 드론이 모두 빨갛게 표시된다.
+  // "primary"는 마지막으로 선택에 들어온 드론 — 정보 패널과 이동 기즈모가
+  // 이 드론에 붙는다. 2대 이상 선택된 상태에서 기즈모를 드래그하면 나머지
+  // 선택 드론도 같은 벡터만큼 함께 이동한다.
   const [multiSelectedDroneIds, setMultiSelectedDroneIds] = useState([]);
   const multiSelectedRef = useRef(new Set());
+  // 이벤트 핸들러가 같은 tick 안에서 최신 선택을 읽어야 하므로 순서 있는
+  // 목록과 primary도 ref로 동기 유지한다 (state는 한 렌더 늦게 온다).
+  const multiSelectedListRef = useRef([]);
+  const primarySelectedIdRef = useRef(null);
 
   useEffect(() => {
-    multiSelectedRef.current = new Set(multiSelectedDroneIds.map(String));
+    multiSelectedListRef.current = multiSelectedDroneIds.map(String);
+    multiSelectedRef.current = new Set(multiSelectedListRef.current);
+    if (
+      primarySelectedIdRef.current &&
+      !multiSelectedRef.current.has(primarySelectedIdRef.current)
+    ) {
+      primarySelectedIdRef.current = null;
+    }
   }, [multiSelectedDroneIds]);
+
+  // primary 드론을 기존 선택 이벤트로 알린다 — 정보 패널(useThreeDViewDroneEvents)
+  // 과 기즈모(drone-axis-gizmo)가 이 이벤트만 보고 움직이므로, 패널에서 고른
+  // 선택도 3D 뷰 클릭과 완전히 같은 결과가 된다. `fromSelectionSync`는 우리가
+  // 쏜 에코라는 표시로, 아래 리스너가 이를 다시 선택 변경으로 해석하지 않는다.
+  const emitPrimarySelection = useCallback((droneId) => {
+    const id = droneId ? String(droneId) : '';
+    const target = id ? findDroneEntityById(id) : null;
+
+    if (!target) {
+      window.dispatchEvent(
+        new CustomEvent('drone-deselected', {
+          detail: { fromSelectionSync: true },
+        })
+      );
+      return;
+    }
+
+    const position = parsePositionLike(
+      target.getAttribute('position'),
+      DEFAULT_DRONE_GROUND_POSITION
+    );
+    const initialPos = parsePositionLike(
+      target.getAttribute('data-initial-pos'),
+      position
+    );
+
+    window.dispatchEvent(
+      new CustomEvent('drone-selected', {
+        detail: {
+          fromSelectionSync: true,
+          id,
+          name: target.getAttribute('data-drone-name'),
+          source: target.getAttribute('data-drone-source'),
+          battery: target.getAttribute('data-battery'),
+          status: target.getAttribute('data-status'),
+          mode: target.getAttribute('data-mode'),
+          heading: target.getAttribute('data-heading'),
+          currentPosition: { x: position[0], y: position[1], z: position[2] },
+          initialPosition: {
+            x: initialPos[0],
+            y: initialPos[1],
+            z: initialPos[2],
+          },
+        },
+      })
+    );
+  }, []);
+
+  const applySelection = useCallback(
+    (ids, primaryId, { emitPrimary = false } = {}) => {
+      const list = (Array.isArray(ids) ? ids : []).map(String);
+      const primary = primaryId ? String(primaryId) : null;
+
+      multiSelectedListRef.current = list;
+      multiSelectedRef.current = new Set(list);
+      primarySelectedIdRef.current = primary;
+      setMultiSelectedDroneIds(list);
+
+      if (emitPrimary) {
+        emitPrimarySelection(primary);
+      }
+    },
+    [emitPrimarySelection]
+  );
+
+  // "드론 선택" 패널에서 목록이 바뀐 경우. primary(정보 패널·기즈모가 붙는
+  // 드론)는 여전히 선택돼 있으면 그대로 둔다 — 목록을 긁어서 여러 대를 담는
+  // 동안 정보 패널이 드론마다 갈아치워지지 않게 하는 앵커 역할이다.
+  const handleMultiSelectionChange = useCallback(
+    (ids) => {
+      const list = (Array.isArray(ids) ? ids : []).map(String);
+      const nextSet = new Set(list);
+      const previousPrimary = primarySelectedIdRef.current;
+      const previousSelection = multiSelectedRef.current;
+
+      let primary =
+        previousPrimary && nextSet.has(previousPrimary) ? previousPrimary : null;
+      if (!primary) {
+        const added = list.filter((id) => !previousSelection.has(id));
+        primary = (added.length ? added.at(-1) : list.at(-1)) ?? null;
+      }
+
+      applySelection(list, primary, {
+        emitPrimary: primary !== previousPrimary,
+      });
+    },
+    [applySelection]
+  );
+
+  // 3D 뷰 클릭(click-pick / 구체 마커) → 공유 선택 상태.
+  // 그냥 클릭 = 그 드론만 선택(이미 단독 선택이면 해제),
+  // Ctrl/Cmd/Shift + 클릭 = 선택 토글.
+  useEffect(() => {
+    if (!isCreateMode) {
+      return undefined;
+    }
+
+    const onSelected = (event) => {
+      const detail = event.detail || {};
+      if (detail.fromSelectionSync) {
+        return;
+      }
+
+      const id = detail.id != null ? String(detail.id) : '';
+      if (!id) {
+        return;
+      }
+
+      const list = multiSelectedListRef.current;
+      const selected = multiSelectedRef.current;
+      const primaryId = primarySelectedIdRef.current;
+
+      let next;
+      let primary;
+
+      if (detail.additive) {
+        if (selected.has(id)) {
+          next = list.filter((item) => item !== id);
+          primary =
+            primaryId && primaryId !== id && next.includes(primaryId)
+              ? primaryId
+              : next[next.length - 1] ?? null;
+        } else {
+          next = [...list, id];
+          primary = id;
+        }
+      } else if (selected.size === 1 && selected.has(id)) {
+        next = [];
+        primary = null;
+      } else {
+        next = [id];
+        primary = id;
+      }
+
+      applySelection(next, primary);
+
+      // 이벤트는 이미 "id가 선택됐다"고 알렸다. 토글로 빠졌거나 해제된
+      // 클릭이면 정보 패널·기즈모를 실제 primary로 바로잡는다 (원래
+      // 이벤트의 모든 리스너가 끝난 뒤에 보내야 하므로 microtask).
+      if (primary !== id) {
+        queueMicrotask(() => {
+          emitPrimarySelection(primary);
+        });
+      }
+    };
+
+    const onDeselected = (event) => {
+      if (event.detail?.fromSelectionSync) {
+        return;
+      }
+
+      applySelection([], null);
+    };
+
+    window.addEventListener('drone-selected', onSelected);
+    window.addEventListener('drone-deselected', onDeselected);
+    return () => {
+      window.removeEventListener('drone-selected', onSelected);
+      window.removeEventListener('drone-deselected', onDeselected);
+    };
+  }, [applySelection, emitPrimarySelection, isCreateMode]);
 
   useEffect(() => {
     const gizmoDragging = { current: false };
@@ -1252,8 +1460,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
     window.dispatchEvent(
       new CustomEvent('drone-delete-request', { detail: { ids } })
     );
-    setMultiSelectedDroneIds([]);
-  }, []);
+    applySelection([], null);
+  }, [applySelection]);
 
   useEffect(() => {
     if (!isCreateMode) return undefined;
@@ -1526,6 +1734,39 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const sphereModeActive = isCreateMode && sphereSimRender;
   const sphereModeActiveRef = useRef(false);
   sphereModeActiveRef.current = sphereModeActive;
+
+  // 선택된 드론을 3D 뷰에서 빨갛게 표시한다 (OBJ 마커). 구체 모드는
+  // DroneSphereMarkers가 selectedIds로 인스턴스 색을 직접 칠한다.
+  // 방금 추가된 드론은 fbx-model 컴포넌트 초기화가 한 프레임 늦을 수 있어
+  // 다음 프레임에 한 번 더 적용한다.
+  useEffect(() => {
+    if (!isCreateMode || sphereModeActive || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const selected = new Set(multiSelectedDroneIds.map(String));
+
+    const applyHighlight = () => {
+      for (const el of document.querySelectorAll('a-scene [data-drone-id]')) {
+        const component = findFbxModelComponent(el);
+        if (!component) {
+          continue;
+        }
+
+        if (selected.has(String(el.getAttribute('data-drone-id')))) {
+          component._select?.();
+        } else {
+          component._deselect?.();
+        }
+      }
+    };
+
+    applyHighlight();
+    const rafId = requestAnimationFrame(applyHighlight);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [effectiveConfig, isCreateMode, multiSelectedDroneIds, sphereModeActive]);
   const pathProgressLatestRef = useRef(0);
   pathProgressLatestRef.current = pathProgress;
 
@@ -2023,6 +2264,71 @@ const ThreeDView = React.forwardRef((props, ref) => {
     );
     return phase?.name ? String(phase.name) : '';
   }, [formationGridEditPhaseId, formationPhases]);
+
+  /**
+   * 그리드 편집기에 회색 참고 점으로 깔아줄 "이전 상태" — 편집이면 바로 앞
+   * phase, 새 phase면 마지막 phase. 앞 phase가 없으면 드론의 초기 위치를 쓴다.
+   */
+  const formationGridPrevious = useMemo(() => {
+    const drones = Array.isArray(effectiveConfig?.drones)
+      ? effectiveConfig.drones.filter(
+          (d) => d?.id != null && String(d.id).trim() !== ''
+        )
+      : [];
+    if (!drones.length) {
+      return { drones: [], label: '' };
+    }
+
+    const editIndex = formationGridEditPhaseId
+      ? formationPhases.findIndex(
+          (p) => String(p.id) === String(formationGridEditPhaseId)
+        )
+      : formationPhases.length;
+    const previousPhase =
+      editIndex > 0 ? formationPhases[editIndex - 1] : undefined;
+    const points =
+      previousPhase?.points && typeof previousPhase.points === 'object'
+        ? previousPhase.points
+        : null;
+
+    if (points) {
+      const previousDrones = [];
+      for (const d of drones) {
+        const id = String(d.id);
+        const point = points[id];
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        const z = Number(point?.z);
+        if (
+          Number.isFinite(x) &&
+          Number.isFinite(y) &&
+          Number.isFinite(z)
+        ) {
+          previousDrones.push({ id, x, y, z });
+        }
+      }
+
+      return {
+        drones: previousDrones,
+        label: previousPhase?.name
+          ? String(previousPhase.name)
+          : `phase-${editIndex}`,
+      };
+    }
+
+    return {
+      drones: drones.map((d) => {
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id: String(d.id), x, y, z };
+      }),
+      label: '초기 위치',
+    };
+  }, [
+    effectiveConfig,
+    formationGridEditPhaseId,
+    formationGridModalOpen,
+    formationPhases,
+  ]);
 
   /** 기존 phase(a,b,c)의 역순(c,b,a)을 복제해 뒤에 추가 */
   const handleAppendReversedFormationPhases = useCallback(() => {
@@ -2712,6 +3018,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onConfirm={handleConfirmFormationGridPhase}
         mode={formationGridEditPhaseId ? 'edit' : 'create'}
         initialLattice={formationGridEditLattice}
+        previousDrones={formationGridPrevious.drones}
+        previousLabel={formationGridPrevious.label}
         title={
           formationGridEditPhaseId
             ? `Formation · 수정${
@@ -2763,7 +3071,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         {/* ✅ 마우스 피킹/호버 커서 */}
         <a-entity
           id="mouse-ray"
-          click-pick=""
+          click-pick={isCreateMode ? 'externalSelection: true' : ''}
           hover-cursor="className: three-d-clickable; interval: 50"
         />
 
@@ -2813,6 +3121,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
                   ? effectiveConfig.drones
                   : undefined
               }
+              selectedIds={multiSelectedDroneIds}
             />
           )}
           {!isCreateMode && <a-drone-flock />}
@@ -2890,7 +3199,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
               name: d.name ? String(d.name) : String(d.id),
             }))}
           selectedIds={multiSelectedDroneIds}
-          onChangeSelection={setMultiSelectedDroneIds}
+          onChangeSelection={handleMultiSelectionChange}
           onDeleteSelected={handleDeleteSelectedDrones}
           selectedPhase={(() => {
             if (!selectedPhaseId) return null;

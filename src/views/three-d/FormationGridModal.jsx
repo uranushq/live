@@ -4,6 +4,8 @@ import PropTypes from 'prop-types';
 
 import Colors from '~/components/colors';
 
+import GridSatelliteGround from './GridSatelliteGround';
+
 const RAD = (d) => (d * Math.PI) / 180;
 const COS30 = Math.cos(RAD(30));
 
@@ -56,6 +58,9 @@ const spacingOf = (arr, fallback) => {
 };
 
 const DEFAULT_LATTICE = { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0, az: 10 };
+
+/** 이 대수까지만 이전 phase 회색 점에 드론 라벨을 붙인다. */
+const GHOST_LABEL_LIMIT = 40;
 
 /**
  * 기준점(ax,ay,az) = 격자 시작 모서리 (i=j=k=0).
@@ -434,6 +439,8 @@ export default function FormationGridModal({
   mode = 'create',
   title,
   initialLattice = null,
+  previousDrones = null,
+  previousLabel = '',
 }) {
   const isEdit = mode === 'edit';
   const viewRef = useRef(null);
@@ -967,6 +974,38 @@ export default function FormationGridModal({
     return map;
   }, [drones]);
 
+  /**
+   * 이전 phase(편집 시엔 바로 앞 phase, 없으면 드론의 현재 위치)의 좌표를
+   * 회색 점으로 깔아 두는 참고 레이어. 클릭 대상이 아니라 "여기서 어디로
+   * 옮기는지"만 보여준다.
+   */
+  const ghostDots = useMemo(() => {
+    if (!Array.isArray(previousDrones) || !previousDrones.length) {
+      return [];
+    }
+
+    return previousDrones
+      .map((d, idx) => {
+        const id = String(d?.id ?? '');
+        const x = Number(d?.x);
+        const y = Number(d?.y);
+        const z = Number(d?.z);
+        if (!id || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+          return null;
+        }
+
+        const s = proj(x, y, z);
+        return {
+          key: id,
+          label: shortLabel(id, idx),
+          px: s.px,
+          py: s.py,
+          title: `${id} · 이전 위치 x ${x.toFixed(1)}  y ${y.toFixed(1)}  z ${z.toFixed(1)}`,
+        };
+      })
+      .filter(Boolean);
+  }, [previousDrones, proj]);
+
   const scene = useMemo(() => {
     const plate = [];
     const pad = Math.max(sx, sy) * 0.6;
@@ -1482,6 +1521,56 @@ export default function FormationGridModal({
               touchAction: 'none',
             }}
           >
+            {/* 3D 뷰와 같은 위성 사진 바닥 (야외 쇼 + 위성 베이스 레이어일 때) */}
+            <GridSatelliteGround project={proj} />
+
+            {/* 이전 phase 위치: 회색 점 (참고용, 클릭 불가) */}
+            {ghostDots.map((g) => (
+              <div
+                key={`ghost-${g.key}`}
+                title={g.title}
+                style={{
+                  position: 'absolute',
+                  left: g.px - 9,
+                  top: g.py - 9,
+                  width: 18,
+                  height: 18,
+                  zIndex: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                <i
+                  style={{
+                    display: 'block',
+                    width: 9,
+                    height: 9,
+                    borderRadius: '50%',
+                    background: 'rgba(190, 198, 210, 0.55)',
+                    border: '1px solid rgba(230, 236, 245, 0.45)',
+                  }}
+                />
+                {/* 드론이 많으면 회색 라벨까지 겹쳐 읽기 어려워지므로 생략 */}
+                {ghostDots.length <= GHOST_LABEL_LIMIT ? (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 13,
+                      top: 2,
+                      fontSize: 9,
+                      fontWeight: 600,
+                      color: 'rgba(214, 222, 233, 0.6)',
+                      textShadow: '0 0 4px rgba(0,0,0,0.85)',
+                    }}
+                  >
+                    {g.label}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+
             <svg
               width="100%"
               height="100%"
@@ -1784,6 +1873,30 @@ export default function FormationGridModal({
                   {label}
                 </span>
               ))}
+              {ghostDots.length ? (
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: 'rgba(214, 222, 233, 0.7)',
+                    borderLeft: '1px solid rgba(255,255,255,0.14)',
+                    paddingLeft: 8,
+                  }}
+                >
+                  <i
+                    style={{
+                      display: 'block',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: 'rgba(190, 198, 210, 0.55)',
+                      border: '1px solid rgba(230, 236, 245, 0.45)',
+                    }}
+                  />
+                  {previousLabel || '이전 phase'}
+                </span>
+              ) : null}
             </div>
 
             {/* 대기중 드론 UI 스택 */}
@@ -2025,6 +2138,17 @@ FormationGridModal.propTypes = {
   onConfirm: PropTypes.func,
   mode: PropTypes.oneOf(['create', 'edit']),
   title: PropTypes.string,
+  /** 회색 참고 점으로 깔 이전 phase 좌표 (없으면 표시하지 않음) */
+  previousDrones: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+      x: PropTypes.number,
+      y: PropTypes.number,
+      z: PropTypes.number,
+    })
+  ),
+  /** 범례에 보여줄 이전 phase 이름 */
+  previousLabel: PropTypes.string,
   initialLattice: PropTypes.shape({
     nx: PropTypes.number,
     ny: PropTypes.number,

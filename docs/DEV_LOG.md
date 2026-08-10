@@ -7,6 +7,25 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-07 22:09:25 +0900 — `daeced48` 최적화
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 시뮬레이션 3D 뷰의 드론 렌더링을 InstancedMesh 구(sphere)로 최적화하고, 관성 속도 프로파일 시각화 차트를 추가했다.
+
+**주요 변경점**:
+- `DroneSphereMarkers.jsx`: 시뮬레이션 모드에서 드론별 OBJ 모델 대신 하나의 InstancedMesh(구) + 단일 드로우콜로 렌더링해 100+ 대도 성능 유지. 구 색상은 LED 쇼 프레임(`computePlaybackFrame`)에서 파생되어 이미지 임포트 색을 반영하며, 플레이헤드/쇼 변경 시에만 갱신.
+- `VelocityProfileChart.jsx`: chart.js(react-chartjs-2) 기반으로 관성 모델의 속도 프로파일(지수 ease-in / 로그 ease-out)을 smoothing 값에 따라 실시간으로 그리는 인터랙티브 차트 추가.
+- `utils/velocityProfile.js`: 속도 프로파일 샘플링·두께(k) 계산 등 차트의 수식 유틸.
+- 세 파일 모두 신규 추가(총 489줄), 기존 코드 수정·삭제는 없음.
+
+**의미/영향**: 대규모 드론 스웜 시뮬레이션에서 per-drone OBJ 모델·포인트 라이트로 인한 렌더링 부하를 인스턴싱으로 크게 낮춰, 3D 뷰의 실시간성과 확장성을 개선한다. 기존 저작(authoring) 모드는 OBJ 마커를 그대로 쓰고 시뮬레이션 모드에서만 구 마커를 사용하므로 기존 워크플로우와 병존한다. LED 쇼·속도 프로파일과의 연동으로 3D 시각화(three-d)와 LED 에디터 기능이 한층 통합되는 방향을 이어간다.
+
+**주의/리스크**: 구 마커는 `MeshBasicMaterial`(무조명) 기반이라 기존 OBJ 모델과 음영·외형이 달라 시각적 표현이 단순화된다. LED 상태를 `store.subscribe`로 매번 검사하므로 구독 콜백 비용이 있으나 key 비교로 실제 갱신은 최소화했다. 신규 파일만 추가되어 실제 뷰에 배선(연결)되었는지, chart.js 의존성이 번들에 포함되는지는 이 diff만으로는 확인 불가.
+
+---
+
+
 ## 2026-08-07 15:50:38 +0900 — `85b993e6` Merge branch 'dev' of https://github.com/uranushq/live into dev
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
