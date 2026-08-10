@@ -4,7 +4,9 @@ import PropTypes from 'prop-types';
 
 import Colors from '~/components/colors';
 
+import FillDirectionPicker from './FillDirectionPicker';
 import GridSatelliteGround from './GridSatelliteGround';
+import { dirLabel, resolveAxisOrder } from './utils/fillDirections';
 import { fitIsoView, isoRaw } from './utils/isoProjection';
 
 const STATUS_OPTIONS = ['Idle', 'Flying', 'Charging', 'Returning'];
@@ -27,41 +29,77 @@ const clampSpacing = (value) => {
   return Math.min(100, n);
 };
 
-/** 셀 좌표는 월드 축과 그대로 대응한다: ix = +X 칸수, iy = +Y 칸수 */
+/** 셀 좌표는 월드 축과 그대로 대응한다: ix = X 칸수, iy = Y 칸수 */
 const cellKey = (ix, iy) => `${ix},${iy}`;
 const parseCellKey = (key) => {
   const [ix, iy] = key.split(',').map(Number);
   return { ix, iy };
 };
 
+/** 채우기 방향 순서 → 축별 부호 ( '-' 방향이면 원점에서 음수 쪽으로 자란다 ) */
+const axisSigns = (order) => ({
+  x: order.find((entry) => entry.axis === 'x')?.descending ? -1 : 1,
+  y: order.find((entry) => entry.axis === 'y')?.descending ? -1 : 1,
+});
+
 /**
- * 격자는 월드 원점에서 시작해 +X · +Y 방향으로 자란다 (z = 0).
+ * 격자는 월드 원점에서 시작해 고른 방향으로 자란다 (z = 0).
  * 3D 뷰와 같은 좌표계라서 미리보기에서 본 자리에 그대로 놓인다.
  */
-const gridCellToWorldPosition = (ix, iy, spacing, altitude = DEFAULT_ALTITUDE) => [
-  ix * spacing,
-  iy * spacing,
-  altitude,
-];
+const gridCellToWorldPosition = (
+  ix,
+  iy,
+  spacing,
+  signs,
+  altitude = DEFAULT_ALTITUDE
+) => [ix * spacing * signs.x, iy * spacing * signs.y, altitude];
 
-/** +X 방향을 먼저 채우고 한 칸씩 +Y로 넘어간다 (드론 번호 순서) */
-const buildGridPositions = (countX, countY, spacing, altitude = DEFAULT_ALTITUDE) => {
+/** 1번 방향 축을 먼저 채우고 한 칸씩 2번 방향으로 넘어간다 (드론 번호 순서) */
+const buildGridPositions = (
+  countX,
+  countY,
+  spacing,
+  order,
+  altitude = DEFAULT_ALTITUDE
+) => {
+  const counts = { x: countX, y: countY };
+  const signs = axisSigns(order);
+  const [fast, slow] = order;
   const positions = [];
 
-  for (let iy = 0; iy < countY; iy += 1) {
-    for (let ix = 0; ix < countX; ix += 1) {
-      positions.push(gridCellToWorldPosition(ix, iy, spacing, altitude));
+  for (let slowIdx = 0; slowIdx < counts[slow.axis]; slowIdx += 1) {
+    for (let fastIdx = 0; fastIdx < counts[fast.axis]; fastIdx += 1) {
+      const cell = { [slow.axis]: slowIdx, [fast.axis]: fastIdx };
+      positions.push(
+        gridCellToWorldPosition(cell.x, cell.y, spacing, signs, altitude)
+      );
     }
   }
 
   return positions;
 };
 
-const buildManualPositions = (selectedCells, spacing, altitude = DEFAULT_ALTITUDE) =>
-  [...selectedCells]
+const buildManualPositions = (
+  selectedCells,
+  spacing,
+  order,
+  altitude = DEFAULT_ALTITUDE
+) => {
+  const signs = axisSigns(order);
+  const [fast, slow] = order;
+  const key = (cell) => ({ x: cell.ix, y: cell.iy });
+
+  return [...selectedCells]
     .map(parseCellKey)
-    .sort((a, b) => a.iy - b.iy || a.ix - b.ix)
-    .map(({ ix, iy }) => gridCellToWorldPosition(ix, iy, spacing, altitude));
+    .sort(
+      (a, b) =>
+        key(a)[slow.axis] - key(b)[slow.axis] ||
+        key(a)[fast.axis] - key(b)[fast.axis]
+    )
+    .map(({ ix, iy }) =>
+      gridCellToWorldPosition(ix, iy, spacing, signs, altitude)
+    );
+};
 
 const generateDroneBatch = ({
   positions,
@@ -243,11 +281,13 @@ function PlacementPreview({
   countX,
   countY,
   spacing,
+  order,
   mode,
   selectedCells,
   onToggleCell,
   existingDrones,
 }) {
+  const signs = useMemo(() => axisSigns(order), [order]);
   const viewRef = useRef(null);
   const orbitRef = useRef(null);
   const [size, setSize] = useState({ w: 320, h: 300 });
@@ -303,14 +343,15 @@ function PlacementPreview({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const spanX = Math.max(0, countX - 1) * spacing;
-  const spanY = Math.max(0, countY - 1) * spacing;
+  // 부호가 붙은 격자 범위 — 고른 방향으로 원점에서 뻗어 나간다
+  const spanX = Math.max(0, countX - 1) * spacing * signs.x;
+  const spanY = Math.max(0, countY - 1) * spacing * signs.y;
 
   const fit = useMemo(() => {
     const pad = spacing * 1.2;
     const points = [{ x: 0, y: 0, z: 0 }];
-    for (const x of [-pad, spanX + pad]) {
-      for (const y of [-pad, spanY + pad]) {
+    for (const x of [-pad, spanX + pad, spanX - pad]) {
+      for (const y of [-pad, spanY + pad, spanY - pad]) {
         points.push({ x, y, z: 0 });
       }
     }
@@ -336,19 +377,35 @@ function PlacementPreview({
   );
 
   const cells = useMemo(() => {
+    const counts = { x: countX, y: countY };
+    const [fast, slow] = order;
     const list = [];
     let serial = 0;
-    for (let iy = 0; iy < countY; iy += 1) {
-      for (let ix = 0; ix < countX; ix += 1) {
-        const key = cellKey(ix, iy);
+
+    // 번호는 실제 배치 순서(1번 축 먼저)와 같은 순서로 매긴다
+    for (let slowIdx = 0; slowIdx < counts[slow.axis]; slowIdx += 1) {
+      for (let fastIdx = 0; fastIdx < counts[fast.axis]; fastIdx += 1) {
+        const cell = { [slow.axis]: slowIdx, [fast.axis]: fastIdx };
+        const key = cellKey(cell.x, cell.y);
         const active = mode === 'auto' || selectedCells.has(key);
         if (active) serial += 1;
-        const p = project(ix * spacing, iy * spacing, 0);
-        list.push({ key, ix, iy, active, order: active ? serial : null, ...p });
+        const p = project(
+          cell.x * spacing * signs.x,
+          cell.y * spacing * signs.y,
+          0
+        );
+        list.push({
+          key,
+          ix: cell.x,
+          iy: cell.y,
+          active,
+          serial: active ? serial : null,
+          ...p,
+        });
       }
     }
     return list;
-  }, [countX, countY, mode, project, selectedCells, spacing]);
+  }, [countX, countY, mode, order, project, selectedCells, signs, spacing]);
 
   const activeCount = cells.filter((c) => c.active).length;
 
@@ -356,27 +413,41 @@ function PlacementPreview({
   const gridLines = useMemo(() => {
     const lines = [];
     for (let ix = 0; ix < countX; ix += 1) {
-      const a = project(ix * spacing, 0, 0);
-      const b = project(ix * spacing, spanY, 0);
+      const x = ix * spacing * signs.x;
+      const a = project(x, 0, 0);
+      const b = project(x, spanY, 0);
       lines.push({ key: `x${ix}`, x1: a.px, y1: a.py, x2: b.px, y2: b.py });
     }
     for (let iy = 0; iy < countY; iy += 1) {
-      const a = project(0, iy * spacing, 0);
-      const b = project(spanX, iy * spacing, 0);
+      const y = iy * spacing * signs.y;
+      const a = project(0, y, 0);
+      const b = project(spanX, y, 0);
       lines.push({ key: `y${iy}`, x1: a.px, y1: a.py, x2: b.px, y2: b.py });
     }
     return lines;
-  }, [countX, countY, project, spacing, spanX, spanY]);
+  }, [countX, countY, project, signs, spacing, spanX, spanY]);
 
+  // 축 화살표는 고른 채우기 방향을 향한다 — 격자가 어디로 뻗는지 바로 보이게
   const axes = useMemo(() => {
     const origin = project(0, 0, 0);
-    const length = Math.max(spacing * 1.6, Math.max(spanX, spanY) * 0.28);
+    const length = Math.max(
+      spacing * 1.6,
+      Math.max(Math.abs(spanX), Math.abs(spanY)) * 0.28
+    );
     return {
       origin,
-      x: { ...project(length, 0, 0), color: AXIS_COLORS.x, label: '+X' },
-      y: { ...project(0, length, 0), color: AXIS_COLORS.y, label: '+Y' },
+      x: {
+        ...project(length * signs.x, 0, 0),
+        color: AXIS_COLORS.x,
+        label: dirLabel(signs.x < 0 ? 'x-' : 'x+'),
+      },
+      y: {
+        ...project(0, length * signs.y, 0),
+        color: AXIS_COLORS.y,
+        label: dirLabel(signs.y < 0 ? 'y-' : 'y+'),
+      },
     };
-  }, [project, spacing, spanX, spanY]);
+  }, [project, signs, spacing, spanX, spanY]);
 
   const ghosts = useMemo(
     () =>
@@ -398,7 +469,7 @@ function PlacementPreview({
     >
       <div style={{ fontSize: 11, opacity: 0.58, marginBottom: 10 }}>
         {mode === 'auto'
-          ? '3D 뷰와 같은 시선 · z=0 지면에 +X · +Y 방향으로 배치됩니다'
+          ? '3D 뷰와 같은 시선 · z=0 지면, 원점에서 고른 방향으로 배치됩니다'
           : '지면 격자를 클릭해 놓을 자리를 지정하세요 (배경 드래그로 회전)'}
       </div>
 
@@ -519,10 +590,12 @@ function PlacementPreview({
                     onToggleCell?.(cell.ix, cell.iy);
                   }}
                 >
-                  <title>{`X ${cell.ix * spacing}m · Y ${cell.iy * spacing}m`}</title>
+                  <title>{`X ${cell.ix * spacing * signs.x}m · Y ${
+                    cell.iy * spacing * signs.y
+                  }m`}</title>
                 </circle>
               ) : null}
-              {cell.order === 1 ? (
+              {cell.serial === 1 ? (
                 <text
                   x={cell.px + 8}
                   y={cell.py - 6}
@@ -570,6 +643,13 @@ PlacementPreview.propTypes = {
   countX: PropTypes.number.isRequired,
   countY: PropTypes.number.isRequired,
   spacing: PropTypes.number.isRequired,
+  /** 채우기 진행 순서 [1번, 2번] — resolveAxisOrder 결과 */
+  order: PropTypes.arrayOf(
+    PropTypes.shape({
+      axis: PropTypes.oneOf(['x', 'y']).isRequired,
+      descending: PropTypes.bool,
+    })
+  ).isRequired,
   mode: PropTypes.oneOf(['auto', 'manual']).isRequired,
   selectedCells: PropTypes.instanceOf(Set),
   onToggleCell: PropTypes.func,
@@ -598,7 +678,32 @@ export default function AddDroneModal({
   const [battery, setBattery] = useState('100');
   const [status, setStatus] = useState('Idle');
   const [manualCells, setManualCells] = useState(() => new Set());
+  /** 채우기 방향 (그리드 Phase 편집기와 같은 규칙) — 비우면 +X → +Y 자동 */
+  const [fillDirs, setFillDirs] = useState([]);
   const [error, setError] = useState('');
+
+  const placementOrder = useMemo(
+    () => resolveAxisOrder(fillDirs, ['x', 'y']),
+    [fillDirs]
+  );
+
+  /** "+X → +Y" 처럼 실제 진행 방향을 그대로 보여주는 라벨 */
+  const placementLabel = useMemo(
+    () =>
+      placementOrder
+        .map((entry) => dirLabel(`${entry.axis}${entry.descending ? '-' : '+'}`))
+        .join(' → '),
+    [placementOrder]
+  );
+
+  /** 개수 필드 아래에 붙는 축 방향 라벨 (+X / −X …) */
+  const signLabels = useMemo(() => {
+    const signs = axisSigns(placementOrder);
+    return {
+      x: dirLabel(signs.x < 0 ? 'x-' : 'x+'),
+      y: dirLabel(signs.y < 0 ? 'y-' : 'y+'),
+    };
+  }, [placementOrder]);
 
   const safeGridX = clampInt(gridX, 1, MAX_GRID_DIM);
   const safeGridY = clampInt(gridY, 1, MAX_GRID_DIM);
@@ -614,6 +719,7 @@ export default function AddDroneModal({
     setBattery('100');
     setStatus('Idle');
     setManualCells(new Set());
+    setFillDirs([]);
     setError('');
   }, [open]);
 
@@ -665,13 +771,18 @@ export default function AddDroneModal({
 
     let positions = [];
     if (mode === 'auto') {
-      positions = buildGridPositions(safeGridX, safeGridY, safeSpacing);
+      positions = buildGridPositions(
+        safeGridX,
+        safeGridY,
+        safeSpacing,
+        placementOrder
+      );
     } else {
       if (manualCells.size === 0) {
         setError('그리드에서 최소 1개 이상의 위치를 선택해주세요.');
         return;
       }
-      positions = buildManualPositions(manualCells, safeSpacing);
+      positions = buildManualPositions(manualCells, safeSpacing, placementOrder);
     }
 
     const drones = generateDroneBatch({
@@ -726,7 +837,7 @@ export default function AddDroneModal({
               드론 추가
             </div>
             <div style={{ fontSize: 12, opacity: 0.55, marginTop: 4 }}>
-              3D 뷰와 같은 지면(z=0)에 배치 · 원점에서 +X · +Y 방향
+              3D 뷰와 같은 지면(z=0)에 배치 · 원점에서 {placementLabel} 방향
             </div>
           </div>
           <button
@@ -817,7 +928,7 @@ export default function AddDroneModal({
                       opacity: 0.85,
                     }}
                   >
-                    +X {safeGridX}대
+                    {signLabels.x} {safeGridX}대
                   </div>
                 </div>
                 <span style={{ opacity: 0.4, fontSize: 14, paddingTop: 4 }}>×</span>
@@ -836,7 +947,7 @@ export default function AddDroneModal({
                       opacity: 0.85,
                     }}
                   >
-                    +Y {safeGridY}대
+                    {signLabels.y} {safeGridY}대
                   </div>
                 </div>
               </div>
@@ -853,6 +964,15 @@ export default function AddDroneModal({
                 style={fieldInputStyle}
               />
             </label>
+
+            <div style={{ marginBottom: 14 }}>
+              <FillDirectionPicker
+                axes={['x', 'y']}
+                value={fillDirs}
+                onChange={setFillDirs}
+                label="배치 방향 (1번 → 2번)"
+              />
+            </div>
 
             <label style={{ display: 'block', marginBottom: 14 }}>
               <div style={fieldLabelStyle}>이름 접두어</div>
@@ -901,6 +1021,7 @@ export default function AddDroneModal({
             countX={safeGridX}
             countY={safeGridY}
             spacing={safeSpacing}
+            order={placementOrder}
             mode={mode}
             selectedCells={manualCells}
             onToggleCell={handleToggleCell}
@@ -936,8 +1057,7 @@ export default function AddDroneModal({
           }}
         >
           <div style={{ fontSize: 11, opacity: 0.45 }}>
-            {safeGridX} × {safeGridY} grid · {safeSpacing}m · z=0 지면, 원점에서 +X ·
-            +Y 방향
+            {safeGridX} × {safeGridY} grid · {safeSpacing}m · z=0 지면 · {placementLabel}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button

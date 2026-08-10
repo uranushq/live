@@ -4,7 +4,13 @@ import PropTypes from 'prop-types';
 
 import Colors from '~/components/colors';
 
+import FillDirectionPicker from './FillDirectionPicker';
 import GridSatelliteGround from './GridSatelliteGround';
+import {
+  axisIndices,
+  PLANE_AXES,
+  resolveAxisOrder,
+} from './utils/fillDirections';
 import { fitIsoView, isoInverseOnZ, isoRaw } from './utils/isoProjection';
 
 /** 3D 뷰 CoordinateSystemAxes와 동일한 축 색 */
@@ -67,19 +73,6 @@ const MIN_SPACING = 1;
 const MAX_SPACING = 60;
 
 const ZERO_PAN = Object.freeze({ x: 0, y: 0 });
-
-/** 작업 평면(laxis = 평면의 법선축)에 놓인 두 축 */
-const PLANE_AXES = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] };
-
-const AXIS_LABEL = { x: 'X', y: 'Y', z: 'Z' };
-
-/** 평면에서 고를 수 있는 채우기 방향 토큰 ('x+' = +X 쪽으로 진행) */
-const planeFillDirections = (laxis) =>
-  PLANE_AXES[laxis].flatMap((axis) => [`${axis}+`, `${axis}-`]);
-
-const dirAxis = (dir) => dir[0];
-const dirDescending = (dir) => dir[1] === '-';
-const dirLabel = (dir) => `${dir[1]}${AXIS_LABEL[dirAxis(dir)]}`;
 
 /**
  * 기준점(ax,ay,az) = 격자 시작 모서리 (i=j=k=0).
@@ -1119,34 +1112,16 @@ export default function FormationGridModal({
    * 채우기 진행 축 순서 — 빠른 축부터 [1번, 2번, 법선축]. 고르지 않은 축은
    * 평면 축 순서대로 오름차순 자동 배정된다.
    */
-  const fillAxisOrder = useMemo(() => {
-    const order = [];
-    const pushAxis = (axis, descending) => {
-      if (!order.some((entry) => entry.axis === axis)) {
-        order.push({ axis, descending });
-      }
-    };
-
-    for (const dir of fillDirs) {
-      pushAxis(dirAxis(dir), dirDescending(dir));
-    }
-
-    for (const axis of PLANE_AXES[laxis]) {
-      pushAxis(axis, false);
-    }
-
+  const fillAxisOrder = useMemo(
     // 법선축은 층을 훑는 순서 (전체 층 채우기일 때만 의미가 있다)
-    pushAxis(laxis, false);
-    return order;
-  }, [fillDirs, laxis]);
+    () => resolveAxisOrder(fillDirs, [...PLANE_AXES[laxis], laxis]),
+    [fillDirs, laxis]
+  );
 
   const fillLayer = () => {
     let { drones: d, occupancy: occ } = placementRef.current;
     const counts = { x: nx, y: ny, z: nz };
-    const indices = ({ axis, descending }) => {
-      const list = Array.from({ length: counts[axis] }, (_, idx) => idx);
-      return descending ? list.reverse() : list;
-    };
+    const indices = (entry) => axisIndices(entry, counts[entry.axis]);
 
     const [fast, mid, slow] = fillAxisOrder;
     const slot = { x: 0, y: 0, z: 0 };
@@ -1173,25 +1148,6 @@ export default function FormationGridModal({
       }
     }
     commitPlacement({ drones: d, occupancy: occ, selectedId: null });
-  };
-
-  /**
-   * 방향 버튼 토글. 처음 누른 방향이 1번, 그다음이 2번이 되고 이미 쓴 축의
-   * 반대 방향은 고를 수 없다. 이미 고른 방향을 누르면 그 뒤 선택까지 지운다.
-   */
-  const toggleFillDir = (dir) => {
-    setFillDirs((prev) => {
-      const at = prev.indexOf(dir);
-      if (at >= 0) {
-        return prev.slice(0, at);
-      }
-
-      if (prev.length >= 2 || prev.some((d) => dirAxis(d) === dirAxis(dir))) {
-        return prev;
-      }
-
-      return [...prev, dir];
-    });
   };
 
   const clearAll = () => {
@@ -1695,80 +1651,11 @@ export default function FormationGridModal({
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={labStyle}>채우기 방향 (1번 → 2번)</span>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {planeFillDirections(laxis).map((dir) => {
-                  const rank = fillDirs.indexOf(dir);
-                  const selected = rank >= 0;
-                  const blocked =
-                    !selected &&
-                    (fillDirs.length >= 2 ||
-                      fillDirs.some((d) => dirAxis(d) === dirAxis(dir)));
-                  return (
-                    <button
-                      key={dir}
-                      type="button"
-                      disabled={blocked}
-                      title={
-                        blocked
-                          ? '같은 축의 다른 방향이 이미 선택됨'
-                          : selected
-                            ? '다시 누르면 선택 해제'
-                            : `${dirLabel(dir)} 방향으로 먼저 채우기`
-                      }
-                      onClick={() => toggleFillDir(dir)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 6,
-                        padding: '7px 9px',
-                        borderRadius: 8,
-                        border: `1px solid ${
-                          selected ? 'rgba(240, 180, 41, 0.7)' : 'rgba(255,255,255,0.12)'
-                        }`,
-                        background: selected
-                          ? 'rgba(240, 180, 41, 0.14)'
-                          : 'rgba(255,255,255,0.02)',
-                        color: blocked ? 'rgba(255,255,255,0.28)' : 'inherit',
-                        cursor: blocked ? 'not-allowed' : 'pointer',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <span>{dirLabel(dir)}</span>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 16,
-                          height: 16,
-                          borderRadius: '50%',
-                          fontSize: 10,
-                          fontWeight: 800,
-                          background: selected ? '#f0b429' : 'transparent',
-                          color: selected ? '#1a1205' : 'transparent',
-                        }}
-                      >
-                        {selected ? rank + 1 : ''}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 11, opacity: 0.45, lineHeight: 1.4 }}>
-                {fillDirs.length === 0
-                  ? `자동 (${dirLabel(`${PLANE_AXES[laxis][0]}+`)} → ${dirLabel(
-                      `${PLANE_AXES[laxis][1]}+`
-                    )} 순)`
-                  : fillDirs.length === 1
-                    ? `${dirLabel(fillDirs[0])} 먼저 · 2번은 자동`
-                    : `${dirLabel(fillDirs[0])} 먼저 → ${dirLabel(fillDirs[1])}`}
-              </div>
-            </div>
+            <FillDirectionPicker
+              axes={PLANE_AXES[laxis]}
+              value={fillDirs}
+              onChange={setFillDirs}
+            />
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" style={{ ...btnStyle(false), flex: 1, padding: '8px 10px', fontSize: 12 }} onClick={fillLayer}>
