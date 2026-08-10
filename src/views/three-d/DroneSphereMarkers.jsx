@@ -319,6 +319,8 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
       // Ctrl/Cmd/Shift = 다중 선택 토글. 토글 클릭으로 빈 곳을 눌러도 기존
       // 선택은 유지한다 (click-pick과 동일 규칙).
       const additive = Boolean(event.ctrlKey || event.metaKey || event.shiftKey);
+      // Alt = 그룹(클러스터) 동시 선택을 건너뛰고 이 드론만 고른다.
+      const solo = Boolean(event.altKey);
 
       const hit = raycaster
         .intersectObject(mesh, false)
@@ -341,6 +343,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         new CustomEvent('drone-selected', {
           detail: {
             additive,
+            solo,
             id: item.id,
             name: item.name,
             source: null,

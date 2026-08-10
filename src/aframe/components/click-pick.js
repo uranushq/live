@@ -134,7 +134,7 @@ if (!AFrame.components['click-pick']) {
       return null;
     },
 
-    _emitSelected(hitEl, additive = false) {
+    _emitSelected(hitEl, additive = false, solo = false) {
       const root = this._resolveDroneRootEl(hitEl);
       const currentPosition = this._readPosition(root, 'position');
       const initialPosition = this._readPosition(root, 'data-initial-pos');
@@ -142,6 +142,7 @@ if (!AFrame.components['click-pick']) {
         new CustomEvent('drone-selected', {
           detail: {
             additive,
+            solo,
             id: root.getAttribute('data-drone-id'),
             name: root.getAttribute('data-drone-name'),
             source: root.getAttribute('data-drone-source'),
@@ -219,6 +220,8 @@ if (!AFrame.components['click-pick']) {
 
       // Ctrl/Cmd/Shift = 다중 선택 토글 (선택 소유자가 판단한다)
       const additive = Boolean(e.ctrlKey || e.metaKey || e.shiftKey);
+      // Alt = 그룹(클러스터) 동시 선택을 건너뛰고 이 드론만 고른다.
+      const solo = Boolean(e.altKey);
 
       // 빈 곳 클릭 → 해제 + 이벤트. 다중 선택 중 빈 곳을 잘못 눌러 전체
       // 선택이 날아가지 않도록, 토글 클릭일 때는 해제하지 않는다.
@@ -254,7 +257,7 @@ if (!AFrame.components['click-pick']) {
       // 선택 상태를 외부(ThreeDView)가 소유하면 클릭 사실만 알린다 — 토글
       // 판단과 하이라이트는 소유자가 전체 선택 목록을 보고 처리한다.
       if (this.data.externalSelection) {
-        this._emitSelected(hitEl, additive);
+        this._emitSelected(hitEl, additive, solo);
         this._requestRender();
         e.stopPropagation?.();
         return;

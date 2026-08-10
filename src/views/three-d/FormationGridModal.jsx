@@ -181,21 +181,6 @@ const parseNodeKey = (key) => {
 const compareDroneId = (a, b) =>
   String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
-/** 대기 드론을 격자 앞 바닥(z=0)에 일렬 스택으로 배치 */
-const buildIdleStackPositions = (idleIds, { ax, ay, nx, sx, sy }) => {
-  const n = idleIds.length;
-  if (!n) return {};
-  const gap = Math.max(2.5, Math.min(4.5, Math.min(sx, sy) * 0.5));
-  const y = ay - Math.max(8, sy * 1.25);
-  const midX = ax + ((nx - 1) * sx) / 2;
-  const startX = midX - ((n - 1) * gap) / 2;
-  const map = {};
-  idleIds.forEach((id, idx) => {
-    map[id] = { x: startX + idx * gap, y, z: 0 };
-  });
-  return map;
-};
-
 const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
   const { i, j, k } = parseNodeKey(key);
   if (
@@ -214,26 +199,23 @@ const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
   return latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz });
 };
 
-/** occupancy 기준으로 배치 드론은 슬롯, 대기 드론은 바닥 스택으로 재배치 */
-const relayoutDrones = (drones, occupancy, lattice) => {
+/**
+ * occupancy 기준 재배치 — 격자에 올린 드론만 슬롯으로 옮기고, 올리지 않은
+ * 드론은 homePos(모달을 열 때의 좌표 = 이전 상태)를 그대로 유지한다.
+ * 배치했다가 다시 빼면 원래 있던 자리로 돌아간다.
+ */
+const relayoutDrones = (drones, occupancy, lattice, homePos) => {
   if (!Array.isArray(drones) || !drones.length) return drones;
   const placedPos = {};
-  const validOcc = {};
   Object.entries(occupancy || {}).forEach(([key, droneId]) => {
     const pos = slotWorldPos(key, lattice);
     if (!pos || !droneId) return;
-    validOcc[key] = droneId;
     placedPos[droneId] = pos;
   });
-  const idleIds = drones
-    .map((d) => d.id)
-    .filter((id) => !placedPos[id])
-    .sort(compareDroneId);
-  const idlePos = buildIdleStackPositions(idleIds, lattice);
   return drones.map((d) => {
     if (placedPos[d.id]) return { ...d, ...placedPos[d.id] };
-    if (idlePos[d.id]) return { ...d, ...idlePos[d.id] };
-    return { ...d, z: 0 };
+    const home = homePos?.[d.id];
+    return home ? { ...d, ...home } : d;
   });
 };
 
@@ -469,6 +451,11 @@ export default function FormationGridModal({
    * 만들 때 기본값으로 되돌아가지 않고 직전 설정을 그대로 이어 쓴다.
    */
   const lastLatticeRef = useRef(null);
+  /**
+   * id -> {x,y,z} : 모달을 열었을 때의 좌표(= 이전 상태). 격자에 올리지 않은
+   * 드론은 이 좌표를 그대로 유지하고, 확정할 때도 이 값이 그대로 나간다.
+   */
+  const homePosRef = useRef({});
   const placementRef = useRef({ drones: [], occupancy: {}, homeDrones: [], selectedId: null });
   const [drones, setDrones] = useState([]);
   const [homeDrones, setHomeDrones] = useState([]);
@@ -566,7 +553,12 @@ export default function FormationGridModal({
         }
       }
     }
-    const laidOut = relayoutDrones(seeded, occ, lattice);
+    const homePos = {};
+    seeded.forEach((d) => {
+      homePos[d.id] = { x: d.x, y: d.y, z: d.z };
+    });
+    homePosRef.current = homePos;
+    const laidOut = relayoutDrones(seeded, occ, lattice, homePos);
 
     setNx(lattice.nx);
     setNy(lattice.ny);
@@ -800,7 +792,8 @@ export default function FormationGridModal({
     [ax, ay, az, sx, sy, sz]
   );
 
-  // spacing / anchor / lattice·occupancy 바뀌면 배치 드론은 슬롯, 대기 드론은 바닥 스택으로 재배치
+  // spacing / anchor / lattice·occupancy 가 바뀌면 배치 드론만 슬롯으로 다시
+  // 옮긴다 (대기 드론은 이전 상태 그대로).
   useEffect(() => {
     if (!open) return;
     const lattice = { ax, ay, az, nx, ny, nz, sx, sy, sz };
@@ -813,7 +806,7 @@ export default function FormationGridModal({
       Object.keys(occupancy).some((k) => nextOcc[k] !== occupancy[k]);
 
     setDrones((prev) => {
-      const next = relayoutDrones(prev, nextOcc, lattice);
+      const next = relayoutDrones(prev, nextOcc, lattice, homePosRef.current);
       const changed = next.some(
         (d, i) => d.x !== prev[i]?.x || d.y !== prev[i]?.y || d.z !== prev[i]?.z
       );
@@ -1032,7 +1025,7 @@ export default function FormationGridModal({
         if (id === droneId) delete nextOcc[slot];
       }
       nextOcc[key] = droneId;
-      const nextDrones = relayoutDrones(prevDrones, nextOcc, lattice);
+      const nextDrones = relayoutDrones(prevDrones, nextOcc, lattice, homePosRef.current);
       return { drones: nextDrones, occupancy: nextOcc, selectedId: null };
     },
     [latticeParams]
@@ -1044,7 +1037,12 @@ export default function FormationGridModal({
       if (!prevOcc[key]) return null;
       const nextOcc = { ...prevOcc };
       delete nextOcc[key];
-      const nextDrones = relayoutDrones(prevDrones, nextOcc, latticeParams());
+      const nextDrones = relayoutDrones(
+        prevDrones,
+        nextOcc,
+        latticeParams(),
+        homePosRef.current
+      );
       return { drones: nextDrones, occupancy: nextOcc };
     },
     [latticeParams]
@@ -1153,7 +1151,7 @@ export default function FormationGridModal({
   const clearAll = () => {
     const { drones: prevDrones } = placementRef.current;
     commitPlacement({
-      drones: relayoutDrones(prevDrones, {}, latticeParams()),
+      drones: relayoutDrones(prevDrones, {}, latticeParams(), homePosRef.current),
       occupancy: {},
       selectedId: null,
     });
@@ -1161,17 +1159,20 @@ export default function FormationGridModal({
 
   const handleConfirm = () => {
     const points = {};
+    const gridDroneIds = [];
     const { drones: cur, occupancy: occ } = placementRef.current;
     const placed = new Set(Object.values(occ));
+    if (!placed.size) return;
+    // 격자에 올린 드론은 슬롯 좌표로, 나머지는 열었을 때의 좌표(이전 상태)
+    // 그대로 내보낸다 — 건드리지 않은 드론은 phase에서도 그대로 유지된다.
     cur.forEach((d) => {
-      if (!placed.has(d.id)) return;
       points[d.id] = {
         x: Math.round(d.x * 10000) / 10000,
         y: Math.round(d.y * 10000) / 10000,
         z: Math.round(d.z * 10000) / 10000,
       };
+      if (placed.has(d.id)) gridDroneIds.push(d.id);
     });
-    if (!Object.keys(points).length) return;
     const lattice = {
       nx,
       ny,
@@ -1183,7 +1184,7 @@ export default function FormationGridModal({
       ay: round3(ay),
       az: round3(az),
     };
-    onConfirm?.(points, lattice);
+    onConfirm?.(points, lattice, gridDroneIds);
     onClose();
   };
 
@@ -1298,22 +1299,6 @@ export default function FormationGridModal({
       });
     });
 
-    // 대기 드론 바닥 스택 가이드 라인
-    let idleRail = null;
-    const idleList = drones
-      .filter((d) => !placedDroneIds.has(d.id))
-      .slice()
-      .sort((a, b) => compareDroneId(a.id, b.id));
-    if (idleList.length >= 1) {
-      const a = proj(idleList[0].x, idleList[0].y, 0);
-      const b = proj(
-        idleList[idleList.length - 1].x,
-        idleList[idleList.length - 1].y,
-        0
-      );
-      idleRail = { x1: a.px, y1: a.py, x2: b.px, y2: b.py };
-    }
-
     const atCap = occupiedCount >= drones.length;
     const nodes = [];
     for (let k = 0; k < nz; k += 1) {
@@ -1356,10 +1341,10 @@ export default function FormationGridModal({
         key: d.id,
         label: d.label || shortLabel(d.id, idx),
         title: placed
-          ? `${d.id} · 클릭하면 대기 스택으로`
+          ? `${d.id} · 클릭하면 이전 위치로 되돌림`
           : selected
             ? `${d.id} · 선택됨 — 격자 클릭으로 배치`
-            : `${d.id} · 대기중 — 클릭 후 격자 배치`,
+            : `${d.id} · 이전 위치 유지 — 클릭 후 격자 배치`,
         px: s.px,
         py: s.py,
         placed,
@@ -1409,7 +1394,7 @@ export default function FormationGridModal({
       makeAxis('z', { x: 0, y: 0, z: axisLen }, AXIS_COLORS.z),
     ];
 
-    return { plate, planePoly, planeLines, posts, nodes, dots, idleRail, axes, origin };
+    return { plate, planePoly, planeLines, posts, nodes, dots, axes, origin };
   }, [
     nx,
     ny,
@@ -1866,17 +1851,6 @@ export default function FormationGridModal({
                   strokeDasharray="2 4"
                 />
               ))}
-              {scene.idleRail ? (
-                <line
-                  x1={scene.idleRail.x1}
-                  y1={scene.idleRail.y1}
-                  x2={scene.idleRail.x2}
-                  y2={scene.idleRail.y2}
-                  stroke="rgba(240, 180, 41, 0.22)"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              ) : null}
               {scene.planePoly ? (
                 <polygon
                   points={scene.planePoly}
@@ -2220,12 +2194,12 @@ export default function FormationGridModal({
                     opacity: 0.95,
                   }}
                 >
-                  대기 드론 {idleDrones.length}대
+                  대기 드론 {idleDrones.length}대 · 이전 위치 유지
                   {selectedId ? ` · ${selectedId} 선택됨` : ' · 클릭 후 격자 배치'}
                 </div>
                 {idleDrones.length === 0 ? (
                   <div style={{ fontSize: 12, color: 'rgba(190, 210, 235, 0.4)' }}>
-                    대기 드론 없음 — 배치된 드론을 클릭하면 여기로 돌아옵니다
+                    대기 드론 없음 — 배치된 드론을 클릭하면 이전 위치로 돌아옵니다
                   </div>
                 ) : (
                   <div
@@ -2242,7 +2216,7 @@ export default function FormationGridModal({
                         <button
                           key={d.id}
                           type="button"
-                          title={`${d.id} 대기중`}
+                          title={`${d.id} 대기중 — 이전 위치 유지`}
                           onMouseDown={handleDroneClick(d.id)}
                           style={{
                             width: 30,
@@ -2353,6 +2327,10 @@ export default function FormationGridModal({
                   [
                     '바로 배치',
                     '대기 드론은 하단 스택에 모입니다. 드론을 고른 뒤 격자를 누르면 바로 배치되고, 빈 격자만 눌러도 가장 가까운 대기 드론이 올라갑니다.',
+                  ],
+                  [
+                    '건드리지 않은 드론',
+                    '격자에 올리지 않은 드론은 이전 상태(직전 phase 좌표)를 그대로 유지합니다. 배치한 드론을 다시 클릭하면 원래 자리로 돌아갑니다.',
                   ],
                   [
                     '뷰 조작',

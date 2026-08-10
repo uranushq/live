@@ -369,6 +369,10 @@ const normalizeFormationPhaseForImport = (raw, index) => {
   if (lattice) {
     phase.lattice = lattice;
   }
+  const gridDroneIds = normalizeGridDroneIds(raw?.gridDroneIds, points);
+  if (gridDroneIds.length) {
+    phase.gridDroneIds = gridDroneIds;
+  }
   return phase;
 };
 
@@ -406,6 +410,22 @@ const normalizeFormationLattice = (raw) => {
     ay,
     az: Math.max(0, az),
   };
+};
+
+/**
+ * 그리드 툴이 저장한 "격자에 올린 드론" 목록 정규화. phase.points에 있는
+ * 드론만 남긴다 (points를 주지 않으면 필터링 없이 정리만 한다).
+ */
+const normalizeGridDroneIds = (raw, points = null) => {
+  if (!Array.isArray(raw)) return [];
+  const ids = [];
+  raw.forEach((droneId) => {
+    const key = droneId != null ? String(droneId).trim() : '';
+    if (!key || ids.includes(key)) return;
+    if (points && !Object.prototype.hasOwnProperty.call(points, key)) return;
+    ids.push(key);
+  });
+  return ids;
 };
 
 const stripFormationFromDroneConfigRoot = (parsed) => {
@@ -506,6 +526,16 @@ const remapFormationPhasesToDroneIds = (phases, drones) => {
         )
         .filter((cluster) => cluster.length > 0);
       next = { ...next, clusters: newClusters };
+    }
+    if (Array.isArray(phase.gridDroneIds) && phase.gridDroneIds.length) {
+      const newGridIds = [];
+      phase.gridDroneIds.forEach((k) => {
+        const mapped = mapId(k);
+        if (mapped && !newGridIds.includes(mapped)) {
+          newGridIds.push(mapped);
+        }
+      });
+      next = { ...next, gridDroneIds: newGridIds };
     }
     return next;
   });
@@ -1064,6 +1094,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
           if (lattice) {
             phase.lattice = lattice;
           }
+          const gridDroneIds = normalizeGridDroneIds(p.gridDroneIds, phase.points);
+          if (gridDroneIds.length) {
+            phase.gridDroneIds = gridDroneIds;
+          }
           return phase;
         }),
         settings: sanitizeFormationSettings(formationSettings),
@@ -1203,6 +1237,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 목록과 primary도 ref로 동기 유지한다 (state는 한 렌더 늦게 온다).
   const multiSelectedListRef = useRef([]);
   const primarySelectedIdRef = useRef(null);
+  /**
+   * droneId -> { key, members } : formation 그룹(클러스터)에 묶인 드론.
+   * 3D 뷰에서 멤버 한 대를 클릭하면 그룹 전체가 함께 선택된다.
+   * 아래 droneClusterLookup 메모가 렌더 중에 채워 넣는다.
+   */
+  const droneClusterLookupRef = useRef(new Map());
 
   useEffect(() => {
     multiSelectedListRef.current = multiSelectedDroneIds.map(String);
@@ -1306,7 +1346,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   // 3D 뷰 클릭(click-pick / 구체 마커) → 공유 선택 상태.
   // 그냥 클릭 = 그 드론만 선택(이미 단독 선택이면 해제),
-  // Ctrl/Cmd/Shift + 클릭 = 선택 토글.
+  // Ctrl/Cmd/Shift + 클릭 = 선택 토글, Alt + 클릭 = 그룹 무시하고 한 대만.
+  // formation 그룹(클러스터)에 속한 드론은 한 대만 눌러도 그룹 전체가 함께
+  // 선택/해제된다 — 경로를 만들 때 그룹이 통째로 움직이기 때문이다.
   useEffect(() => {
     if (!isCreateMode) {
       return undefined;
@@ -1327,25 +1369,31 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const selected = multiSelectedRef.current;
       const primaryId = primarySelectedIdRef.current;
 
+      const cluster = detail.solo ? null : droneClusterLookupRef.current.get(id);
+      const groupIds = cluster ? cluster.members : [id];
+      const groupSet = new Set(groupIds);
+      const groupSelected = groupIds.every((member) => selected.has(member));
+
       let next;
       let primary;
 
       if (detail.additive) {
-        if (selected.has(id)) {
-          next = list.filter((item) => item !== id);
+        if (groupSelected) {
+          next = list.filter((item) => !groupSet.has(item));
           primary =
-            primaryId && primaryId !== id && next.includes(primaryId)
+            primaryId && !groupSet.has(primaryId) && next.includes(primaryId)
               ? primaryId
               : next[next.length - 1] ?? null;
         } else {
-          next = [...list, id];
+          next = [...list.filter((item) => !groupSet.has(item)), ...groupIds];
           primary = id;
         }
-      } else if (selected.size === 1 && selected.has(id)) {
+      } else if (groupSelected && selected.size === groupIds.length) {
+        // 이 그룹(또는 이 드론)만 선택된 상태에서 다시 누르면 해제
         next = [];
         primary = null;
       } else {
-        next = [id];
+        next = [...groupIds];
         primary = id;
       }
 
@@ -2142,7 +2190,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   /** Lattice 그리드 툴로 새 phase 추가 또는 기존 phase 좌표 수정 후 씬에 반영 */
   const handleConfirmFormationGridPhase = useCallback(
-    (pointsByDroneId, latticeRaw) => {
+    (pointsByDroneId, latticeRaw, gridDroneIdsRaw) => {
       if (!pointsByDroneId || typeof pointsByDroneId !== 'object') return;
       const points = {};
       for (const [droneId, pos] of Object.entries(pointsByDroneId)) {
@@ -2159,14 +2207,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
       }
       if (!Object.keys(points).length) return;
       const lattice = normalizeFormationLattice(latticeRaw);
+      // 격자에 실제로 올린 드론 목록 — 다시 편집할 때 어떤 드론이 격자 소속이고
+      // 어떤 드론이 이전 상태를 유지 중인지 구분하는 데 쓴다.
+      const gridDroneIds = normalizeGridDroneIds(gridDroneIdsRaw, points);
 
       const editId = formationGridEditPhaseId;
       if (editId) {
         setFormationPhases((prev) =>
           prev.map((phase) => {
             if (String(phase.id) !== String(editId)) return phase;
-            // 그리드에 배치된 드론만 유지 (대기 스택으로 뺀 드론은 phase에서 제거).
-            // yaw 등 기존 속성은 남은 드론에 한해 보존한다.
+            // 그리드에 올리지 않은 드론도 이전 상태 좌표로 그대로 들어온다.
+            // yaw 등 기존 속성은 보존한다.
             const nextPoints = {};
             Object.entries(points).forEach(([id, pos]) => {
               const prevPoint = phase.points?.[id];
@@ -2178,6 +2229,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
             const next = { ...phase, points: nextPoints };
             if (lattice) next.lattice = lattice;
             else delete next.lattice;
+            if (gridDroneIds.length) next.gridDroneIds = gridDroneIds;
+            else delete next.gridDroneIds;
             return next;
           })
         );
@@ -2190,6 +2243,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
             holdMs: 3000,
             points,
             ...(lattice ? { lattice } : {}),
+            ...(gridDroneIds.length ? { gridDroneIds } : {}),
           },
         ]);
       }
@@ -2240,86 +2294,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
       });
   }, [addDroneModalOpen, effectiveConfig]);
 
-  const formationGridDrones = useMemo(() => {
-    const drones = Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [];
-    const editPhase = formationGridEditPhaseId
-      ? formationPhases.find((p) => String(p.id) === String(formationGridEditPhaseId))
-      : null;
-    const phasePoints =
-      editPhase?.points && typeof editPhase.points === 'object' ? editPhase.points : null;
-    const domPoints = readAllDronePositionsFromDom();
-    return drones
-      .filter((d) => d?.id != null && String(d.id).trim() !== '')
-      .map((d) => {
-        const id = String(d.id);
-        const fromPhase = phasePoints?.[id];
-        if (
-          fromPhase &&
-          Number.isFinite(Number(fromPhase.x)) &&
-          Number.isFinite(Number(fromPhase.y)) &&
-          Number.isFinite(Number(fromPhase.z))
-        ) {
-          return {
-            id,
-            x: Number(fromPhase.x),
-            y: Number(fromPhase.y),
-            z: Number(fromPhase.z),
-            fromPhase: true,
-          };
-        }
-        const fromDom = domPoints[id];
-        if (
-          fromDom &&
-          Number.isFinite(Number(fromDom.x)) &&
-          Number.isFinite(Number(fromDom.y)) &&
-          Number.isFinite(Number(fromDom.z))
-        ) {
-          return { id, x: Number(fromDom.x), y: Number(fromDom.y), z: Number(fromDom.z) };
-        }
-        const [x, y, z] = getDroneInitialPositionTuple(d);
-        return { id, x, y, z };
-      });
-  }, [
-    effectiveConfig,
-    formationGridModalOpen,
-    formationGridEditPhaseId,
-    formationPhases,
-  ]);
-
-  const formationGridEditLattice = useMemo(() => {
-    if (!formationGridEditPhaseId) return null;
-    const phase = formationPhases.find(
-      (p) => String(p.id) === String(formationGridEditPhaseId)
-    );
-    return normalizeFormationLattice(phase?.lattice);
-  }, [formationGridEditPhaseId, formationPhases]);
-
   /**
-   * 새 phase를 만들 때 쓸 격자 시드 — 마지막으로 그리드를 사용한 phase의
-   * 개수·간격·기준점. 앱을 다시 켜도 phase에 저장된 값이라 그대로 이어진다.
-   */
-  const formationGridLastUsedLattice = useMemo(() => {
-    for (let i = formationPhases.length - 1; i >= 0; i -= 1) {
-      const lattice = normalizeFormationLattice(formationPhases[i]?.lattice);
-      if (lattice) {
-        return lattice;
-      }
-    }
-
-    return null;
-  }, [formationPhases]);
-
-  const formationGridEditPhaseName = useMemo(() => {
-    if (!formationGridEditPhaseId) return '';
-    const phase = formationPhases.find(
-      (p) => String(p.id) === String(formationGridEditPhaseId)
-    );
-    return phase?.name ? String(phase.name) : '';
-  }, [formationGridEditPhaseId, formationPhases]);
-
-  /**
-   * 그리드 편집기에 회색 참고 점으로 깔아줄 "이전 상태" — 편집이면 바로 앞
-   * phase, 새 phase면 마지막 phase. 앞 phase가 없으면 드론의 초기 위치를 쓴다.
+   * 그리드 편집기의 "이전 상태" — 편집이면 바로 앞 phase, 새 phase면 마지막
+   * phase. 앞 phase가 없으면 씬의 현재 위치(없으면 초기 위치)를 쓴다.
+   * 회색 참고 점이자, 격자에 올리지 않은 드론이 유지할 좌표다.
    */
   const formationGridPrevious = useMemo(() => {
     const drones = Array.isArray(effectiveConfig?.drones)
@@ -2368,12 +2346,23 @@ const ThreeDView = React.forwardRef((props, ref) => {
       };
     }
 
+    const domPoints = readAllDronePositionsFromDom();
     return {
       drones: drones.map((d) => {
+        const id = String(d.id);
+        const fromDom = domPoints[id];
+        if (
+          fromDom &&
+          Number.isFinite(Number(fromDom.x)) &&
+          Number.isFinite(Number(fromDom.y)) &&
+          Number.isFinite(Number(fromDom.z))
+        ) {
+          return { id, x: Number(fromDom.x), y: Number(fromDom.y), z: Number(fromDom.z) };
+        }
         const [x, y, z] = getDroneInitialPositionTuple(d);
-        return { id: String(d.id), x, y, z };
+        return { id, x, y, z };
       }),
-      label: '초기 위치',
+      label: '현재 위치',
     };
   }, [
     effectiveConfig,
@@ -2381,6 +2370,87 @@ const ThreeDView = React.forwardRef((props, ref) => {
     formationGridModalOpen,
     formationPhases,
   ]);
+
+  const formationGridDrones = useMemo(() => {
+    const drones = Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [];
+    const editPhase = formationGridEditPhaseId
+      ? formationPhases.find((p) => String(p.id) === String(formationGridEditPhaseId))
+      : null;
+    const phasePoints =
+      editPhase?.points && typeof editPhase.points === 'object' ? editPhase.points : null;
+    // 격자에 올렸던 드론만 격자 위로 복원한다. 목록이 없는 구버전 phase는
+    // 좌표가 있는 드론 전부를 격자 소속으로 본다.
+    const gridIds = normalizeGridDroneIds(editPhase?.gridDroneIds, phasePoints);
+    const gridIdSet = gridIds.length ? new Set(gridIds) : null;
+    const previousById = {};
+    formationGridPrevious.drones.forEach((d) => {
+      previousById[d.id] = d;
+    });
+    return drones
+      .filter((d) => d?.id != null && String(d.id).trim() !== '')
+      .map((d) => {
+        const id = String(d.id);
+        const fromPhase = phasePoints?.[id];
+        if (
+          fromPhase &&
+          Number.isFinite(Number(fromPhase.x)) &&
+          Number.isFinite(Number(fromPhase.y)) &&
+          Number.isFinite(Number(fromPhase.z))
+        ) {
+          return {
+            id,
+            x: Number(fromPhase.x),
+            y: Number(fromPhase.y),
+            z: Number(fromPhase.z),
+            fromPhase: gridIdSet ? gridIdSet.has(id) : true,
+          };
+        }
+        // phase에 없는 드론은 이전 상태(직전 phase / 현재 위치)를 그대로 유지
+        const previous = previousById[id];
+        if (previous) {
+          return { id, x: previous.x, y: previous.y, z: previous.z };
+        }
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id, x, y, z };
+      });
+  }, [
+    effectiveConfig,
+    formationGridModalOpen,
+    formationGridEditPhaseId,
+    formationPhases,
+    formationGridPrevious,
+  ]);
+
+  const formationGridEditLattice = useMemo(() => {
+    if (!formationGridEditPhaseId) return null;
+    const phase = formationPhases.find(
+      (p) => String(p.id) === String(formationGridEditPhaseId)
+    );
+    return normalizeFormationLattice(phase?.lattice);
+  }, [formationGridEditPhaseId, formationPhases]);
+
+  /**
+   * 새 phase를 만들 때 쓸 격자 시드 — 마지막으로 그리드를 사용한 phase의
+   * 개수·간격·기준점. 앱을 다시 켜도 phase에 저장된 값이라 그대로 이어진다.
+   */
+  const formationGridLastUsedLattice = useMemo(() => {
+    for (let i = formationPhases.length - 1; i >= 0; i -= 1) {
+      const lattice = normalizeFormationLattice(formationPhases[i]?.lattice);
+      if (lattice) {
+        return lattice;
+      }
+    }
+
+    return null;
+  }, [formationPhases]);
+
+  const formationGridEditPhaseName = useMemo(() => {
+    if (!formationGridEditPhaseId) return '';
+    const phase = formationPhases.find(
+      (p) => String(p.id) === String(formationGridEditPhaseId)
+    );
+    return phase?.name ? String(phase.name) : '';
+  }, [formationGridEditPhaseId, formationPhases]);
 
   /** 기존 phase(a,b,c)의 역순(c,b,a)을 복제해 뒤에 추가 */
   const handleAppendReversedFormationPhases = useCallback(() => {
@@ -2408,6 +2478,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
         const lattice = normalizeFormationLattice(phase.lattice);
         if (lattice) {
           reversedPhase.lattice = lattice;
+        }
+        const gridDroneIds = normalizeGridDroneIds(phase.gridDroneIds, points);
+        if (gridDroneIds.length) {
+          reversedPhase.gridDroneIds = gridDroneIds;
         }
         return reversedPhase;
       });
@@ -2529,6 +2603,70 @@ const ThreeDView = React.forwardRef((props, ref) => {
     if (!pid) return;
     setSelectedPhaseId((prev) => (prev === pid ? null : pid));
   }, []);
+
+  /**
+   * 3D 뷰 클릭이 참고하는 그룹 표 — droneId -> { key, members }.
+   * phase를 고른 상태면 그 phase의 그룹만 쓰고, 고르지 않았으면 앞 phase부터
+   * 훑어 드론이 처음 속한 그룹을 쓴다. 존재하지 않는 드론 id는 버린다.
+   */
+  const droneClusterLookup = useMemo(() => {
+    const droneIds = new Set(
+      (Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [])
+        .map((d) => (d?.id != null ? String(d.id) : ''))
+        .filter(Boolean)
+    );
+    const map = new Map();
+    if (!droneIds.size) return map;
+
+    const addPhase = (phase) => {
+      if (!phase || !Array.isArray(phase.clusters)) return;
+      const phaseId = String(phase.id);
+      phase.clusters.forEach((cluster, index) => {
+        const members = (Array.isArray(cluster) ? cluster : [])
+          .map(String)
+          .filter((memberId, i, arr) => droneIds.has(memberId) && arr.indexOf(memberId) === i);
+        if (members.length < 2) return;
+        const entry = {
+          key: `${phaseId}#${index}`,
+          phaseId,
+          phaseName: String(phase.name || '').trim() || phaseId,
+          index,
+          members,
+        };
+        members.forEach((memberId) => {
+          if (!map.has(memberId)) map.set(memberId, entry);
+        });
+      });
+    };
+
+    // 그룹은 phase를 넘어가면 이어지지 않는다 — 딱 한 phase만 본다.
+    // phase를 고른 상태면 그 phase, 아니면 직전(마지막) phase의 그룹만
+    // 살아 있다. 그 phase에 그룹이 없으면 그룹 선택·배지도 없다.
+    const contextPhase = selectedPhaseId
+      ? formationPhases.find((p) => String(p.id) === String(selectedPhaseId))
+      : formationPhases[formationPhases.length - 1];
+    addPhase(contextPhase);
+    return map;
+  }, [effectiveConfig, formationPhases, selectedPhaseId]);
+
+  droneClusterLookupRef.current = droneClusterLookup;
+
+  /** 좌측 선택 패널에 그룹 배지를 그리기 위한 목록 (중복 제거) */
+  const droneClusterGroups = useMemo(() => {
+    const seen = new Set();
+    const groups = [];
+    droneClusterLookup.forEach((entry) => {
+      if (seen.has(entry.key)) return;
+      seen.add(entry.key);
+      groups.push({
+        key: entry.key,
+        label: `그룹 ${entry.index + 1}`,
+        phaseName: entry.phaseName,
+        members: entry.members,
+      });
+    });
+    return groups;
+  }, [droneClusterLookup]);
 
   const handleAddClusterToPhase = useCallback((phaseId) => {
     const pid = phaseId != null ? String(phaseId) : '';
@@ -2652,6 +2790,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const lattice = normalizeFormationLattice(phase.lattice);
       if (lattice) {
         copy.lattice = lattice;
+      }
+      const gridDroneIds = normalizeGridDroneIds(phase.gridDroneIds, points);
+      if (gridDroneIds.length) {
+        copy.gridDroneIds = gridDroneIds;
       }
       const next = prev.slice();
       next.splice(index + 1, 0, copy);
@@ -2789,20 +2931,19 @@ const ThreeDView = React.forwardRef((props, ref) => {
         phasePayload.fixedPaths = fixedPaths;
       }
 
-      // 클러스터: 존재하는 드론만, 직선 고정(fixedPaths)과 중복되지 않게.
+      // 클러스터: 이 phase에 존재하는 드론만. 직선 고정(fixedPaths)된 멤버도
+      // 남겨야 한다 — 클러스터는 경로뿐 아니라 '출발 시점'까지 묶는 뜻이고,
+      // 백엔드는 겹침을 알아서 처리한다(고정 경로가 우선, 나머지 멤버만 그
+      // 경로와의 충돌을 검사). 예전처럼 고정된 멤버를 빼버리면 세 대짜리
+      // 그룹이 한 대만 남거나 통째로 사라져 백엔드가 그룹을 못 본다.
       const pointIdSet = new Set(points.map((p) => p.droneId));
       const clusters = (Array.isArray(phase.clusters) ? phase.clusters : [])
         .map((cluster) =>
           (Array.isArray(cluster) ? cluster : [])
             .map(String)
-            .filter(
-              (id, i, arr) =>
-                pointIdSet.has(id) &&
-                !fixedSet.has(id) &&
-                arr.indexOf(id) === i
-            )
+            .filter((id, i, arr) => pointIdSet.has(id) && arr.indexOf(id) === i)
         )
-        .filter((cluster) => cluster.length > 0);
+        .filter((cluster) => cluster.length > 1);
       if (clusters.length) {
         phasePayload.clusters = clusters;
       }
@@ -3256,6 +3397,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
               name: d.name ? String(d.name) : String(d.id),
             }))}
           selectedIds={multiSelectedDroneIds}
+          groups={droneClusterGroups}
           onChangeSelection={handleMultiSelectionChange}
           onDeleteSelected={handleDeleteSelectedDrones}
           selectedPhase={(() => {

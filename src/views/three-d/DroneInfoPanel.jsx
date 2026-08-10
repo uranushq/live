@@ -559,6 +559,11 @@ export default function DroneInfoPanel({
   skycDownloadStatus = '',
 }) {
   const [activeTab, setActiveTab] = useState('path');
+  /** 지금 선택된 드론 — 클러스터(그룹) 하이라이트 판정에 쓴다 */
+  const multiSelectedSet = useMemo(
+    () => new Set(multiSelectedDroneIds.map(String)),
+    [multiSelectedDroneIds]
+  );
 
   // 포메이션 전송 중 경과 시간 (0.5초 간격 갱신)
   const [sendElapsedSec, setSendElapsedSec] = useState(0);
@@ -1920,7 +1925,19 @@ export default function DroneInfoPanel({
                           gap: 4,
                         }}
                       >
-                        {phase.clusters.map((cluster, clusterIndex) => (
+                        {phase.clusters.map((cluster, clusterIndex) => {
+                          // 그룹 전원이 지금 선택돼 있으면 하이라이트 —
+                          // 3D 뷰에서 그룹 멤버를 클릭했을 때 어떤 그룹이
+                          // 잡혔는지 바로 보인다.
+                          const members = (
+                            Array.isArray(cluster) ? cluster : []
+                          ).map(String);
+                          const active =
+                            members.length > 0 &&
+                            members.every((memberId) =>
+                              multiSelectedSet.has(memberId)
+                            );
+                          return (
                           <div
                             // eslint-disable-next-line react/no-array-index-key
                             key={clusterIndex}
@@ -1928,8 +1945,16 @@ export default function DroneInfoPanel({
                               display: 'flex',
                               alignItems: 'center',
                               gap: 6,
+                              padding: active ? '3px 6px' : 0,
+                              borderRadius: 5,
+                              background: active
+                                ? 'rgba(195, 155, 255, 0.16)'
+                                : 'transparent',
+                              boxShadow: active
+                                ? 'inset 2px 0 0 #c39bff'
+                                : 'none',
                               fontSize: 10.5,
-                              color: '#b9bbc2',
+                              color: active ? '#e6dbff' : '#b9bbc2',
                             }}
                           >
                             <span
@@ -1938,11 +1963,12 @@ export default function DroneInfoPanel({
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
+                                fontWeight: active ? 700 : 400,
                               }}
                               title={cluster.join(', ')}
                             >
-                              그룹 {clusterIndex + 1} · {cluster.length}대 —{' '}
-                              {cluster.join(', ')}
+                              그룹 {clusterIndex + 1} · {cluster.length}대
+                              {active ? ' · 선택됨' : ''} — {cluster.join(', ')}
                             </span>
                             <FormationActionButton
                               title="이 그룹 해제"
@@ -1955,7 +1981,8 @@ export default function DroneInfoPanel({
                               해제
                             </FormationActionButton>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>

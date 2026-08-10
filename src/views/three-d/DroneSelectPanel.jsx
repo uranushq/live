@@ -15,13 +15,21 @@ import React, { useEffect, useRef, useState } from 'react';
  *   선택/해제된다 (누른 행의 반대 상태를 스윕 전체에 적용).
  * - 2대 이상 선택된 상태에서 선택된 드론의 기즈모를 드래그하면 선택된
  *   드론 전체가 같은 벡터만큼 함께 이동한다 (ThreeDView의 그룹 이동 로직).
+ * - formation 그룹(클러스터)에 묶인 드론은 3D 뷰에서 한 대만 눌러도 그룹
+ *   전체가 선택된다. 여기서는 그룹 배지(G1, G2…)와 하이라이트로 보여준다.
  */
+
+/** 그룹 하이라이트 색 — 3D 뷰 선택색(빨강)과 구분되는 보라 계열 */
+const GROUP_ACCENT = '#c39bff';
+const GROUP_ACCENT_DIM = 'rgba(195, 155, 255, 0.16)';
+
 export default function DroneSelectPanel({
   drones = [],
   selectedIds = [],
   onChangeSelection = () => {},
   onDeleteSelected = () => {},
   selectedPhase = null,
+  groups = [],
   onCreateCluster = () => {},
   onRemoveCluster = () => {},
 }) {
@@ -69,6 +77,26 @@ export default function DroneSelectPanel({
   const handleRowMouseEnter = (droneId) => {
     if (!sweepRef.current) return;
     applyToDrone(droneId, sweepRef.current.mode);
+  };
+
+  // 그룹 표: 드론 행에 붙일 배지와, 그룹 전체가 선택됐는지(하이라이트) 여부
+  const groupByDroneId = new Map();
+  groups.forEach((group, index) => {
+    const members = (group.members || []).map(String);
+    const active = members.length > 0 && members.every((id) => selectedSet.has(id));
+    const info = {
+      ...group,
+      members,
+      active,
+      badge: `G${index + 1}`,
+    };
+    members.forEach((id) => {
+      if (!groupByDroneId.has(id)) groupByDroneId.set(id, info);
+    });
+  });
+  const clusterActive = (cluster) => {
+    const members = (Array.isArray(cluster) ? cluster : []).map(String);
+    return members.length > 0 && members.every((id) => selectedSet.has(id));
   };
 
   const selectAll = () => {
@@ -195,6 +223,8 @@ export default function DroneSelectPanel({
               drones.map((d) => {
                 const id = String(d.id);
                 const checked = selectedSet.has(id);
+                const group = groupByDroneId.get(id);
+                const highlighted = !!group?.active;
                 return (
                   <div
                     key={id}
@@ -210,7 +240,12 @@ export default function DroneSelectPanel({
                       padding: '4px 8px',
                       borderRadius: 6,
                       cursor: 'pointer',
-                      background: checked ? 'rgba(76, 141, 255, 0.16)' : 'transparent',
+                      background: highlighted
+                        ? GROUP_ACCENT_DIM
+                        : checked
+                          ? 'rgba(76, 141, 255, 0.16)'
+                          : 'transparent',
+                      boxShadow: highlighted ? `inset 2px 0 0 ${GROUP_ACCENT}` : 'none',
                       color: checked ? '#cfe1ff' : '#b9bbc2',
                     }}
                   >
@@ -230,6 +265,28 @@ export default function DroneSelectPanel({
                     >
                       {d.name || id}
                     </span>
+                    {group ? (
+                      <span
+                        title={`${group.phaseName ? `${group.phaseName} · ` : ''}${
+                          group.label
+                        } · ${group.members.length}대 — 한 대만 눌러도 함께 선택`}
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          lineHeight: 1.4,
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          border: `1px solid ${
+                            highlighted ? GROUP_ACCENT : 'rgba(195, 155, 255, 0.35)'
+                          }`,
+                          background: highlighted ? GROUP_ACCENT : 'transparent',
+                          color: highlighted ? '#1b1224' : GROUP_ACCENT,
+                        }}
+                      >
+                        {group.badge}
+                      </span>
+                    ) : null}
                   </div>
                 );
               })
@@ -288,7 +345,9 @@ export default function DroneSelectPanel({
                   그룹 없음 — 통째로 움직인 블록은 자동 감지됩니다
                 </div>
               ) : (
-                selectedPhase.clusters.map((cluster, index) => (
+                selectedPhase.clusters.map((cluster, index) => {
+                  const active = clusterActive(cluster);
+                  return (
                   <div
                     // eslint-disable-next-line react/no-array-index-key
                     key={index}
@@ -297,8 +356,12 @@ export default function DroneSelectPanel({
                       alignItems: 'center',
                       gap: 6,
                       marginTop: 6,
+                      padding: active ? '3px 5px' : 0,
+                      borderRadius: 5,
+                      background: active ? GROUP_ACCENT_DIM : 'transparent',
+                      boxShadow: active ? `inset 2px 0 0 ${GROUP_ACCENT}` : 'none',
                       fontSize: 10.5,
-                      color: '#b9bbc2',
+                      color: active ? '#e6dbff' : '#b9bbc2',
                     }}
                   >
                     <span
@@ -307,10 +370,11 @@ export default function DroneSelectPanel({
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
+                        fontWeight: active ? 700 : 400,
                       }}
                       title={cluster.join(', ')}
                     >
-                      그룹 {index + 1} · {cluster.length}대
+                      그룹 {index + 1} · {cluster.length}대{active ? ' · 선택됨' : ''}
                     </span>
                     <button
                       type='button'
@@ -345,7 +409,8 @@ export default function DroneSelectPanel({
                       해제
                     </button>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           ) : null}
@@ -364,6 +429,15 @@ export default function DroneSelectPanel({
             3D 뷰 클릭과 같은 선택 (Ctrl·Shift+클릭 = 추가/해제)
             <br />
             2대 이상 선택 후 기즈모 드래그 = 함께 이동
+            {groups.length ? (
+              <>
+                <br />
+                <span style={{ color: GROUP_ACCENT }}>
+                  G 배지 = {groups[0].phaseName || 'formation'} 그룹
+                </span>
+                {' '}— 3D 뷰에서 한 대만 눌러도 그룹 전체 선택 (Alt+클릭 = 한 대만)
+              </>
+            ) : null}
             {selectedPhase ? null : (
               <>
                 <br />
@@ -392,6 +466,14 @@ DroneSelectPanel.propTypes = {
     name: PropTypes.string,
     clusters: PropTypes.arrayOf(PropTypes.arrayOf(PropTypes.string)),
   }),
+  groups: PropTypes.arrayOf(
+    PropTypes.shape({
+      key: PropTypes.string.isRequired,
+      label: PropTypes.string,
+      phaseName: PropTypes.string,
+      members: PropTypes.arrayOf(PropTypes.string).isRequired,
+    })
+  ),
   onCreateCluster: PropTypes.func,
   onRemoveCluster: PropTypes.func,
 };
