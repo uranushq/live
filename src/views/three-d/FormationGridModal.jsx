@@ -62,6 +62,27 @@ const DEFAULT_LATTICE = { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0
 /** 이 대수까지만 이전 phase 회색 점에 드론 라벨을 붙인다. */
 const GHOST_LABEL_LIMIT = 40;
 
+/** 축별 최대 격자 개수 — 세 축 모두 동일하다. */
+export const MAX_GRID_COUNT = 14;
+/** 간격(m) 허용 범위 */
+const MIN_SPACING = 1;
+const MAX_SPACING = 60;
+
+const ZERO_PAN = Object.freeze({ x: 0, y: 0 });
+
+/** 작업 평면(laxis = 평면의 법선축)에 놓인 두 축 */
+const PLANE_AXES = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] };
+
+const AXIS_LABEL = { x: 'X', y: 'Y', z: 'Z' };
+
+/** 평면에서 고를 수 있는 채우기 방향 토큰 ('x+' = +X 쪽으로 진행) */
+const planeFillDirections = (laxis) =>
+  PLANE_AXES[laxis].flatMap((axis) => [`${axis}+`, `${axis}-`]);
+
+const dirAxis = (dir) => dir[0];
+const dirDescending = (dir) => dir[1] === '-';
+const dirLabel = (dir) => `${dir[1]}${AXIS_LABEL[dirAxis(dir)]}`;
+
 /**
  * 기준점(ax,ay,az) = 격자 시작 모서리 (i=j=k=0).
  * 월드 원점(0,0,0)의 XYZ 축과 별개로, 격자만 이 좌표에서 시작한다.
@@ -97,12 +118,12 @@ const normalizeLattice = (raw) => {
     return null;
   }
   return {
-    nx: clamp(nx, 1, 14),
-    ny: clamp(ny, 1, 14),
-    nz: clamp(nz, 1, 10),
-    sx: clamp(sx, 1, 60),
-    sy: clamp(sy, 1, 60),
-    sz: clamp(sz, 1, 60),
+    nx: clamp(nx, 1, MAX_GRID_COUNT),
+    ny: clamp(ny, 1, MAX_GRID_COUNT),
+    nz: clamp(nz, 1, MAX_GRID_COUNT),
+    sx: clamp(sx, MIN_SPACING, MAX_SPACING),
+    sy: clamp(sy, MIN_SPACING, MAX_SPACING),
+    sz: clamp(sz, MIN_SPACING, MAX_SPACING),
     ax,
     ay,
     az: Math.max(0, az),
@@ -149,9 +170,9 @@ const inferLatticeFromPositions = (positions) => {
   const sx = spacingOf(xs, 8);
   const sy = spacingOf(ys, 8);
   const sz = spacingOf(zs, 6);
-  const nx = clamp(xs.length, 1, 14);
-  const ny = clamp(ys.length, 1, 14);
-  const nz = clamp(zs.length, 1, 10);
+  const nx = clamp(xs.length, 1, MAX_GRID_COUNT);
+  const ny = clamp(ys.length, 1, MAX_GRID_COUNT);
+  const nz = clamp(zs.length, 1, MAX_GRID_COUNT);
   // 기준점 = 격자 시작 모서리 (최소 좌표)
   const ax = xs[0];
   const ay = ys[0];
@@ -447,7 +468,16 @@ export default function FormationGridModal({
   const paintRef = useRef(null);
   /** 뷰 드래그 회전: { startX, startYaw } */
   const orbitRef = useRef(null);
+  /** 휠 버튼 드래그 이동: { startX, startY, startPan } */
+  const panRef = useRef(null);
+  /** 가장자리 드래그로 격자 크기 조절: { handle, start, nx, ny, az, unproject } */
+  const resizeRef = useRef(null);
   const yawRef = useRef(35);
+  /**
+   * 이 모달에서 마지막으로 쓴 격자(개수·간격·기준점). 새 phase를 연달아
+   * 만들 때 기본값으로 되돌아가지 않고 직전 설정을 그대로 이어 쓴다.
+   */
+  const lastLatticeRef = useRef(null);
   const placementRef = useRef({ drones: [], occupancy: {}, homeDrones: [], selectedId: null });
   const [drones, setDrones] = useState([]);
   const [homeDrones, setHomeDrones] = useState([]);
@@ -466,8 +496,21 @@ export default function FormationGridModal({
   const [layer, setLayer] = useState(0);
   const [allLayers, setAllLayers] = useState(false);
   const [laxis, setLaxis] = useState('z');
+  /**
+   * 채우기 순서: 작업 평면의 방향 토큰을 최대 2개 담는다 (예: ['x+', 'y-']).
+   * 첫 번째가 가장 빨리 증가하는 축(1번), 두 번째가 그다음(2번). 비워 두면
+   * 평면 축을 오름차순으로 자동 사용한다.
+   */
+  const [fillDirs, setFillDirs] = useState([]);
   const [yaw, setYaw] = useState(35);
   const [zoom, setZoom] = useState(1);
+  /** 휠 버튼 드래그로 옮기는 화면 이동량 (px) */
+  const [pan, setPan] = useState(ZERO_PAN);
+  /**
+   * 격자 크기 조절 중에는 자동 맞춤(fit)을 얼려 둔다. 얼리지 않으면 간격을
+   * 늘리는 순간 뷰가 다시 맞춰지면서 잡은 가장자리가 커서에서 도망간다.
+   */
+  const [fitFreeze, setFitFreeze] = useState(null);
   const [view, setView] = useState({ w: 900, h: 560 });
   const [guide, setGuide] = useState(true);
   const [orbiting, setOrbiting] = useState(false);
@@ -498,9 +541,16 @@ export default function FormationGridModal({
 
     // 편집: 저장된 격자를 우선 복원. 없으면 phase에 속한 드론 좌표만으로 추론
     // (대기/홈 위치 드론이 섞이면 격자가 깨져 빈 화면처럼 보임)
+    // 새 phase: 직전에 쓴 격자를 이어서 쓴다 — 세션 중 마지막으로 다룬 격자가
+    // 우선이고, 없으면 마지막으로 그리드를 쓴 phase의 격자(initialLattice).
     let lattice = DEFAULT_LATTICE;
     let occ = {};
-    if (isEdit) {
+    if (!isEdit) {
+      lattice =
+        normalizeLattice(lastLatticeRef.current) ??
+        normalizeLattice(initialLattice) ??
+        DEFAULT_LATTICE;
+    } else {
       const saved = normalizeLattice(initialLattice);
       const phaseDrones = seeded.filter((d) => d.fromPhase);
       const inferSource = phaseDrones.length ? phaseDrones : seeded;
@@ -542,12 +592,78 @@ export default function FormationGridModal({
     setLayer(0);
     setAllLayers(false);
     setLaxis('z');
+    setFillDirs([]);
     setYaw(35);
     setZoom(1);
+    setPan(ZERO_PAN);
     setGuide(!isEdit);
     paintRef.current = null;
     // dronesProp / mode / initialLattice는 open 시점에만 시드
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- seed on open only
+
+  // 작업 평면이 바뀌면 이전 평면의 방향(1번·2번) 선택은 더 이상 유효하지 않다
+  useEffect(() => {
+    setFillDirs([]);
+  }, [laxis]);
+
+  // 열려 있는 동안의 격자 설정을 기억해 둔다 (닫아도 ref에 남아 다음 phase의
+  // 시드가 된다). 위 시드 효과보다 뒤에 있어야 시드된 값이 기록된다.
+  useEffect(() => {
+    if (!open) return;
+    lastLatticeRef.current = { nx, ny, nz, sx, sy, sz, ax, ay, az };
+  }, [open, nx, ny, nz, sx, sy, sz, ax, ay, az]);
+
+  /**
+   * 가장자리/꼭짓점 드래그 → 반대쪽 변을 고정한 채 간격(과 필요하면 기준점)을
+   * 다시 계산한다. 드래그 시작 때 얼려 둔 투영을 쓰므로 잡은 지점이 커서를
+   * 그대로 따라온다.
+   */
+  const applyResize = useCallback((event) => {
+    const state = resizeRef.current;
+    const el = viewRef.current;
+    if (!state || !el) return;
+
+    const rect = el.getBoundingClientRect();
+    const world = state.unproject(
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+      state.az
+    );
+    if (!Number.isFinite(world.x) || !Number.isFinite(world.y)) return;
+
+    const { handle, start, offset } = state;
+    const round1 = (v) => Math.round(v * 10) / 10;
+    const targetX = world.x - offset.x;
+    const targetY = world.y - offset.y;
+    let { x0, y0, x1, y1 } = start;
+
+    if (handle.includes('x1')) x1 = targetX;
+    else if (handle.includes('x0')) x0 = targetX;
+    if (handle.includes('y1')) y1 = targetY;
+    else if (handle.includes('y0')) y0 = targetY;
+
+    if (handle.includes('x0') || handle.includes('x1')) {
+      if (state.nx > 1) {
+        setSx(
+          clamp(round1(Math.abs(x1 - x0) / (state.nx - 1)), MIN_SPACING, MAX_SPACING)
+        );
+        setAx(round1(Math.min(x0, x1)));
+      } else {
+        setAx(round1(targetX));
+      }
+    }
+
+    if (handle.includes('y0') || handle.includes('y1')) {
+      if (state.ny > 1) {
+        setSy(
+          clamp(round1(Math.abs(y1 - y0) / (state.ny - 1)), MIN_SPACING, MAX_SPACING)
+        );
+        setAy(round1(Math.min(y0, y1)));
+      } else {
+        setAy(round1(targetY));
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -573,6 +689,20 @@ export default function FormationGridModal({
       setOrbiting(false);
     };
     const onMove = (e) => {
+      if (resizeRef.current) {
+        applyResize(e);
+        return;
+      }
+
+      if (panRef.current) {
+        const { startX, startY, startPan } = panRef.current;
+        setPan({
+          x: startPan.x + (e.clientX - startX),
+          y: startPan.y + (e.clientY - startY),
+        });
+        return;
+      }
+
       if (!orbitRef.current) return;
       const dx = e.clientX - orbitRef.current.startX;
       setYaw(wrapYaw(orbitRef.current.startYaw + dx * 0.45));
@@ -582,6 +712,12 @@ export default function FormationGridModal({
         paintRef.current = null;
         setPaintTick((t) => t + 1);
       }
+      if (resizeRef.current) {
+        resizeRef.current = null;
+        // 드래그가 끝나면 다시 자동 맞춤 (커진 격자에 맞게 화면을 다시 잡는다)
+        setFitFreeze(null);
+      }
+      panRef.current = null;
       endOrbit();
     };
     const onKey = (e) => {
@@ -616,8 +752,10 @@ export default function FormationGridModal({
         el.removeEventListener('contextmenu', onContextMenu);
       }
       orbitRef.current = null;
+      panRef.current = null;
+      resizeRef.current = null;
     };
-  }, [open, guide, onClose]);
+  }, [open, guide, onClose, applyResize]);
 
   const beginOrbit = useCallback((clientX) => {
     orbitRef.current = { startX: clientX, startYaw: yawRef.current };
@@ -642,8 +780,18 @@ export default function FormationGridModal({
   const handleViewMouseDown = useCallback(
     (e) => {
       if (guide) return;
-      // 우클릭·휠클릭: 어디서든 회전 / 좌클릭: 빈 배경에서만 회전 (슬롯 배치와 분리)
-      if (e.button === 2 || e.button === 1) {
+      // 휠 버튼: 화면 이동(팬) / 우클릭: 어디서든 회전 /
+      // 좌클릭: 빈 배경에서만 회전 (슬롯 배치와 분리)
+      if (e.button === 1) {
+        e.preventDefault();
+        panRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startPan: pan,
+        };
+        return;
+      }
+      if (e.button === 2) {
         e.preventDefault();
         beginOrbit(e.clientX);
         return;
@@ -653,7 +801,7 @@ export default function FormationGridModal({
         beginOrbit(e.clientX);
       }
     },
-    [guide, beginOrbit]
+    [guide, beginOrbit, pan]
   );
 
   const nodePos = useCallback(
@@ -715,7 +863,7 @@ export default function FormationGridModal({
     [yaw]
   );
 
-  const fit = useMemo(() => {
+  const autoFit = useMemo(() => {
     // 월드 원점 + 격자를 함께 맞춤 → 축(0,0,0)이 보이면서 격자는 기준점 오프셋만큼 떨어짐
     const pts = [{ x: 0, y: 0, z: 0 }];
     for (const k of [0, nz - 1]) {
@@ -758,10 +906,14 @@ export default function FormationGridModal({
     const cv = (vMin + vMax) / 2;
     return {
       s,
-      ox: view.w / 2 - cu * s,
-      oy: padTop + h / 2 - cv * s,
+      ox: view.w / 2 - cu * s + pan.x,
+      oy: padTop + h / 2 - cv * s + pan.y,
     };
-  }, [nx, ny, nz, sx, sy, ax, ay, raw, nodePos, view, zoom]);
+  }, [nx, ny, nz, sx, sy, ax, ay, raw, nodePos, view, zoom, pan]);
+
+  // 크기 조절 중에는 드래그 시작 시점의 맞춤을 그대로 쓴다 (위 fitFreeze 주석)
+  const fit = fitFreeze ?? autoFit;
+  const resizing = Boolean(fitFreeze);
 
   const proj = useCallback(
     (x, y, z) => {
@@ -769,6 +921,101 @@ export default function FormationGridModal({
       return { px: fit.ox + r.u * fit.s, py: fit.oy + r.v * fit.s, depth: r.depth };
     },
     [raw, fit]
+  );
+
+  /**
+   * proj의 역변환 — 화면 좌표를 "z가 주어진 수평면" 위의 월드 좌표로 되돌린다.
+   * (u, v)는 (x, y)에 대해 선형이고 행렬식이 -cos30으로 항상 0이 아니라 안정적.
+   */
+  const unprojectOnZ = useCallback(
+    (px, py, z) => {
+      const c = Math.cos(RAD(yaw));
+      const s = Math.sin(RAD(yaw));
+      const u = (px - fit.ox) / fit.s;
+      const v = (py - fit.oy) / fit.s;
+      const diff = u / COS30; // ry - rx
+      const sum = 2 * (v + z); // rx + ry
+      const rx = (sum - diff) / 2;
+      const ry = (sum + diff) / 2;
+      return { x: rx * c + ry * s, y: -rx * s + ry * c };
+    },
+    [fit, yaw]
+  );
+
+  /**
+   * 격자의 XY 바닥 테두리 + 크기 조절 손잡이. 가장자리를 끌면 그 축의 간격이,
+   * 꼭짓점을 끌면 두 축의 간격이 함께 바뀐다 (반대쪽 변은 제자리에 고정).
+   */
+  const resizeFrame = useMemo(() => {
+    const x0 = ax;
+    const x1 = ax + Math.max(0, nx - 1) * sx;
+    const y0 = ay;
+    const y1 = ay + Math.max(0, ny - 1) * sy;
+    // 손잡이는 격자 밖으로 조금 밀어 둔다 — 꼭짓점 슬롯 클릭을 가리지 않게.
+    const mx = sx * 0.3;
+    const my = sy * 0.3;
+    const c00 = proj(x0 - mx, y0 - my, az);
+    const c10 = proj(x1 + mx, y0 - my, az);
+    const c11 = proj(x1 + mx, y1 + my, az);
+    const c01 = proj(x0 - mx, y1 + my, az);
+    const mid = (a, b) => ({ px: (a.px + b.px) / 2, py: (a.py + b.py) / 2 });
+
+    return {
+      world: { x0, y0, x1, y1 },
+      polygon: [c00, c10, c11, c01]
+        .map((p) => `${p.px.toFixed(1)},${p.py.toFixed(1)}`)
+        .join(' '),
+      handles: [
+        { id: 'x0y0', corner: true, ...c00 },
+        { id: 'x1y0', corner: true, ...c10 },
+        { id: 'x1y1', corner: true, ...c11 },
+        { id: 'x0y1', corner: true, ...c01 },
+        { id: 'x0', axisLabel: 'X', ...mid(c00, c01) },
+        { id: 'x1', axisLabel: 'X', ...mid(c10, c11) },
+        { id: 'y0', axisLabel: 'Y', ...mid(c00, c10) },
+        { id: 'y1', axisLabel: 'Y', ...mid(c01, c11) },
+      ],
+    };
+  }, [ax, ay, az, nx, ny, sx, sy, proj]);
+
+  const beginResize = useCallback(
+    (handleId) => (e) => {
+      if (guide || e.button !== 0) return;
+      const el = viewRef.current;
+      if (!el) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // 잡은 지점과 실제 변 사이의 차이를 기억해 두면 손잡이를 격자 밖에
+      // 그려도 드래그가 커서를 정확히 따라온다.
+      const rect = el.getBoundingClientRect();
+      const grab = unprojectOnZ(e.clientX - rect.left, e.clientY - rect.top, az);
+      const world = resizeFrame.world;
+      const offset = {
+        x: handleId.includes('x1')
+          ? grab.x - world.x1
+          : handleId.includes('x0')
+            ? grab.x - world.x0
+            : 0,
+        y: handleId.includes('y1')
+          ? grab.y - world.y1
+          : handleId.includes('y0')
+            ? grab.y - world.y0
+            : 0,
+      };
+
+      resizeRef.current = {
+        handle: handleId,
+        start: world,
+        offset,
+        nx,
+        ny,
+        az,
+        unproject: unprojectOnZ,
+      };
+      setFitFreeze(autoFit);
+    },
+    [autoFit, az, guide, nx, ny, resizeFrame, unprojectOnZ]
   );
 
   const planeGeom = useMemo(() => {
@@ -907,11 +1154,49 @@ export default function FormationGridModal({
     [commitPlacement, releaseAtKey]
   );
 
+  /**
+   * 채우기 진행 축 순서 — 빠른 축부터 [1번, 2번, 법선축]. 고르지 않은 축은
+   * 평면 축 순서대로 오름차순 자동 배정된다.
+   */
+  const fillAxisOrder = useMemo(() => {
+    const order = [];
+    const pushAxis = (axis, descending) => {
+      if (!order.some((entry) => entry.axis === axis)) {
+        order.push({ axis, descending });
+      }
+    };
+
+    for (const dir of fillDirs) {
+      pushAxis(dirAxis(dir), dirDescending(dir));
+    }
+
+    for (const axis of PLANE_AXES[laxis]) {
+      pushAxis(axis, false);
+    }
+
+    // 법선축은 층을 훑는 순서 (전체 층 채우기일 때만 의미가 있다)
+    pushAxis(laxis, false);
+    return order;
+  }, [fillDirs, laxis]);
+
   const fillLayer = () => {
     let { drones: d, occupancy: occ } = placementRef.current;
-    for (let k = 0; k < nz; k += 1) {
-      for (let j = 0; j < ny; j += 1) {
-        for (let i = 0; i < nx; i += 1) {
+    const counts = { x: nx, y: ny, z: nz };
+    const indices = ({ axis, descending }) => {
+      const list = Array.from({ length: counts[axis] }, (_, idx) => idx);
+      return descending ? list.reverse() : list;
+    };
+
+    const [fast, mid, slow] = fillAxisOrder;
+    const slot = { x: 0, y: 0, z: 0 };
+
+    for (const slowIdx of indices(slow)) {
+      slot[slow.axis] = slowIdx;
+      for (const midIdx of indices(mid)) {
+        slot[mid.axis] = midIdx;
+        for (const fastIdx of indices(fast)) {
+          slot[fast.axis] = fastIdx;
+          const { x: i, y: j, z: k } = slot;
           if (!allLayers && [i, j, k][axIndex] !== layer) continue;
           const key = nodeKey(i, j, k);
           if (occ[key]) continue;
@@ -927,6 +1212,25 @@ export default function FormationGridModal({
       }
     }
     commitPlacement({ drones: d, occupancy: occ, selectedId: null });
+  };
+
+  /**
+   * 방향 버튼 토글. 처음 누른 방향이 1번, 그다음이 2번이 되고 이미 쓴 축의
+   * 반대 방향은 고를 수 없다. 이미 고른 방향을 누르면 그 뒤 선택까지 지운다.
+   */
+  const toggleFillDir = (dir) => {
+    setFillDirs((prev) => {
+      const at = prev.indexOf(dir);
+      if (at >= 0) {
+        return prev.slice(0, at);
+      }
+
+      if (prev.length >= 2 || prev.some((d) => dirAxis(d) === dirAxis(dir))) {
+        return prev;
+      }
+
+      return [...prev, dir];
+    });
   };
 
   const clearAll = () => {
@@ -1288,15 +1592,15 @@ export default function FormationGridModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>격자 개수 (X · Y · Z)</span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <NumberField value={nx} min={1} max={14} integer onChange={setNx} />
-                <NumberField value={ny} min={1} max={14} integer onChange={setNy} />
+                <NumberField value={nx} min={1} max={MAX_GRID_COUNT} integer onChange={setNx} />
+                <NumberField value={ny} min={1} max={MAX_GRID_COUNT} integer onChange={setNy} />
                 <NumberField
                   value={nz}
                   min={1}
-                  max={10}
+                  max={MAX_GRID_COUNT}
                   integer
                   onChange={(v) => {
-                    const next = clamp(Math.round(v), 1, 10);
+                    const next = clamp(Math.round(v), 1, MAX_GRID_COUNT);
                     setNz(next);
                     setLayer((L) => Math.min(L, next - 1));
                   }}
@@ -1430,6 +1734,81 @@ export default function FormationGridModal({
               </div>
             </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={labStyle}>채우기 방향 (1번 → 2번)</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {planeFillDirections(laxis).map((dir) => {
+                  const rank = fillDirs.indexOf(dir);
+                  const selected = rank >= 0;
+                  const blocked =
+                    !selected &&
+                    (fillDirs.length >= 2 ||
+                      fillDirs.some((d) => dirAxis(d) === dirAxis(dir)));
+                  return (
+                    <button
+                      key={dir}
+                      type="button"
+                      disabled={blocked}
+                      title={
+                        blocked
+                          ? '같은 축의 다른 방향이 이미 선택됨'
+                          : selected
+                            ? '다시 누르면 선택 해제'
+                            : `${dirLabel(dir)} 방향으로 먼저 채우기`
+                      }
+                      onClick={() => toggleFillDir(dir)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 6,
+                        padding: '7px 9px',
+                        borderRadius: 8,
+                        border: `1px solid ${
+                          selected ? 'rgba(240, 180, 41, 0.7)' : 'rgba(255,255,255,0.12)'
+                        }`,
+                        background: selected
+                          ? 'rgba(240, 180, 41, 0.14)'
+                          : 'rgba(255,255,255,0.02)',
+                        color: blocked ? 'rgba(255,255,255,0.28)' : 'inherit',
+                        cursor: blocked ? 'not-allowed' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <span>{dirLabel(dir)}</span>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 16,
+                          height: 16,
+                          borderRadius: '50%',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          background: selected ? '#f0b429' : 'transparent',
+                          color: selected ? '#1a1205' : 'transparent',
+                        }}
+                      >
+                        {selected ? rank + 1 : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.45, lineHeight: 1.4 }}>
+                {fillDirs.length === 0
+                  ? `자동 (${dirLabel(`${PLANE_AXES[laxis][0]}+`)} → ${dirLabel(
+                      `${PLANE_AXES[laxis][1]}+`
+                    )} 순)`
+                  : fillDirs.length === 1
+                    ? `${dirLabel(fillDirs[0])} 먼저 · 2번은 자동`
+                    : `${dirLabel(fillDirs[0])} 먼저 → ${dirLabel(fillDirs[1])}`}
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" style={{ ...btnStyle(false), flex: 1, padding: '8px 10px', fontSize: 12 }} onClick={fillLayer}>
                 층 채우기
@@ -1447,6 +1826,8 @@ export default function FormationGridModal({
               </span>
               <div style={{ fontSize: 11, opacity: 0.45, lineHeight: 1.4 }}>
                 드래그로 회전 · 휠로 확대/축소
+                <br />
+                휠 버튼 드래그로 화면 이동 · 노란 테두리를 끌어 격자 크기 조절
               </div>
               <input
                 type="range"
@@ -1666,6 +2047,62 @@ export default function FormationGridModal({
                   stroke="rgba(78, 168, 255, 0.35)"
                   strokeWidth="1"
                 />
+              ))}
+            </svg>
+
+            {/* 격자 크기 조절 테두리 — 가장자리/꼭짓점을 끌어 간격 조절 */}
+            <svg
+              width="100%"
+              height="100%"
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 7 }}
+            >
+              <polygon
+                points={resizeFrame.polygon}
+                fill="none"
+                stroke={resizing ? 'rgba(240, 180, 41, 0.9)' : 'rgba(240, 180, 41, 0.4)'}
+                strokeWidth="1.25"
+                strokeDasharray="5 4"
+              />
+              {resizeFrame.handles.map((h) => (
+                <g key={h.id}>
+                  {/* 잡기 쉬운 투명 히트 영역 */}
+                  <circle
+                    cx={h.px}
+                    cy={h.py}
+                    r="11"
+                    fill="transparent"
+                    style={{ pointerEvents: 'auto', cursor: 'grab' }}
+                    onMouseDown={beginResize(h.id)}
+                  >
+                    <title>
+                      {h.corner
+                        ? '끌어서 X·Y 간격 동시 조절'
+                        : `끌어서 ${h.axisLabel} 간격 조절`}
+                    </title>
+                  </circle>
+                  {h.corner ? (
+                    <rect
+                      x={h.px - 3.5}
+                      y={h.py - 3.5}
+                      width="7"
+                      height="7"
+                      fill="rgba(240, 180, 41, 0.95)"
+                      stroke="rgba(20, 24, 32, 0.85)"
+                      strokeWidth="1"
+                      pointerEvents="none"
+                    />
+                  ) : (
+                    <circle
+                      cx={h.px}
+                      cy={h.py}
+                      r="3.6"
+                      fill="rgba(12, 16, 24, 0.9)"
+                      stroke="rgba(240, 180, 41, 0.9)"
+                      strokeWidth="1.4"
+                      pointerEvents="none"
+                    />
+                  )}
+                </g>
               ))}
             </svg>
 

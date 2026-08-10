@@ -23,7 +23,7 @@ import DroneSelectPanel from './DroneSelectPanel';
 import ImageToDotsModal from './ImageToDotsModal';
 import PathControlPanel from './PathControlPanel';
 import AddDroneModal from './AddDroneModal';
-import FormationGridModal from './FormationGridModal';
+import FormationGridModal, { MAX_GRID_COUNT } from './FormationGridModal';
 import PathGeneratorModal from './PathGeneratorModal';
 import useThreeDViewDroneEvents from './hooks/useThreeDViewDroneEvents';
 import {
@@ -394,9 +394,9 @@ const normalizeFormationLattice = (raw) => {
     return null;
   }
   return {
-    nx: Math.min(14, Math.max(1, nx)),
-    ny: Math.min(14, Math.max(1, ny)),
-    nz: Math.min(10, Math.max(1, nz)),
+    nx: Math.min(MAX_GRID_COUNT, Math.max(1, nx)),
+    ny: Math.min(MAX_GRID_COUNT, Math.max(1, ny)),
+    nz: Math.min(MAX_GRID_COUNT, Math.max(1, nz)),
     sx,
     sy,
     sz,
@@ -2257,6 +2257,21 @@ const ThreeDView = React.forwardRef((props, ref) => {
     return normalizeFormationLattice(phase?.lattice);
   }, [formationGridEditPhaseId, formationPhases]);
 
+  /**
+   * 새 phase를 만들 때 쓸 격자 시드 — 마지막으로 그리드를 사용한 phase의
+   * 개수·간격·기준점. 앱을 다시 켜도 phase에 저장된 값이라 그대로 이어진다.
+   */
+  const formationGridLastUsedLattice = useMemo(() => {
+    for (let i = formationPhases.length - 1; i >= 0; i -= 1) {
+      const lattice = normalizeFormationLattice(formationPhases[i]?.lattice);
+      if (lattice) {
+        return lattice;
+      }
+    }
+
+    return null;
+  }, [formationPhases]);
+
   const formationGridEditPhaseName = useMemo(() => {
     if (!formationGridEditPhaseId) return '';
     const phase = formationPhases.find(
@@ -3017,7 +3032,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
         drones={formationGridDrones}
         onConfirm={handleConfirmFormationGridPhase}
         mode={formationGridEditPhaseId ? 'edit' : 'create'}
-        initialLattice={formationGridEditLattice}
+        initialLattice={
+          formationGridEditPhaseId
+            ? formationGridEditLattice
+            : formationGridLastUsedLattice
+        }
         previousDrones={formationGridPrevious.drones}
         previousLabel={formationGridPrevious.label}
         title={
