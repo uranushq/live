@@ -7,7 +7,11 @@ import Colors from '~/components/colors';
 const AXIS_GROUND_CLEARANCE = 0.08;
 
 /**
- * Component that renders unit-length coordinate system axes at the origin.
+ * Unit-length local-frame axes at the origin.
+ *
+ * X/Y/Z stay fixed in the local coordinate frame (same as drones). Origin
+ * orientation is applied by the flat-Earth transform to the satellite ground,
+ * so relative to the world the axes match the map.
  */
 const CoordinateSystemAxes = ({ leftHanded, lineWidth = 10 }) => {
   const z = AXIS_GROUND_CLEARANCE;

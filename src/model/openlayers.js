@@ -15,9 +15,11 @@ import { updateMissionItemFromFeature } from '~/features/mission/actions';
 import {
   moveOutdoorShowOriginByMapCoordinateDelta,
   rotateOutdoorShowOrientationByAngleAroundPoint,
+  updateOutdoorShowSettings,
 } from '~/features/show/actions';
 import {
   lonLatFromMapViewCoordinate,
+  normalizeAngle,
   normalizePolygon,
 } from '~/utils/geography';
 import { toDegrees } from '~/utils/math';
@@ -224,6 +226,11 @@ function _handleFeatureUpdatesInOpenLayers(
         }
 
         dispatch(updateFlatEarthCoordinateSystem({ position, angle }));
+        dispatch(
+          updateOutdoorShowSettings({
+            orientation: normalizeAngle(angle),
+          })
+        );
       } else {
         // Some other origin (e.g., show origin). We don't handle it yet,
         // maybe later?
