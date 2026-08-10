@@ -5,9 +5,7 @@ import PropTypes from 'prop-types';
 import Colors from '~/components/colors';
 
 import GridSatelliteGround from './GridSatelliteGround';
-
-const RAD = (d) => (d * Math.PI) / 180;
-const COS30 = Math.cos(RAD(30));
+import { fitIsoView, isoInverseOnZ, isoRaw } from './utils/isoProjection';
 
 /** 3D 뷰 CoordinateSystemAxes와 동일한 축 색 */
 const AXIS_COLORS = {
@@ -852,16 +850,7 @@ export default function FormationGridModal({
 
   // 투영·회전은 항상 월드 원점(0,0,0) 기준.
   // 3D 뷰와 동일하게 +Y가 화면 오른쪽, +X가 왼쪽·아래, +Z가 위.
-  const raw = useCallback(
-    (x, y, z) => {
-      const c = Math.cos(RAD(yaw));
-      const s = Math.sin(RAD(yaw));
-      const rx = x * c - y * s;
-      const ry = x * s + y * c;
-      return { u: (ry - rx) * COS30, v: (rx + ry) * 0.5 - z, depth: rx + ry };
-    },
-    [yaw]
-  );
+  const raw = useCallback((x, y, z) => isoRaw(x, y, z, yaw), [yaw]);
 
   const autoFit = useMemo(() => {
     // 월드 원점 + 격자를 함께 맞춤 → 축(0,0,0)이 보이면서 격자는 기준점 오프셋만큼 떨어짐
@@ -882,34 +871,15 @@ export default function FormationGridModal({
       }
     }
 
-    let uMin = Infinity;
-    let uMax = -Infinity;
-    let vMin = Infinity;
-    let vMax = -Infinity;
-    pts.forEach((p) => {
-      const r = raw(p.x, p.y, p.z);
-      if (r.u < uMin) uMin = r.u;
-      if (r.u > uMax) uMax = r.u;
-      if (r.v < vMin) vMin = r.v;
-      if (r.v > vMax) vMax = r.v;
+    return fitIsoView({
+      points: pts,
+      yaw,
+      zoom,
+      width: view.w,
+      height: view.h,
+      pan,
     });
-
-    const padX = 54;
-    const padTop = 48;
-    const padBottom = 110;
-    const w = Math.max(120, view.w - padX * 2);
-    const h = Math.max(120, view.h - padTop - padBottom);
-    const du = Math.max(1, uMax - uMin);
-    const dv = Math.max(1, vMax - vMin);
-    const s = Math.min(w / du, h / dv) * zoom;
-    const cu = (uMin + uMax) / 2;
-    const cv = (vMin + vMax) / 2;
-    return {
-      s,
-      ox: view.w / 2 - cu * s + pan.x,
-      oy: padTop + h / 2 - cv * s + pan.y,
-    };
-  }, [nx, ny, nz, sx, sy, ax, ay, raw, nodePos, view, zoom, pan]);
+  }, [nx, ny, nz, sx, sy, ax, ay, yaw, nodePos, view, zoom, pan]);
 
   // 크기 조절 중에는 드래그 시작 시점의 맞춤을 그대로 쓴다 (위 fitFreeze 주석)
   const fit = fitFreeze ?? autoFit;
@@ -928,17 +898,8 @@ export default function FormationGridModal({
    * (u, v)는 (x, y)에 대해 선형이고 행렬식이 -cos30으로 항상 0이 아니라 안정적.
    */
   const unprojectOnZ = useCallback(
-    (px, py, z) => {
-      const c = Math.cos(RAD(yaw));
-      const s = Math.sin(RAD(yaw));
-      const u = (px - fit.ox) / fit.s;
-      const v = (py - fit.oy) / fit.s;
-      const diff = u / COS30; // ry - rx
-      const sum = 2 * (v + z); // rx + ry
-      const rx = (sum - diff) / 2;
-      const ry = (sum + diff) / 2;
-      return { x: rx * c + ry * s, y: -rx * s + ry * c };
-    },
+    (px, py, z) =>
+      isoInverseOnZ((px - fit.ox) / fit.s, (py - fit.oy) / fit.s, z, yaw),
     [fit, yaw]
   );
 

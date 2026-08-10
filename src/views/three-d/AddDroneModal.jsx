@@ -1,10 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import PropTypes from 'prop-types';
 
+import Colors from '~/components/colors';
+
+import GridSatelliteGround from './GridSatelliteGround';
+import { fitIsoView, isoRaw } from './utils/isoProjection';
+
 const STATUS_OPTIONS = ['Idle', 'Flying', 'Charging', 'Returning'];
 const MAX_GRID_DIM = 25;
+/** 초기 배치는 항상 지면(z = 0) — 3D 뷰의 XY 평면 위에 놓인다. */
 const DEFAULT_ALTITUDE = 0;
+
+/** 3D 뷰 CoordinateSystemAxes와 동일한 축 색 */
+const AXIS_COLORS = { x: Colors.axes.x, y: Colors.axes.y };
 
 const clampInt = (value, min, max) => {
   const n = Math.round(Number(value));
@@ -18,43 +27,41 @@ const clampSpacing = (value) => {
   return Math.min(100, n);
 };
 
-const cellKey = (col, row) => `${col},${row}`;
-
-/** 화면 위= X+, 오른쪽= Y+ (Z=고도) */
-const gridCellToWorldPosition = (col, row, cols, rows, spacing, altitude = DEFAULT_ALTITUDE) => {
-  const totalX = (rows - 1) * spacing;
-  const totalY = (cols - 1) * spacing;
-  const startX = -totalX / 2;
-  const startY = -totalY / 2;
-  const x = startX + (rows - 1 - row) * spacing;
-  const y = startY + col * spacing;
-  return [x, y, altitude];
+/** 셀 좌표는 월드 축과 그대로 대응한다: ix = +X 칸수, iy = +Y 칸수 */
+const cellKey = (ix, iy) => `${ix},${iy}`;
+const parseCellKey = (key) => {
+  const [ix, iy] = key.split(',').map(Number);
+  return { ix, iy };
 };
 
-const buildGridPositions = (cols, rows, spacing, altitude = DEFAULT_ALTITUDE) => {
+/**
+ * 격자는 월드 원점에서 시작해 +X · +Y 방향으로 자란다 (z = 0).
+ * 3D 뷰와 같은 좌표계라서 미리보기에서 본 자리에 그대로 놓인다.
+ */
+const gridCellToWorldPosition = (ix, iy, spacing, altitude = DEFAULT_ALTITUDE) => [
+  ix * spacing,
+  iy * spacing,
+  altitude,
+];
+
+/** +X 방향을 먼저 채우고 한 칸씩 +Y로 넘어간다 (드론 번호 순서) */
+const buildGridPositions = (countX, countY, spacing, altitude = DEFAULT_ALTITUDE) => {
   const positions = [];
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      positions.push(gridCellToWorldPosition(col, row, cols, rows, spacing, altitude));
+  for (let iy = 0; iy < countY; iy += 1) {
+    for (let ix = 0; ix < countX; ix += 1) {
+      positions.push(gridCellToWorldPosition(ix, iy, spacing, altitude));
     }
   }
 
   return positions;
 };
 
-const buildManualPositions = (selectedCells, cols, rows, spacing, altitude = DEFAULT_ALTITUDE) => {
-  return [...selectedCells]
-    .sort((a, b) => {
-      const [ac, ar] = a.split(',').map(Number);
-      const [bc, br] = b.split(',').map(Number);
-      return ar - br || ac - bc;
-    })
-    .map((key) => {
-      const [col, row] = key.split(',').map(Number);
-      return gridCellToWorldPosition(col, row, cols, rows, spacing, altitude);
-    });
-};
+const buildManualPositions = (selectedCells, spacing, altitude = DEFAULT_ALTITUDE) =>
+  [...selectedCells]
+    .map(parseCellKey)
+    .sort((a, b) => a.iy - b.iy || a.ix - b.ix)
+    .map(({ ix, iy }) => gridCellToWorldPosition(ix, iy, spacing, altitude));
 
 const generateDroneBatch = ({
   positions,
@@ -221,21 +228,164 @@ NumberStepper.propTypes = {
   ariaLabel: PropTypes.string,
 };
 
-function GridPreview({ cols, rows, mode, selectedCells, onToggleCell }) {
-  const activeKeys = useMemo(() => {
-    if (mode === 'auto') {
-      const keys = new Set();
-      for (let row = 0; row < rows; row += 1) {
-        for (let col = 0; col < cols; col += 1) {
-          keys.add(cellKey(col, row));
-        }
-      }
-      return keys;
-    }
-    return selectedCells;
-  }, [cols, rows, mode, selectedCells]);
+const wrapYaw = (value) => {
+  let next = Math.round(value) % 360;
+  if (next < 0) next += 360;
+  return next;
+};
 
-  const dotCount = activeKeys.size;
+/**
+ * 3D 뷰와 같은 등축 시선으로 배치를 미리 보여주는 지면 뷰.
+ * 위성 사진 바닥 · 월드 원점 · +X/+Y 축이 함께 보이므로, 여기서 본 자리가
+ * 실제 3D 뷰에서 드론이 놓이는 자리다.
+ */
+function PlacementPreview({
+  countX,
+  countY,
+  spacing,
+  mode,
+  selectedCells,
+  onToggleCell,
+  existingDrones,
+}) {
+  const viewRef = useRef(null);
+  const orbitRef = useRef(null);
+  const [size, setSize] = useState({ w: 320, h: 300 });
+  const [yaw, setYaw] = useState(35);
+  const [zoom, setZoom] = useState(1);
+  const [orbiting, setOrbiting] = useState(false);
+
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(() => {
+      const rect = el.getBoundingClientRect();
+      setSize({ w: rect.width, h: rect.height });
+    });
+    observer.observe(el);
+    const rect = el.getBoundingClientRect();
+    setSize({ w: rect.width, h: rect.height });
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!orbitRef.current) return;
+      setYaw(wrapYaw(orbitRef.current.startYaw + (e.clientX - orbitRef.current.startX) * 0.45));
+    };
+    const onUp = () => {
+      if (!orbitRef.current) return;
+      orbitRef.current = null;
+      setOrbiting(false);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return undefined;
+
+    const onWheel = (e) => {
+      e.preventDefault();
+      const step = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoom((z) => Math.min(2.4, Math.max(0.5, Math.round((z + step) * 10) / 10)));
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const spanX = Math.max(0, countX - 1) * spacing;
+  const spanY = Math.max(0, countY - 1) * spacing;
+
+  const fit = useMemo(() => {
+    const pad = spacing * 1.2;
+    const points = [{ x: 0, y: 0, z: 0 }];
+    for (const x of [-pad, spanX + pad]) {
+      for (const y of [-pad, spanY + pad]) {
+        points.push({ x, y, z: 0 });
+      }
+    }
+
+    return fitIsoView({
+      points,
+      yaw,
+      zoom,
+      width: size.w,
+      height: size.h,
+      padX: 26,
+      padTop: 26,
+      padBottom: 26,
+    });
+  }, [size, spacing, spanX, spanY, yaw, zoom]);
+
+  const project = useCallback(
+    (x, y, z) => {
+      const r = isoRaw(x, y, z, yaw);
+      return { px: fit.ox + r.u * fit.s, py: fit.oy + r.v * fit.s };
+    },
+    [fit, yaw]
+  );
+
+  const cells = useMemo(() => {
+    const list = [];
+    let serial = 0;
+    for (let iy = 0; iy < countY; iy += 1) {
+      for (let ix = 0; ix < countX; ix += 1) {
+        const key = cellKey(ix, iy);
+        const active = mode === 'auto' || selectedCells.has(key);
+        if (active) serial += 1;
+        const p = project(ix * spacing, iy * spacing, 0);
+        list.push({ key, ix, iy, active, order: active ? serial : null, ...p });
+      }
+    }
+    return list;
+  }, [countX, countY, mode, project, selectedCells, spacing]);
+
+  const activeCount = cells.filter((c) => c.active).length;
+
+  // 격자 바닥 선 (칸 경계가 아니라 열·행을 잇는 선 — 방향을 읽기 쉽게)
+  const gridLines = useMemo(() => {
+    const lines = [];
+    for (let ix = 0; ix < countX; ix += 1) {
+      const a = project(ix * spacing, 0, 0);
+      const b = project(ix * spacing, spanY, 0);
+      lines.push({ key: `x${ix}`, x1: a.px, y1: a.py, x2: b.px, y2: b.py });
+    }
+    for (let iy = 0; iy < countY; iy += 1) {
+      const a = project(0, iy * spacing, 0);
+      const b = project(spanX, iy * spacing, 0);
+      lines.push({ key: `y${iy}`, x1: a.px, y1: a.py, x2: b.px, y2: b.py });
+    }
+    return lines;
+  }, [countX, countY, project, spacing, spanX, spanY]);
+
+  const axes = useMemo(() => {
+    const origin = project(0, 0, 0);
+    const length = Math.max(spacing * 1.6, Math.max(spanX, spanY) * 0.28);
+    return {
+      origin,
+      x: { ...project(length, 0, 0), color: AXIS_COLORS.x, label: '+X' },
+      y: { ...project(0, length, 0), color: AXIS_COLORS.y, label: '+Y' },
+    };
+  }, [project, spacing, spanX, spanY]);
+
+  const ghosts = useMemo(
+    () =>
+      (Array.isArray(existingDrones) ? existingDrones : []).map((d, index) => ({
+        key: `${d.id ?? index}`,
+        ...project(d.x, d.y, d.z),
+      })),
+    [existingDrones, project]
+  );
 
   return (
     <div
@@ -243,137 +393,161 @@ function GridPreview({ cols, rows, mode, selectedCells, onToggleCell }) {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        minHeight: 280,
+        minHeight: 300,
       }}
     >
-      <div
-        style={{
-          fontSize: 11,
-          opacity: 0.58,
-          marginBottom: 10,
-        }}
-      >
+      <div style={{ fontSize: 11, opacity: 0.58, marginBottom: 10 }}>
         {mode === 'auto'
-          ? '자동으로 그리드 전체에 배치됩니다'
-          : '그리드를 클릭해 드론 위치를 지정하세요'}
+          ? '3D 뷰와 같은 시선 · z=0 지면에 +X · +Y 방향으로 배치됩니다'
+          : '지면 격자를 클릭해 놓을 자리를 지정하세요 (배경 드래그로 회전)'}
       </div>
 
       <div
+        ref={viewRef}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          const tag = String(e.target.tagName || '').toLowerCase();
+          if (tag === 'circle' && e.target.dataset?.cell) return;
+          e.preventDefault();
+          orbitRef.current = { startX: e.clientX, startYaw: yaw };
+          setOrbiting(true);
+        }}
         style={{
           flex: 1,
           position: 'relative',
+          overflow: 'hidden',
           borderRadius: 12,
           border: '1px solid rgba(130, 190, 255, 0.14)',
-          background:
-            'radial-gradient(circle at 50% 40%, rgba(46, 120, 220, 0.12), rgba(8, 12, 20, 0.92))',
-          padding: 16,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          backgroundColor: 'rgba(8, 12, 20, 0.92)',
+          backgroundImage:
+            'linear-gradient(rgba(80, 120, 180, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(80, 120, 180, 0.07) 1px, transparent 1px)',
+          backgroundSize: '36px 36px',
+          cursor: orbiting ? 'grabbing' : 'grab',
+          touchAction: 'none',
         }}
       >
-        {/* 축: 위=X+, 오른쪽=Y+ */}
+        <GridSatelliteGround project={project} />
+
+        <svg
+          width="100%"
+          height="100%"
+          style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}
+        >
+          {gridLines.map((l) => (
+            <line
+              key={l.key}
+              x1={l.x1}
+              y1={l.y1}
+              x2={l.x2}
+              y2={l.y2}
+              stroke="rgba(120, 170, 225, 0.28)"
+              strokeWidth="1"
+            />
+          ))}
+
+          {/* 기존 드론 — 겹치지 않게 참고만 */}
+          {ghosts.map((g) => (
+            <circle
+              key={`ghost-${g.key}`}
+              cx={g.px}
+              cy={g.py}
+              r="3.4"
+              fill="rgba(190, 198, 210, 0.5)"
+              stroke="rgba(230, 236, 245, 0.4)"
+              strokeWidth="1"
+            />
+          ))}
+
+          {[axes.x, axes.y].map((axis) => (
+            <g key={axis.label}>
+              <line
+                x1={axes.origin.px}
+                y1={axes.origin.py}
+                x2={axis.px}
+                y2={axis.py}
+                stroke={axis.color}
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+              <text
+                x={axis.px}
+                y={axis.py}
+                dx={(axis.px - axes.origin.px) * 0.12}
+                dy={(axis.py - axes.origin.py) * 0.12}
+                fill={axis.color}
+                fontSize="10"
+                fontWeight="700"
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {axis.label}
+              </text>
+            </g>
+          ))}
+          <circle
+            cx={axes.origin.px}
+            cy={axes.origin.py}
+            r="2.6"
+            fill="#fff"
+            stroke="rgba(200, 220, 255, 0.85)"
+            strokeWidth="1.2"
+          />
+
+          {cells.map((cell) => (
+            <g key={cell.key}>
+              <circle
+                cx={cell.px}
+                cy={cell.py}
+                r={cell.active ? 4.6 : 3}
+                fill={cell.active ? '#4ea8ff' : 'rgba(255,255,255,0.14)'}
+                stroke={
+                  cell.active ? 'rgba(200, 230, 255, 0.85)' : 'rgba(255,255,255,0.22)'
+                }
+                strokeWidth="1"
+              />
+              {mode === 'manual' ? (
+                <circle
+                  cx={cell.px}
+                  cy={cell.py}
+                  r="9"
+                  fill="transparent"
+                  data-cell={cell.key}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onToggleCell?.(cell.ix, cell.iy);
+                  }}
+                >
+                  <title>{`X ${cell.ix * spacing}m · Y ${cell.iy * spacing}m`}</title>
+                </circle>
+              ) : null}
+              {cell.order === 1 ? (
+                <text
+                  x={cell.px + 8}
+                  y={cell.py - 6}
+                  fill="rgba(200, 230, 255, 0.9)"
+                  fontSize="9"
+                  fontWeight="700"
+                >
+                  1
+                </text>
+              ) : null}
+            </g>
+          ))}
+        </svg>
+
         <div
           style={{
             position: 'absolute',
-            inset: 0,
+            left: 8,
+            bottom: 6,
+            fontSize: 10,
+            color: 'rgba(236, 245, 255, 0.45)',
             pointerEvents: 'none',
-            zIndex: 2,
           }}
         >
-          <div
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: 10,
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              color: 'rgba(255, 90, 90, 0.85)',
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            <span style={{ lineHeight: 1 }}>↑</span>
-            <span style={{ marginTop: 2 }}>x+</span>
-          </div>
-          <div
-            style={{
-              position: 'absolute',
-              right: 10,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              color: 'rgba(255, 90, 90, 0.85)',
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            <span>y+</span>
-            <span>→</span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 280,
-            aspectRatio: '1 / 1',
-            display: 'grid',
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${rows}, 1fr)`,
-            gap: Math.max(2, Math.min(6, 14 - Math.max(cols, rows) * 0.3)),
-          }}
-        >
-          {Array.from({ length: rows }).map((_, row) =>
-            Array.from({ length: cols }).map((__, col) => {
-              const key = cellKey(col, row);
-              const active = activeKeys.has(key);
-              const clickable = mode === 'manual';
-
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  aria-label={`그리드 ${col + 1}, ${row + 1}${active ? ' (선택됨)' : ''}`}
-                  onClick={() => clickable && onToggleCell?.(col, row)}
-                  style={{
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    background: 'transparent',
-                    cursor: clickable ? 'pointer' : 'default',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: '72%',
-                      height: '72%',
-                      borderRadius: '50%',
-                      background: active
-                        ? 'radial-gradient(circle, #7ec8ff 0%, #3b82f6 55%, #1d4ed8 100%)'
-                        : 'rgba(255,255,255,0.06)',
-                      boxShadow: active
-                        ? '0 0 10px rgba(78, 168, 255, 0.85), 0 0 18px rgba(59, 130, 246, 0.45)'
-                        : 'none',
-                      border: active
-                        ? '1px solid rgba(180, 220, 255, 0.55)'
-                        : '1px solid rgba(255,255,255,0.08)',
-                      transition: 'all 0.15s ease',
-                      transform: active ? 'scale(1)' : 'scale(0.85)',
-                      opacity: active ? 1 : mode === 'manual' ? 0.45 : 0.9,
-                    }}
-                  />
-                </button>
-              );
-            })
-          )}
+          {yaw}° / {zoom.toFixed(1)}× · 드래그 회전 · 휠 확대
         </div>
       </div>
 
@@ -386,21 +560,36 @@ function GridPreview({ cols, rows, mode, selectedCells, onToggleCell }) {
         }}
       >
         생성할 드론{' '}
-        <strong style={{ color: '#7ec8ff', fontSize: 14 }}>{dotCount}</strong> 대
+        <strong style={{ color: '#7ec8ff', fontSize: 14 }}>{activeCount}</strong> 대
       </div>
     </div>
   );
 }
 
-GridPreview.propTypes = {
-  cols: PropTypes.number.isRequired,
-  rows: PropTypes.number.isRequired,
+PlacementPreview.propTypes = {
+  countX: PropTypes.number.isRequired,
+  countY: PropTypes.number.isRequired,
+  spacing: PropTypes.number.isRequired,
   mode: PropTypes.oneOf(['auto', 'manual']).isRequired,
   selectedCells: PropTypes.instanceOf(Set),
   onToggleCell: PropTypes.func,
+  existingDrones: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string,
+      x: PropTypes.number,
+      y: PropTypes.number,
+      z: PropTypes.number,
+    })
+  ),
 };
 
-export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
+export default function AddDroneModal({
+  open,
+  onClose,
+  onAdd,
+  existingIds,
+  existingDrones,
+}) {
   const [mode, setMode] = useState('auto');
   const [gridX, setGridX] = useState(10);
   const [gridY, setGridY] = useState(10);
@@ -432,8 +621,8 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
     setManualCells((prev) => {
       const next = new Set();
       prev.forEach((key) => {
-        const [col, row] = key.split(',').map(Number);
-        if (col < safeGridX && row < safeGridY) next.add(key);
+        const { ix, iy } = parseCellKey(key);
+        if (ix < safeGridX && iy < safeGridY) next.add(key);
       });
       return next.size === prev.size ? prev : next;
     });
@@ -452,8 +641,8 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
 
   if (!open) return null;
 
-  const handleToggleCell = (col, row) => {
-    const key = cellKey(col, row);
+  const handleToggleCell = (ix, iy) => {
+    const key = cellKey(ix, iy);
     setManualCells((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -482,7 +671,7 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
         setError('그리드에서 최소 1개 이상의 위치를 선택해주세요.');
         return;
       }
-      positions = buildManualPositions(manualCells, safeGridX, safeGridY, safeSpacing);
+      positions = buildManualPositions(manualCells, safeSpacing);
     }
 
     const drones = generateDroneBatch({
@@ -537,7 +726,7 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
               드론 추가
             </div>
             <div style={{ fontSize: 12, opacity: 0.55, marginTop: 4 }}>
-              그리드로 한 번에 배치하거나 직접 찍어서 배치
+              3D 뷰와 같은 지면(z=0)에 배치 · 원점에서 +X · +Y 방향
             </div>
           </div>
           <button
@@ -617,10 +806,18 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
                   <NumberStepper
                     value={safeGridX}
                     onChange={setGridX}
-                    ariaLabel="가로"
+                    ariaLabel="X 방향 개수"
                   />
-                  <div style={{ fontSize: 10, opacity: 0.45, marginTop: 4, textAlign: 'center' }}>
-                    가로 {safeGridX}
+                  <div
+                    style={{
+                      fontSize: 10,
+                      marginTop: 4,
+                      textAlign: 'center',
+                      color: AXIS_COLORS.x,
+                      opacity: 0.85,
+                    }}
+                  >
+                    +X {safeGridX}대
                   </div>
                 </div>
                 <span style={{ opacity: 0.4, fontSize: 14, paddingTop: 4 }}>×</span>
@@ -628,10 +825,18 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
                   <NumberStepper
                     value={safeGridY}
                     onChange={setGridY}
-                    ariaLabel="세로"
+                    ariaLabel="Y 방향 개수"
                   />
-                  <div style={{ fontSize: 10, opacity: 0.45, marginTop: 4, textAlign: 'center' }}>
-                    세로 {safeGridY}
+                  <div
+                    style={{
+                      fontSize: 10,
+                      marginTop: 4,
+                      textAlign: 'center',
+                      color: AXIS_COLORS.y,
+                      opacity: 0.85,
+                    }}
+                  >
+                    +Y {safeGridY}대
                   </div>
                 </div>
               </div>
@@ -691,13 +896,15 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
             </div>
           </div>
 
-          {/* Right: preview */}
-          <GridPreview
-            cols={safeGridX}
-            rows={safeGridY}
+          {/* Right: 3D 뷰와 같은 시선의 배치 미리보기 */}
+          <PlacementPreview
+            countX={safeGridX}
+            countY={safeGridY}
+            spacing={safeSpacing}
             mode={mode}
             selectedCells={manualCells}
             onToggleCell={handleToggleCell}
+            existingDrones={existingDrones}
           />
         </div>
 
@@ -729,7 +936,8 @@ export default function AddDroneModal({ open, onClose, onAdd, existingIds }) {
           }}
         >
           <div style={{ fontSize: 11, opacity: 0.45 }}>
-            {safeGridX} × {safeGridY} grid · {safeSpacing}m
+            {safeGridX} × {safeGridY} grid · {safeSpacing}m · z=0 지면, 원점에서 +X ·
+            +Y 방향
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
@@ -779,4 +987,13 @@ AddDroneModal.propTypes = {
   onClose: PropTypes.func.isRequired,
   onAdd: PropTypes.func.isRequired,
   existingIds: PropTypes.arrayOf(PropTypes.string),
+  /** 이미 있는 드론의 현재 위치 — 미리보기에 회색 점으로 겹쳐 보여준다 */
+  existingDrones: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string,
+      x: PropTypes.number,
+      y: PropTypes.number,
+      z: PropTypes.number,
+    })
+  ),
 };

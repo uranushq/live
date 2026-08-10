@@ -132,6 +132,8 @@ const findFbxModelComponent = (el) => {
   return null;
 };
 
+const EMPTY_DRONE_POSITIONS = Object.freeze([]);
+
 const DEFAULT_PATH_DELIVERY_URL = '/api/v1/path-planner/plan';
 const PATH_DELIVERY_PROXY_TARGET = 'http://localhost:5001/api/v1/path-planner/plan';
 const PATH_DELIVERY_STATUS_DISMISS_MS = 5000;
@@ -2203,6 +2205,41 @@ const ThreeDView = React.forwardRef((props, ref) => {
     [formationGridEditPhaseId]
   );
 
+  /** 드론 추가 미리보기에 참고로 겹쳐 보여줄 기존 드론의 현재 위치 */
+  const addDronePreviewDrones = useMemo(() => {
+    if (!addDroneModalOpen) {
+      return EMPTY_DRONE_POSITIONS;
+    }
+
+    const drones = Array.isArray(effectiveConfig?.drones)
+      ? effectiveConfig.drones
+      : [];
+    const domPoints = readAllDronePositionsFromDom();
+
+    return drones
+      .filter((d) => d?.id != null && String(d.id).trim() !== '')
+      .map((d) => {
+        const id = String(d.id);
+        const fromDom = domPoints[id];
+        if (
+          fromDom &&
+          Number.isFinite(Number(fromDom.x)) &&
+          Number.isFinite(Number(fromDom.y)) &&
+          Number.isFinite(Number(fromDom.z))
+        ) {
+          return {
+            id,
+            x: Number(fromDom.x),
+            y: Number(fromDom.y),
+            z: Number(fromDom.z),
+          };
+        }
+
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id, x, y, z };
+      });
+  }, [addDroneModalOpen, effectiveConfig]);
+
   const formationGridDrones = useMemo(() => {
     const drones = Array.isArray(effectiveConfig?.drones) ? effectiveConfig.drones : [];
     const editPhase = formationGridEditPhaseId
@@ -3023,6 +3060,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
             ? effectiveConfig.drones.map((d) => d.id)
             : []
         }
+        existingDrones={addDronePreviewDrones}
       />
       )}
       {isCreateMode && (
