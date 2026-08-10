@@ -7,6 +7,27 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-10 16:54:36 +0900 — `d9606b76` grid formation
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 3D 시뮬레이션 뷰에서 위성사진 바닥·다중 선택(Ctrl/Shift 클릭)과 이전 phase 위치를 참고로 보여주는 격자 배치(Grid Formation) 기능을 통합했다.
+
+**주요 변경점**:
+- `click-pick.js`: 선택 상태를 외부(ThreeDView)가 소유하는 `externalSelection` 모드 추가. 클릭 시 어떤 드론을 맞췄는지와 modifier(Ctrl/Cmd/Shift) 여부만 이벤트(`additive`)로 알리고, 하이라이트·토글 판단은 소유자가 처리. 토글 클릭 중 빈 곳을 눌러도 전체 선택이 날아가지 않도록 보정.
+- `DroneSphereMarkers.jsx`: `selectedIds` prop을 받아 선택 드론을 빨간색(`SELECTED_BODY_COLOR`)으로 칠하고, 색상 캐시 key에 선택 상태를 반영. 구체 자체 레이캐스트에도 다중 선택(`additive`) 규칙 적용.
+- `FormationGridModal.jsx`: 격자 편집 모달에 이전 phase(또는 현재 위치)를 회색 점(ghost dots)으로 깔아 이동 전/후를 시각화(라벨은 40대까지). 3D 뷰와 동일한 위성 사진 바닥(`GridSatelliteGround`) 렌더링.
+- 신규 파일 `GridSatelliteGround.jsx`, `utils/satelliteTiles.js` 추가 및 `SatelliteMapGround.jsx` 리팩터링(153→상당 축소, 타일 로직 공용화 추정).
+- `ThreeDView.jsx` 대폭 확장(+325줄): 선택 상태 소유·격자 배치 기능 배선.
+- `DroneSelectPanel.jsx`: 패널 선택과 3D 뷰 클릭 선택이 동일 상태임을 안내(Ctrl·Shift 추가/해제) 문구 추가.
+
+**의미/영향**: 앞선 `daeced48`(InstancedMesh 구 마커·시뮬레이션 최적화)에 이어, 시뮬레이션/Create 모드의 상호작용을 실제 편집 워크플로우로 완성하는 커밋이다. 다중 선택·기즈모 이동·격자 배치가 하나의 선택 상태로 묶이고, 위성사진 바닥·ghost 참고 레이어로 야외 쇼 배치의 공간감이 크게 개선된다. 위성 타일 로직을 유틸로 분리·공용화해 3D 뷰와 격자 모달이 같은 베이스맵을 공유하도록 정리한 점도 유지보수 측면에서 긍정적이다.
+
+**주의/리스크**: 선택 소유권이 컴포넌트 로컬(live view)과 외부(ThreeDView Create 모드)로 이원화되어, 두 경로의 하이라이트/해제 규칙이 어긋나면 선택 상태 불일치가 생길 수 있다. 위성 타일 로드는 외부 타일 서버 의존·네트워크 비용이 있어 오프라인/타일 실패 시 폴백 처리가 필요하다. 이 diff만으로는 `SatelliteMapGround.jsx` 리팩터링이 기존 동작을 그대로 보존하는지, 격자 모달과 3D 뷰의 좌표 투영(`proj`)이 완전히 일치하는지는 확인 불가.
+
+---
+
+
 ## 2026-08-07 22:09:25 +0900 — `daeced48` 최적화
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
