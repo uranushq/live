@@ -7,6 +7,25 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-11 17:08:46 +0900 — `298fb159` smoothing logic
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 관성 속도 프로파일을 단일 스무딩+지수/로그 곡률 구조에서 가속 램프·등속 plateau·감속 램프 3구간 모델로 재설계하고 경로 스무딩 로직을 강화했다.
+
+**주요 변경점**:
+- 속도 프로파일을 가속/감속 각각의 **모양(exp·log·linear·none)**, **폭(a, b)**, **곡률** 노브로 분리하고 plateau 폭은 파생값(1-a-b)으로 자동 계산
+- plateau가 0으로 눌리면 양쪽 램프를 등속으로 잠그는 `plateauCollapsed` 상태와 경고 UI, 노브 비활성화 처리 추가
+- 노브 상태를 개별 useState에서 통합 `profileKnobs` 객체 + `refreshProfileKnobs`로 리팩터링, 폭 리셋(`resetProfileWidths`) 및 스무딩 연동(`widthsLinked`) 지원
+- 신규 `utils/pathSmoothing.js`(158줄) 추가, `velocityProfile.js`·`skycExportUtils.js` 대폭 확장, 차트(`VelocityProfileChart`)를 새 profile 객체 기반으로 교체
+
+**의미/영향**: 기존 3D 경로 생성 기능(FormationBuilder·PathGenerator·skyc export)의 핵심인 속도 프로파일 표현력을 크게 확장해, 코너 감속·오버슛 제어 등 실제 드론 비행 특성을 세밀하게 조율할 수 있게 됐다. 전역 공유·localStorage 저장 구조를 유지하므로 plan/delivery/skyc 패치 등 모든 생성 경로에 일관되게 적용된다. 최근 "path 제작 기능 완성"에 이은 후속 정교화 작업으로, 경로/비행 품질 고도화 단계로 볼 수 있다.
+
+**주의/리스크**: 프로파일 파라미터 스키마가 바뀌어 이전에 localStorage에 저장된 값이나 skyc export 포맷과의 하위 호환성 검증이 필요하며, a+b가 1을 넘을 때의 밀림 처리·plateau 잠금 로직의 경계 케이스 테스트가 권장된다.
+
+---
+
+
 ## 2026-08-10 16:54:36 +0900 — `d9606b76` grid formation
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
