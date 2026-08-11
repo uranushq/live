@@ -946,12 +946,6 @@ const LargeControlButtonGroup = ({
           </Typography>
         ) : null}
 
-        {!hasSelection ? (
-          <Typography className={classes.stageStatusHint} variant='caption'>
-            {t('largeControlButtonGroup.targetSelection')}
-          </Typography>
-        ) : null}
-
         <Box className={classes.bottomBarGrid}>
           {BOTTOM_BAR_BUTTONS.map((button) => (
             <BottomBarCommandButton

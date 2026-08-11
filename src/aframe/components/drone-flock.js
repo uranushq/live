@@ -24,7 +24,10 @@ import { abbreviateGPSFixType } from '~/model/enums';
 import { uavIdToGlobalId } from '~/model/identifiers';
 import { getFlatEarthCoordinateTransformer } from '~/selectors/map';
 import store from '~/store';
-import { showYawToModelRotationZ } from '~/aframe/components/fbx-model';
+import {
+  showYawToModelRotationZ,
+  UR9_TARGET_SIZE_M,
+} from '~/aframe/components/fbx-model';
 import { resolveShowYawForUav } from '~/views/three-d/showYawUtils';
 
 const { THREE } = AFrame;
@@ -32,6 +35,12 @@ const DRONE_BODY_COLOR = 0xff8c00;
 const DRONE_ARMED_COLOR = 0x00ff00;
 const DRONE_HOVER_COLOR = 0xff0000;
 const DRONE_SELECTION_BOX_COLOR = 0x58c7ff;
+/** Selection wireframe size vs preferred drone radius (was 2.8). */
+const DRONE_SELECTION_BOX_SCALE = 1.4;
+/** Invisible pick-sphere radius vs preferred drone radius — wider than the OBJ mesh. */
+const DRONE_PICK_RADIUS_SCALE = 1.8;
+/** Model origin is at the feet; lift helpers to body mid-height. */
+const DRONE_BODY_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 
 const getDroneBodyColorFromUAV = (uav) =>
   uav.errors.includes(UAVErrorCode.MOTORS_RUNNING_WHILE_ON_GROUND)
@@ -285,7 +294,14 @@ AFrame.registerSystem('drone-flock', {
       entity.selectionBox = null;
     }
 
-    const size = this._droneRadius * 2.8;
+    if (entity.pickVolume) {
+      entity.object3D.remove(entity.pickVolume);
+      entity.pickVolume.geometry.dispose();
+      entity.pickVolume.material.dispose();
+      entity.pickVolume = null;
+    }
+
+    const size = this._droneRadius * DRONE_SELECTION_BOX_SCALE;
     const boxGeometry = new THREE.BoxGeometry(size, size, size);
     const edges = new THREE.EdgesGeometry(boxGeometry);
     boxGeometry.dispose();
@@ -298,11 +314,25 @@ AFrame.registerSystem('drone-flock', {
         opacity: 0.95,
       })
     );
+    line.position.z = DRONE_BODY_CENTER_Z;
     line.userData.clickPickIgnore = true;
     line.visible = Boolean(entity.isHovered || entity.isSelected);
     entity.object3D.add(line);
     entity.selectionBox = line;
 
+    // Invisible hit volume so sparse OBJ meshes are easier to click/hover.
+    const pickRadius = this._droneRadius * DRONE_PICK_RADIUS_SCALE;
+    const pickMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(pickRadius, 10, 8),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      })
+    );
+    pickMesh.position.z = DRONE_BODY_CENTER_Z;
+    entity.object3D.add(pickMesh);
+    entity.pickVolume = pickMesh;
   },
 
   setEntityHovered(entity, hovered) {
