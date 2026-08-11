@@ -686,6 +686,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
     ledPlaying,
     threeDSync,
     ledTimelineDuration,
+    animationEditPanelOpen: animationEditPanelOpenProp,
+    onAnimationEditPanelOpenChange,
   } = props;
 
   // Sync is only meaningful when an LED show exists (its playhead is the master
@@ -729,6 +731,26 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const ignorePersistedDroneConfigRef = useRef(false);
   const formationHydratedFromPersistRef = useRef(false);
   const snapDronesToHomeAfterRehydrateRef = useRef(false);
+
+  // 상단 버튼으로 여는 애니메이션 편집(우측 DroneInfo) 패널.
+  const [animationEditPanelOpenLocal, setAnimationEditPanelOpenLocal] =
+    useState(false);
+  const animationEditPanelOpen =
+    typeof animationEditPanelOpenProp === 'boolean'
+      ? animationEditPanelOpenProp
+      : animationEditPanelOpenLocal;
+  const setAnimationEditPanelOpen = useCallback(
+    (next) => {
+      const value =
+        typeof next === 'function' ? next(animationEditPanelOpen) : next;
+      if (typeof onAnimationEditPanelOpenChange === 'function') {
+        onAnimationEditPanelOpenChange(value);
+      } else {
+        setAnimationEditPanelOpenLocal(value);
+      }
+    },
+    [animationEditPanelOpen, onAnimationEditPanelOpenChange]
+  );
 
   // 드론 추가 모달
   const [addDroneModalOpen, setAddDroneModalOpen] = useState(false);
@@ -930,8 +952,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const extraSceneProps = {};
   if (showStatistics) extraSceneProps.stats = 'true';
 
-  const panelOpen =
-    isCreateMode && !!selectedDrone && selectedDrone.source !== 'uav';
+  const panelOpen = isCreateMode && animationEditPanelOpen;
   const effectiveLighting = naturalLighting || lighting;
 
   useEffect(() => {
@@ -939,13 +960,28 @@ const ThreeDView = React.forwardRef((props, ref) => {
     setIsPlaybackRunning(false);
     setAddDroneModalOpen(false);
     setPathGeneratorModalOpen(false);
+    setAnimationEditPanelOpen(false);
     setSelectedDrone(null);
     setPendingAutoSelectDrone(null);
     window.dispatchEvent(new CustomEvent('drone-deselected'));
-  }, [isCreateMode]);
+  }, [isCreateMode, setAnimationEditPanelOpen]);
+
+  // 드론을 고르면 애니메이션 편집 패널도 함께 연다.
+  useEffect(() => {
+    if (!isCreateMode) return;
+    if (selectedDrone && selectedDrone.source !== 'uav') {
+      setAnimationEditPanelOpen(true);
+    }
+  }, [
+    isCreateMode,
+    selectedDrone?.id,
+    selectedDrone?.source,
+    setAnimationEditPanelOpen,
+  ]);
 
   const closePanel = () => {
     // ✅ 패널 닫기 = 선택 해제까지 같이 일어나게 (A-Frame도 정리되도록)
+    setAnimationEditPanelOpen(false);
     window.dispatchEvent(new CustomEvent('drone-deselected'));
     setSelectedDrone(null);
   };
@@ -1319,6 +1355,25 @@ const ThreeDView = React.forwardRef((props, ref) => {
     },
     [emitPrimarySelection]
   );
+
+  // 상단 버튼으로 애니메이션 편집을 열었는데 선택된 드론이 없으면 첫 드론을 고른다.
+  useEffect(() => {
+    if (!isCreateMode || !animationEditPanelOpen) return;
+    if (selectedDrone && selectedDrone.source !== 'uav') return;
+    const drones = Array.isArray(effectiveConfig?.drones)
+      ? effectiveConfig.drones
+      : [];
+    const first = drones.find((d) => d?.id != null);
+    if (!first) return;
+    const id = String(first.id);
+    applySelection([id], id, { emitPrimary: true });
+  }, [
+    isCreateMode,
+    animationEditPanelOpen,
+    selectedDrone,
+    effectiveConfig,
+    applySelection,
+  ]);
 
   // "드론 선택" 패널에서 목록이 바뀐 경우. primary(정보 패널·기즈모가 붙는
   // 드론)는 여전히 선택돼 있으면 그대로 둔다 — 목록을 긁어서 여러 대를 담는
@@ -2763,6 +2818,27 @@ const ThreeDView = React.forwardRef((props, ref) => {
     });
   }, []);
 
+  const handleReorderFormationPhase = useCallback((fromIndex, toIndex) => {
+    const from = Number(fromIndex);
+    const to = Number(toIndex);
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return;
+    setFormationPhases((prev) => {
+      if (
+        from < 0 ||
+        to < 0 ||
+        from >= prev.length ||
+        to >= prev.length ||
+        from === to
+      ) {
+        return prev;
+      }
+      const next = prev.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
   const handleDuplicateFormationPhase = useCallback((phaseId) => {
     if (!phaseId) return;
     setFormationPhases((prev) => {
@@ -3362,6 +3438,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         canRecoverReversedFormationPhases={lastReversedPhaseIds.length > 0}
         onRemoveFormationPhase={handleRemoveFormationPhase}
         onMoveFormationPhase={handleMoveFormationPhase}
+        onReorderFormationPhase={handleReorderFormationPhase}
         onDuplicateFormationPhase={handleDuplicateFormationPhase}
         onUpdateFormationPhaseMeta={handleUpdateFormationPhaseMeta}
         onUpdateFormationDronePosition={handleUpdateFormationDronePosition}
@@ -3492,6 +3569,8 @@ ThreeDView.propTypes = {
   grid: PropTypes.string,
   interactionMode: PropTypes.oneOf(['view', 'create']),
   isCreateMode: PropTypes.bool,
+  animationEditPanelOpen: PropTypes.bool,
+  onAnimationEditPanelOpenChange: PropTypes.func,
   isCoordinateSystemLeftHanded: PropTypes.bool,
   lighting: PropTypes.oneOf(['dark', 'light']),
   naturalLighting: PropTypes.oneOf(['dark', 'light']),
