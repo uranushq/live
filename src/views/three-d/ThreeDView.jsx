@@ -1833,9 +1833,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
     maxPathDurationMs * (Math.min(100, Math.max(0, Number(pathProgress) || 0)) / 100);
 
   // 구체 렌더 활성 조건: 편집 모드에서 토글 ON이면 즉시 구체로 표시
-  // (재생 여부와 무관 — 체크하면 바로 바뀌어야 알아보기 쉽다). 구체
-  // 표시 중에는 개별 OBJ 엔티티가 없으므로 클릭/기즈모 편집은 쉬고,
-  // 끄면 즉시 복귀한다.
+  // (재생 여부와 무관 — 체크하면 바로 바뀌어야 알아보기 쉽다).
+  // DroneShapeMarkers 부모 엔티티는 유지하고 OBJ/LED 시각만 떼며,
+  // 끄면 같은 엔티티에 모델을 다시 붙인다.
   const sphereModeActive = isCreateMode && sphereSimRender;
   const sphereModeActiveRef = useRef(false);
   sphereModeActiveRef.current = sphereModeActive;
@@ -3379,13 +3379,14 @@ const ThreeDView = React.forwardRef((props, ref) => {
             drones={effectiveConfig && Array.isArray(effectiveConfig.drones) ? effectiveConfig.drones : undefined}
             selectedDroneId={selectedPathDroneId}
           />
-          {isCreateMode && !sphereModeActive && (
+          {isCreateMode && (
             <DroneShapeMarkers
               drones={
                 effectiveConfig && Array.isArray(effectiveConfig.drones)
                   ? effectiveConfig.drones
                   : undefined
               }
+              showModels={!sphereModeActive}
             />
           )}
           {isCreateMode && sphereModeActive && (

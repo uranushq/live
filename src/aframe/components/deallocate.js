@@ -7,11 +7,14 @@
 
 import AFrame from '@skybrush/aframe-components';
 
+import { clearDroneModelTemplateCache } from '~/aframe/components/fbx-model';
+
 const { Cache } = AFrame.THREE;
 
 AFrame.registerComponent('deallocate', {
   remove() {
     Cache.clear();
+    clearDroneModelTemplateCache();
 
     const renderer = this.el?.renderer;
     if (!renderer) {

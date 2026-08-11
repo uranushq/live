@@ -58,7 +58,7 @@ function normalizeDrones(drones) {
     .filter((d) => d.id);
 }
 
-const DroneShapeMarkers = React.memo(({ drones }) => {
+const DroneShapeMarkers = React.memo(({ drones, showModels = true }) => {
   const items = normalizeDrones(drones);
 
   return items.map((d, index) => (
@@ -74,8 +74,14 @@ const DroneShapeMarkers = React.memo(({ drones }) => {
       data-initial-pos={d.initialPos.join(' ')}
       data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
     >
-      <a-entity mixin="drone-marker" class="three-d-clickable" />
-      {ledShowEnabled && <a-entity drone-led-panel={`index: ${index}`} />}
+      {/* 구체 모드에서는 시각(OBJ/LED)만 떼고 부모 엔티티는 유지한다.
+          위치·선택·기즈모 계약이 끊기지 않고, 체크 해제 시 모델만 다시 붙는다. */}
+      {showModels && (
+        <a-entity mixin="drone-marker" class="three-d-clickable" />
+      )}
+      {showModels && ledShowEnabled && (
+        <a-entity drone-led-panel={`index: ${index}`} />
+      )}
     </a-entity>
   ));
 });
@@ -83,6 +89,7 @@ const DroneShapeMarkers = React.memo(({ drones }) => {
 DroneShapeMarkers.displayName = 'DroneShapeMarkers';
 
 DroneShapeMarkers.propTypes = {
+  showModels: PropTypes.bool,
   drones: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string,

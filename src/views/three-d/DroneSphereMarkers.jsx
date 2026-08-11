@@ -6,22 +6,17 @@ import { UR9_TARGET_SIZE_M } from '~/aframe/components/fbx-model';
 import { computePlaybackFrame } from '~/features/led-editor/utils';
 import store from '~/store';
 
-import { DEFAULT_DRONE_GROUND_POSITION } from './utils/threeDViewUtils';
-
 const { THREE } = AFrame;
 
 // Simulation render: draw all drones as one InstancedMesh of coloured spheres
 // instead of a per-drone OBJ model, so 100+ drones stay fast (one draw call, no
 // per-drone point light, no per-drone LED-panel meshes).
 //
-// IMPORTANT: only the VISUAL changes. Every drone still gets an invisible
-// per-drone "proxy" a-entity carrying the exact same data-* attributes and
-// position as the OBJ markers, so the whole existing event/data layer —
-// drone-move-bridge (move/path/yaw/initial-pos events), the axis gizmo,
-// position collection for formation payloads, hover/selection consumers —
-// keeps working unchanged. A per-frame sync loop mirrors the proxies'
-// positions into the instanced mesh, and clicking a sphere raycasts the
-// instance and emits the same `drone-selected` event as click-pick.
+// IMPORTANT: only the VISUAL changes. DroneShapeMarkers keeps the per-drone
+// a-entity parents (data-*, position) mounted even in sphere mode — those are
+// the source of truth for drone-move-bridge, the axis gizmo, formation capture,
+// etc. This component only mirrors those existing entities into the instanced
+// mesh and handles sphere click → `drone-selected`.
 const SPHERE_RADIUS = 0.5; // metres
 const SPHERE_SEGMENTS_W = 10;
 const SPHERE_SEGMENTS_H = 8;
@@ -35,9 +30,7 @@ const DEFAULT_BODY_COLOR = 0xff8c00;
 // (fbx-model `_select`), so the "드론 선택" panel and the 3D view agree.
 const SELECTED_BODY_COLOR = 0xff0000;
 
-// DroneShapeMarkers와 동일한 정규화 — 프록시 엔티티가 OBJ 마커와 같은
-// 속성(data-*)을 노출해야 기존 소비자들이 차이를 못 느낀다.
-function normalizeDrones(drones) {
+function normalizeDroneIds(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
 
   return drones
@@ -46,50 +39,19 @@ function normalizeDrones(drones) {
         d.id !== undefined && d.id !== null && String(d.id).trim() !== ''
           ? String(d.id)
           : `drone-${index + 1}`;
-      const name = d.name || id;
-      const battery = Number.isFinite(Number(d.battery)) ? Number(d.battery) : 100;
-      const status = d.status || 'Idle';
-      const firstPathPoint = Array.isArray(d.path) && d.path.length ? d.path[0] : null;
-      const fallbackPos =
-        firstPathPoint &&
-        Number.isFinite(Number(firstPathPoint.x)) &&
-        Number.isFinite(Number(firstPathPoint.y)) &&
-        Number.isFinite(Number(firstPathPoint.z))
-          ? [Number(firstPathPoint.x), Number(firstPathPoint.y), Number(firstPathPoint.z)]
-          : DEFAULT_DRONE_GROUND_POSITION;
-      let initialPosArray = fallbackPos;
-      if (Array.isArray(d.initialPos) && d.initialPos.length === 3) {
-        initialPosArray = d.initialPos;
-      } else if (Array.isArray(d.initial_position) && d.initial_position.length === 3) {
-        initialPosArray = d.initial_position;
-      }
-      const posArray = firstPathPoint
-        ? fallbackPos
-        : Array.isArray(d.pos) && d.pos.length === 3
-          ? d.pos
-          : initialPosArray;
-      const pathYaw =
-        firstPathPoint && Number.isFinite(Number(firstPathPoint.yaw))
-          ? Number(firstPathPoint.yaw)
-          : null;
-      const yaw = Number.isFinite(Number(d.yaw))
-        ? Number(d.yaw)
-        : Number.isFinite(Number(d.heading))
-          ? Number(d.heading)
-          : pathYaw ?? 0;
-
-      return {
-        id,
-        name,
-        battery,
-        status,
-        pos: posArray,
-        initialPos: initialPosArray,
-        path: Array.isArray(d.path) ? d.path : [],
-        yaw,
-      };
+      return id;
     })
-    .filter((d) => d.id);
+    .filter(Boolean);
+}
+
+function findDroneEntity(droneId) {
+  if (droneId == null || typeof document === 'undefined') return null;
+  const id = String(droneId);
+  const safeId =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(id)
+      : id;
+  return document.querySelector(`a-scene [data-drone-id="${safeId}"]`);
 }
 
 // Representative solid colour of an LED-show drone's k×k panel (the average of
@@ -114,10 +76,10 @@ function representativeColor(pixels) {
 }
 
 const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
-  const items = React.useMemo(() => normalizeDrones(drones), [drones]);
+  const ids = React.useMemo(() => normalizeDroneIds(drones), [drones]);
   const elRef = React.useRef(null);
   const meshRef = React.useRef(null);
-  const proxyRefs = React.useRef(new Map()); // drone id -> a-entity
+  const entityByIdRef = React.useRef(new Map());
 
   const selectedSet = React.useMemo(
     () => new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String)),
@@ -129,12 +91,18 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
     [selectedSet]
   );
 
-  const setProxyRef = React.useCallback((id) => {
-    return (el) => {
-      if (el) proxyRefs.current.set(id, el);
-      else proxyRefs.current.delete(id);
-    };
-  }, []);
+  // DroneShapeMarkers 부모가 먼저 마운트되므로, 한 프레임 뒤 엔티티 맵을 채운다.
+  React.useEffect(() => {
+    let rafId = requestAnimationFrame(() => {
+      const map = new Map();
+      for (const id of ids) {
+        const el = findDroneEntity(id);
+        if (el) map.set(id, el);
+      }
+      entityByIdRef.current = map;
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [ids]);
 
   // Build (and rebuild on count change) the instanced sphere mesh.
   React.useEffect(() => {
@@ -151,7 +119,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         meshRef.current.material.dispose();
         meshRef.current = null;
       }
-      if (!items.length) return;
+      if (!ids.length) return;
 
       const geometry = new THREE.SphereGeometry(
         SPHERE_RADIUS,
@@ -159,14 +127,22 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         SPHERE_SEGMENTS_H
       );
       const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const mesh = new THREE.InstancedMesh(geometry, material, items.length);
+      const mesh = new THREE.InstancedMesh(geometry, material, ids.length);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
       const m = new THREE.Matrix4();
       const color = new THREE.Color(DEFAULT_BODY_COLOR);
-      for (let i = 0; i < items.length; i++) {
-        const [x, y, z] = items[i].pos;
-        m.makeTranslation(x, y, (Number(z) || 0) + SPHERE_CENTER_Z);
+      for (let i = 0; i < ids.length; i++) {
+        let proxy = entityByIdRef.current.get(ids[i]);
+        if (!proxy) {
+          proxy = findDroneEntity(ids[i]);
+          if (proxy) entityByIdRef.current.set(ids[i], proxy);
+        }
+        const p = proxy?.object3D?.position;
+        const x = p?.x ?? 0;
+        const y = p?.y ?? 0;
+        const z = p?.z ?? 0;
+        m.makeTranslation(x, y, z + SPHERE_CENTER_Z);
         mesh.setMatrixAt(i, m);
         mesh.setColorAt(i, color);
       }
@@ -193,12 +169,11 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         meshRef.current = null;
       }
     };
-  }, [items]);
+  }, [ids]);
 
-  // Per-frame sync: mirror each proxy entity's (local) position into its
-  // instance matrix. The proxies are the single source of truth and are moved
-  // by the exact same events as the OBJ markers (drone-move-bridge, gizmo,
-  // playback), so the spheres follow every interaction for free.
+  // Per-frame sync: mirror each drone entity's (local) position into its
+  // instance matrix. The DroneShapeMarkers parents are the single source of
+  // truth and are moved by the exact same events as when OBJ is shown.
   React.useEffect(() => {
     const matrix = new THREE.Matrix4();
     let rafId = null;
@@ -207,8 +182,12 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
       const mesh = meshRef.current;
       if (mesh) {
         let changed = false;
-        for (let i = 0; i < items.length; i++) {
-          const proxy = proxyRefs.current.get(items[i].id);
+        for (let i = 0; i < ids.length; i++) {
+          let proxy = entityByIdRef.current.get(ids[i]);
+          if (!proxy?.object3D) {
+            proxy = findDroneEntity(ids[i]);
+            if (proxy) entityByIdRef.current.set(ids[i], proxy);
+          }
           const p = proxy?.object3D?.position;
           if (!p) continue;
           matrix.makeTranslation(p.x, p.y, p.z + SPHERE_CENTER_Z);
@@ -224,7 +203,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
-  }, [items]);
+  }, [ids]);
 
   // Drive per-instance colour from the LED show, updating only when the show or
   // the playhead actually changes (cheap: one Float32Array write per drone).
@@ -254,9 +233,9 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         ? computePlaybackFrame(boards, led.droneCount, led.ledsPerDrone, playheadSec)
         : null;
       const color = new THREE.Color();
-      for (let i = 0; i < items.length; i++) {
+      for (let i = 0; i < ids.length; i++) {
         const rep = frame?.drones ? representativeColor(frame.drones[i]) : null;
-        if (selectedSet.has(items[i].id)) {
+        if (selectedSet.has(ids[i])) {
           color.setHex(SELECTED_BODY_COLOR);
         } else if (rep) {
           color.setRGB(rep[0], rep[1], rep[2]);
@@ -283,7 +262,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
       unsubscribe();
       window.removeEventListener('drone-sphere-frame', onFrame);
     };
-  }, [items, selectedSet, selectionKey]);
+  }, [ids, selectedSet, selectionKey]);
 
   // 구체 클릭 = 드론 선택. InstancedMesh는 click-pick의 '.three-d-clickable'
   // 레이캐스트에 걸리지 않으므로 자체 레이캐스트로 instanceId를 찾아 기존
@@ -332,28 +311,34 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
 
         return;
       }
-      const item = items[hit.instanceId];
-      if (!item) return;
+      const id = ids[hit.instanceId];
+      if (!id) return;
 
-      // click-pick과 동일한 detail 형식으로 발행 — 프록시 엔티티에서 현재
-      // 위치/초기 위치를 읽는다 (기즈모·패널이 같은 방식으로 반응).
-      const proxy = proxyRefs.current.get(item.id);
+      let proxy = entityByIdRef.current.get(id);
+      if (!proxy) {
+        proxy = findDroneEntity(id);
+        if (proxy) entityByIdRef.current.set(id, proxy);
+      }
       const p = proxy?.object3D?.position;
+      const initialRaw = proxy?.getAttribute?.('data-initial-pos');
+      const initialParts = String(initialRaw || '')
+        .split(/\s+/)
+        .map(Number);
       window.dispatchEvent(
         new CustomEvent('drone-selected', {
           detail: {
             additive,
             solo,
-            id: item.id,
-            name: item.name,
+            id,
+            name: proxy?.getAttribute?.('data-drone-name') || id,
             source: null,
-            status: item.status,
-            heading: String(item.yaw),
+            status: proxy?.getAttribute?.('data-status') || 'Idle',
+            heading: String(proxy?.getAttribute?.('data-heading') ?? 0),
             currentPosition: p ? { x: p.x, y: p.y, z: p.z } : null,
             initialPosition: {
-              x: Number(item.initialPos[0]) || 0,
-              y: Number(item.initialPos[1]) || 0,
-              z: Number(item.initialPos[2]) || 0,
+              x: Number.isFinite(initialParts[0]) ? initialParts[0] : 0,
+              y: Number.isFinite(initialParts[1]) ? initialParts[1] : 0,
+              z: Number.isFinite(initialParts[2]) ? initialParts[2] : 0,
             },
           },
         })
@@ -366,30 +351,9 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('click', onClick);
     };
-  }, [items]);
+  }, [ids]);
 
-  return (
-    <>
-      {/* 보이지 않는 프록시 엔티티: OBJ 마커와 동일한 데이터 계약
-          (data-*, position, rotation) — 시각 자식만 없다. 이동 브리지,
-          기즈모, 위치 수집 등 기존 레이어가 이 엔티티들을 그대로 쓴다. */}
-      {items.map((d) => (
-        <a-entity
-          key={d.id}
-          ref={setProxyRef(d.id)}
-          position={d.pos.join(' ')}
-          data-drone-id={d.id}
-          data-drone-name={d.name}
-          data-battery={d.battery}
-          data-status={d.status}
-          data-heading={d.yaw}
-          data-initial-pos={d.initialPos.join(' ')}
-          data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
-        />
-      ))}
-      <a-entity ref={elRef} data-sphere-flock="true" />
-    </>
-  );
+  return <a-entity ref={elRef} data-sphere-flock="true" />;
 });
 
 DroneSphereMarkers.displayName = 'DroneSphereMarkers';
