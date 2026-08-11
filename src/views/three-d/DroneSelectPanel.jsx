@@ -109,11 +109,12 @@ export default function DroneSelectPanel({
 
   return (
     <div
+      data-three-d-ui="true"
       style={{
         position: 'absolute',
         top: 12,
         left: 12,
-        zIndex: 11000,
+        zIndex: 12050,
         width: 190,
         borderRadius: 10,
         background: 'rgba(16, 18, 22, 0.82)',

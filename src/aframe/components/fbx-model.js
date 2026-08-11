@@ -81,6 +81,68 @@ const prepareLoadedModel = (model, scale, rotation) => {
 const getTransformKey = (url, scale, rotation) =>
   `${url}|${scale.x},${scale.y},${scale.z}|${rotation.x},${rotation.y},${rotation.z}`;
 
+/** URL → Promise<template Object3D>. 드론 N대가 같은 OBJ를 각각 fetch하지 않도록 공유. */
+const modelTemplatePromises = new Map();
+
+const sharedFbxLoader = new FBXLoader();
+const sharedObjLoader = new OBJLoader();
+const sharedMtlLoader = new MTLLoader();
+
+const cloneModelInstance = (template) => {
+  const model = template.clone(true);
+  model.traverse((child) => {
+    if (!child?.isMesh || !child.material) return;
+    // 선택 틴트가 다른 드론까지 번지지 않도록 material은 인스턴스마다 복제
+    child.material = Array.isArray(child.material)
+      ? child.material.map((mat) => mat.clone())
+      : child.material.clone();
+  });
+  return model;
+};
+
+const loadModelTemplate = (url) => {
+  if (modelTemplatePromises.has(url)) {
+    return modelTemplatePromises.get(url);
+  }
+
+  const promise = new Promise((resolve, reject) => {
+    if (/\.obj$/i.test(url)) {
+      const basePath = url.slice(0, url.lastIndexOf('/') + 1);
+      const objFile = url.slice(url.lastIndexOf('/') + 1);
+      const mtlFile = objFile.replace(/\.obj$/i, '.mtl');
+
+      sharedMtlLoader.setPath(basePath);
+      sharedMtlLoader.load(
+        mtlFile,
+        (materials) => {
+          materials.preload();
+          const loader = new OBJLoader();
+          loader.setMaterials(materials);
+          loader.load(url, resolve, undefined, reject);
+        },
+        undefined,
+        () => {
+          sharedObjLoader.load(url, resolve, undefined, reject);
+        }
+      );
+      return;
+    }
+
+    sharedFbxLoader.load(url, resolve, undefined, reject);
+  }).catch((error) => {
+    modelTemplatePromises.delete(url);
+    throw error;
+  });
+
+  modelTemplatePromises.set(url, promise);
+  return promise;
+};
+
+/** 씬 remount / WebGL context loss 시 오래된 템플릿을 버린다. */
+const clearDroneModelTemplateCache = () => {
+  modelTemplatePromises.clear();
+};
+
 if (!AFrame.components['fbx-model']) {
   AFrame.registerComponent('fbx-model', {
     schema: {
@@ -102,9 +164,7 @@ if (!AFrame.components['fbx-model']) {
 
     init() {
       this.model = null;
-      this.fbxLoader = new FBXLoader();
-      this.objLoader = new OBJLoader();
-      this.mtlLoader = new MTLLoader();
+      this._loadToken = 0;
 
       this._origMatColors = new Map();
       this._tintedMats = new Set();
@@ -159,58 +219,36 @@ if (!AFrame.components['fbx-model']) {
         return;
       }
 
-      if (this._loadingUrl === finalUrl) {
-        return;
-      }
-      this._loadingUrl = finalUrl;
+      const loadToken = ++this._loadToken;
 
-      const onLoaded = (model) => {
-        this._loadingUrl = null;
-        this._loadedUrl = finalUrl;
-
-        if (this.model) {
-          this._restoreColorsOnly();
-          this._removeLight();
-          this.el.object3D.remove(this.model);
-        }
-
-        prepareLoadedModel(model, scale, modelRotation);
-        this.model = model;
-        this.el.object3D.add(model);
-        this._transformKey = transformKey;
-
-        this._ensureLight();
-        if (this._isSelected) this._applyRedColorsOnly();
-      };
-
-      const onError = (error) => {
-        this._loadingUrl = null;
-        console.error('[fbx-model] failed to load model:', finalUrl, error);
-      };
-
-      if (/\.obj$/i.test(finalUrl)) {
-        const basePath = finalUrl.slice(0, finalUrl.lastIndexOf('/') + 1);
-        const objFile = finalUrl.slice(finalUrl.lastIndexOf('/') + 1);
-        const mtlFile = objFile.replace(/\.obj$/i, '.mtl');
-
-        this.mtlLoader.setPath(basePath);
-        this.mtlLoader.load(
-          mtlFile,
-          (materials) => {
-            materials.preload();
-            const loader = new OBJLoader();
-            loader.setMaterials(materials);
-            loader.load(finalUrl, onLoaded, undefined, onError);
-          },
-          undefined,
-          () => {
-            this.objLoader.load(finalUrl, onLoaded, undefined, onError);
+      loadModelTemplate(finalUrl)
+        .then((template) => {
+          // 언마운트/재요청 중이면 무시 (구체↔OBJ 토글 시 경쟁 방지)
+          if (loadToken !== this._loadToken || !this.el?.object3D || !this.el.isConnected) {
+            return;
           }
-        );
-        return;
-      }
 
-      this.fbxLoader.load(finalUrl, onLoaded, undefined, onError);
+          const model = cloneModelInstance(template);
+
+          if (this.model) {
+            this._restoreColorsOnly();
+            this._removeLight();
+            this.el.object3D.remove(this.model);
+          }
+
+          prepareLoadedModel(model, scale, modelRotation);
+          this.model = model;
+          this._loadedUrl = finalUrl;
+          this._transformKey = transformKey;
+          this.el.object3D.add(model);
+
+          this._ensureLight();
+          if (this._isSelected) this._applyRedColorsOnly();
+        })
+        .catch((error) => {
+          if (loadToken !== this._loadToken) return;
+          console.error('[fbx-model] failed to load model:', finalUrl, error);
+        });
     },
 
     tick() {
@@ -355,8 +393,15 @@ if (!AFrame.components['fbx-model']) {
     },
 
     remove() {
+      this._loadToken += 1;
       this._restoreColorsOnly();
       this._removeLight();
+      if (this.model && this.el?.object3D) {
+        this.el.object3D.remove(this.model);
+      }
+      this.model = null;
+      this._loadedUrl = null;
+      this._transformKey = null;
       this._origMatColors.clear();
       this._tintedMats.clear();
     },
@@ -369,4 +414,5 @@ export {
   DRONE_MODEL_YAW_OFFSET,
   showYawToModelRotationZ,
   UR9_TARGET_SIZE_M,
+  clearDroneModelTemplateCache,
 };

@@ -1,12 +1,20 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 
-import { showYawToModelRotationZ } from '~/aframe/components/fbx-model';
+import {
+  showYawToModelRotationZ,
+  UR9_TARGET_SIZE_M,
+} from '~/aframe/components/fbx-model';
 import { hasFeature } from '~/utils/configuration';
 
 import { DEFAULT_DRONE_GROUND_POSITION } from './utils/threeDViewUtils';
 
 const ledShowEnabled = hasFeature('ledShow');
+
+/** Invisible pick sphere — matches Navigate outdoor pick (radius × 1.8). */
+const DRONE_PICK_RADIUS = 0.9;
+/** Model origin is at the feet; lift the pick volume to body mid-height. */
+const DRONE_BODY_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 
 function normalizeDrones(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
@@ -58,7 +66,7 @@ function normalizeDrones(drones) {
     .filter((d) => d.id);
 }
 
-const DroneShapeMarkers = React.memo(({ drones }) => {
+const DroneShapeMarkers = React.memo(({ drones, showModels = true }) => {
   const items = normalizeDrones(drones);
 
   return items.map((d, index) => (
@@ -74,8 +82,23 @@ const DroneShapeMarkers = React.memo(({ drones }) => {
       data-initial-pos={d.initialPos.join(' ')}
       data-path={d.path && d.path.length ? JSON.stringify(d.path) : undefined}
     >
-      <a-entity mixin="drone-marker" class="three-d-clickable" />
-      {ledShowEnabled && <a-entity drone-led-panel={`index: ${index}`} />}
+      {/* 구체 모드에서는 시각(OBJ/LED)만 떼고 부모 엔티티는 유지한다.
+          위치·선택·기즈모 계약이 끊기지 않고, 체크 해제 시 모델만 다시 붙는다. */}
+      {showModels && (
+        <a-entity mixin="drone-marker" class="three-d-clickable" />
+      )}
+      {/* OBJ 메시보다 넓은 투명 피킹 구 — Navigate(drone-flock)와 동일 목적 */}
+      {showModels && (
+        <a-entity
+          class="three-d-clickable"
+          position={`0 0 ${DRONE_BODY_CENTER_Z}`}
+          geometry={`primitive: sphere; radius: ${DRONE_PICK_RADIUS}; segmentsWidth: 10; segmentsHeight: 8`}
+          material="opacity: 0; transparent: true; depthWrite: false; shader: flat"
+        />
+      )}
+      {showModels && ledShowEnabled && (
+        <a-entity drone-led-panel={`index: ${index}`} />
+      )}
     </a-entity>
   ));
 });
@@ -83,6 +106,7 @@ const DroneShapeMarkers = React.memo(({ drones }) => {
 DroneShapeMarkers.displayName = 'DroneShapeMarkers';
 
 DroneShapeMarkers.propTypes = {
+  showModels: PropTypes.bool,
   drones: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string,

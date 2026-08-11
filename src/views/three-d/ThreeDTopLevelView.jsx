@@ -4,15 +4,17 @@
 
 import loadable from '@loadable/component';
 import Settings from '@mui/icons-material/Settings';
+import ViewSidebar from '@mui/icons-material/ViewSidebar';
 import Alert from '@mui/material/Alert';
 import AlertTitle from '@mui/material/AlertTitle';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Toolbar from '@mui/material/Toolbar';
+import Tooltip from '@mui/material/Tooltip';
 import debounce from 'lodash-es/debounce';
 import PropTypes from 'prop-types';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { IgnoreKeys } from 'react-hotkeys';
 import { connect } from 'react-redux';
 import useResizeObserver from 'use-resize-observer';
@@ -153,6 +155,13 @@ const ThreeDTopLevelView = ({
   const effectiveInteractionMode = forcedInteractionMode || interactionMode;
   const isCreateMode = effectiveInteractionMode === ThreeDInteractionMode.CREATE;
   const classes = useStyles();
+  const [animationEditPanelOpen, setAnimationEditPanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isCreateMode) {
+      setAnimationEditPanelOpen(false);
+    }
+  }, [isCreateMode]);
 
   const threeDViewRef = useRef(null);
   const hostNodeRef = useRef(null);
@@ -419,6 +428,40 @@ const ThreeDTopLevelView = ({
                   onChange={onSetInteractionMode}
                 />
               )}
+              {isCreateMode && (
+                <Tooltip
+                  title={
+                    animationEditPanelOpen
+                      ? '애니메이션 편집 닫기'
+                      : '애니메이션 편집 열기'
+                  }
+                >
+                  <IconButton
+                    size="small"
+                    aria-label="애니메이션 편집"
+                    aria-pressed={animationEditPanelOpen}
+                    onClick={() =>
+                      setAnimationEditPanelOpen((prev) => !prev)
+                    }
+                    sx={{
+                      ml: 0.25,
+                      color: animationEditPanelOpen
+                        ? '#ffffff'
+                        : 'rgba(255,255,255,0.45)',
+                      backgroundColor: animationEditPanelOpen
+                        ? 'rgba(255,255,255,0.08)'
+                        : 'transparent',
+                      borderRadius: '6px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        color: '#ffffff',
+                      },
+                    }}
+                  >
+                    <ViewSidebar sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
             </Box>
           </Toolbar>
         </AppBar>
@@ -433,6 +476,8 @@ const ThreeDTopLevelView = ({
               cameraRef={cameraRef}
               interactionMode={effectiveInteractionMode}
               isCreateMode={isCreateMode}
+              animationEditPanelOpen={animationEditPanelOpen}
+              onAnimationEditPanelOpenChange={setAnimationEditPanelOpen}
             />
           </NearestItemTooltip>
           {!hasMapCoordinateSystem && (

@@ -297,9 +297,9 @@ const MapRightSidebar = ({
     if (hasUAVs) dispatch(openUAVDetailsDialog(selectedUAVIds[0]));
   };
 
-  /* ── Pick-mode for origin + orientation ──
-   * Step 1 (`position`): click to set origin location
-   * Step 2 (`angle`): type angle in panel and/or click X+ direction
+  /* ── Pick-mode for origin (+ optional orientation) ──
+   * mapOrigin: Step 1 position → Step 2 angle
+   * showOrigin: position only (angle is set via the dedicated angle button)
    */
   const [pickMode, setPickMode] = useState(null); // 'mapOrigin' | 'showOrigin'
   const [pickStep, setPickStep] = useState('position'); // 'position' | 'angle'
@@ -451,20 +451,29 @@ const MapRightSidebar = ({
 
         if (mode === 'mapOrigin') {
           dispatch(setFlatEarthCoordinateSystemOrigin(coords));
-        } else {
-          dispatch(
-            updateOutdoorShowSettings({ origin: coords, setupMission: true })
-          );
+          // Defer angle step so this same click does not also set the heading.
+          setTimeout(() => attachAngleHandlers(coords, sessionId), 0);
+          return;
         }
 
-        // Defer angle step so this same click does not also set the heading.
-        setTimeout(() => attachAngleHandlers(coords, sessionId), 0);
+        // Show origin: position only — orientation stays as-is.
+        dispatch(
+          updateOutdoorShowSettings({ origin: coords, setupMission: true })
+        );
+        finishPickMode();
       };
 
       pickHandlerRef.current = handler;
       map.once('singleclick', handler);
     },
-    [attachAngleHandlers, cancelPickMode, clearMapHandlers, dispatch, pickMode]
+    [
+      attachAngleHandlers,
+      cancelPickMode,
+      clearMapHandlers,
+      dispatch,
+      finishPickMode,
+      pickMode,
+    ]
   );
 
   /* Cancel pick mode on Escape; Enter confirms angle step */
@@ -496,7 +505,7 @@ const MapRightSidebar = ({
     onPickModeChange?.(pickMode);
   }, [onPickModeChange, pickMode]);
 
-  const panelOpen = Boolean(pickMode) || angleOnlyOpen;
+  const panelOpen = pickMode === 'mapOrigin' || angleOnlyOpen;
   const [panelContainer, setPanelContainer] = useState(null);
 
   useEffect(() => {
@@ -518,21 +527,19 @@ const MapRightSidebar = ({
   const displayedAngle =
     previewAngle != null
       ? previewAngle
-      : pickMode === 'showOrigin'
-        ? showOrientation
-        : mapOriginAngle;
+      : pickMode === 'mapOrigin'
+        ? mapOriginAngle
+        : showOrientation;
 
   const panelTitle =
-    pickMode === 'showOrigin'
-      ? '쇼 원점 각도'
-      : pickMode === 'mapOrigin'
-        ? '맵 원점 각도'
-        : '원점 각도';
+    pickMode === 'mapOrigin'
+      ? '맵 원점 각도'
+      : '원점 각도';
 
   const panelHint =
-    pickMode && pickStep === 'position'
+    pickMode === 'mapOrigin' && pickStep === 'position'
       ? '지도에서 위치를 클릭하세요'
-      : pickMode && pickStep === 'angle'
+      : pickMode === 'mapOrigin' && pickStep === 'angle'
         ? '각도 입력 또는 지도에서 X+ 방향 클릭'
         : 'X+ 축 방향 (북=0°)';
 
@@ -639,7 +646,7 @@ const MapRightSidebar = ({
       <Tip
         label={
           pickMode === 'showOrigin'
-            ? '쇼 원점: 위치 클릭 후 각도 입력 (ESC 취소)'
+            ? '쇼 원점: 지도에서 위치 클릭 (ESC 취소)'
             : '쇼 원점 위치 설정'
         }
       >

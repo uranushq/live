@@ -1,11 +1,12 @@
 import Add from '@mui/icons-material/Add';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import DeleteOutline from '@mui/icons-material/DeleteOutline';
+import DragIndicator from '@mui/icons-material/DragIndicator';
 import GpsFixed from '@mui/icons-material/GpsFixed';
 import GridOn from '@mui/icons-material/GridOn';
 import Groups from '@mui/icons-material/Groups';
 import KeyboardArrowDown from '@mui/icons-material/KeyboardArrowDown';
-import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowRight from '@mui/icons-material/KeyboardArrowRight';
 import LinkOff from '@mui/icons-material/LinkOff';
 import NearMe from '@mui/icons-material/NearMe';
 import Replay from '@mui/icons-material/Replay';
@@ -75,21 +76,21 @@ const copyCapturedFormationAxes = (captured) => {
   return next;
 };
 
-const FORMATION_ACCENT = '#4c8dff';
+const FORMATION_ACCENT = '#67b4ff';
 const FORMATION_MUTED = '#8a8d95';
 const FORMATION_DIM = '#6f727b';
-const FORMATION_BORDER = '#2c2e36';
-const FORMATION_SURFACE = '#1c1e24';
-const FORMATION_INPUT_BG = '#111216';
+const FORMATION_BORDER = 'rgba(255,255,255,0.12)';
+const FORMATION_SURFACE = '#1b1d2a';
+const FORMATION_INPUT_BG = '#14161e';
+const FORMATION_LABEL = 'rgba(255,255,255,0.38)';
 
 const formationSurfaceStyle = {
-  borderRadius: 12,
+  borderRadius: 10,
   border: `1px solid ${FORMATION_BORDER}`,
   background: FORMATION_SURFACE,
 };
 
 const formationMonoStyle = {
-  fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
   fontVariantNumeric: 'tabular-nums',
 };
 
@@ -100,10 +101,26 @@ const formationFieldStyle = {
   outline: 'none',
   background: FORMATION_INPUT_BG,
   border: `1px solid ${FORMATION_BORDER}`,
-  borderRadius: 8,
+  borderRadius: 6,
   color: '#e8e9ec',
-  fontSize: 13,
-  padding: '8px 10px',
+  fontSize: 12,
+  padding: '4px 6px',
+};
+
+const phaseCardLabelStyle = {
+  fontSize: 9.5,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: FORMATION_LABEL,
+  marginBottom: 3,
+};
+
+const phaseCardBtnStyle = {
+  height: 28,
+  padding: '0 9px',
+  fontSize: 12,
+  borderRadius: 6,
+  gap: 5,
 };
 
 function useHoverState() {
@@ -549,6 +566,7 @@ export default function DroneInfoPanel({
   canRecoverReversedFormationPhases = false,
   onRemoveFormationPhase = () => {},
   onMoveFormationPhase = () => {},
+  onReorderFormationPhase = () => {},
   onDuplicateFormationPhase = () => {},
   onUpdateFormationPhaseMeta = () => {},
   onUpdateFormationDronePosition = () => {},
@@ -570,7 +588,10 @@ export default function DroneInfoPanel({
   isDownloadingSkyc = false,
   skycDownloadStatus = '',
 }) {
-  const [activeTab, setActiveTab] = useState('path');
+  const [activeTab, setActiveTab] = useState('formation');
+  const [expandedPhaseId, setExpandedPhaseId] = useState(null);
+  const [dragPhaseIndex, setDragPhaseIndex] = useState(null);
+  const [dragOverPhaseIndex, setDragOverPhaseIndex] = useState(null);
   /** 지금 선택된 드론 — 클러스터(그룹) 하이라이트 판정에 쓴다 */
   const multiSelectedSet = useMemo(
     () => new Set(multiSelectedDroneIds.map(String)),
@@ -1425,7 +1446,7 @@ export default function DroneInfoPanel({
             marginTop: 14,
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 6,
           }}
         >
           {formationPhases.length === 0 ? (
@@ -1444,7 +1465,30 @@ export default function DroneInfoPanel({
               <b style={{ color: '#c9cbd1' }}>현재 배치 캡처</b>를 눌러주세요.
             </div>
           ) : (
-            formationPhases.map((phase, idx) => {
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  marginBottom: 2,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    color: FORMATION_LABEL,
+                  }}
+                >
+                  Phase
+                </span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.28)' }}>
+                  그립을 잡고 드래그해 순서 변경
+                </span>
+              </div>
+              {formationPhases.map((phase, idx) => {
               const captured = phase.points?.[droneId];
               const hasCapturedPosition =
                 captured &&
@@ -1472,68 +1516,158 @@ export default function DroneInfoPanel({
               const isPhaseSelected =
                 selectedPhaseId != null &&
                 String(phase.id) === String(selectedPhaseId);
+              const isExpanded =
+                expandedPhaseId != null &&
+                String(expandedPhaseId) === String(phase.id);
+              const isDragging = dragPhaseIndex === idx;
+              const isDropTarget =
+                dragOverPhaseIndex === idx && dragPhaseIndex !== idx;
+
+              const commitFormationAxisValue = (key, raw) => {
+                if (raw === '' && !hasCaptured) return;
+                const next = copyCapturedFormationAxes(captured);
+                if (raw === '') {
+                  if (key === 'yaw') delete next.yaw;
+                  else next[key] = 0;
+                } else {
+                  const parsed = Number(raw);
+                  if (!Number.isFinite(parsed)) return;
+                  next[key] = parsed;
+                }
+                onUpdateFormationDronePosition(
+                  phase.id,
+                  droneId,
+                  Object.keys(next).length ? next : null
+                );
+                if (key === 'yaw') {
+                  window.dispatchEvent(
+                    new CustomEvent('drone-yaw-set', {
+                      detail: {
+                        id: droneId,
+                        yaw: Number.isFinite(Number(next.yaw))
+                          ? Number(next.yaw)
+                          : null,
+                      },
+                    })
+                  );
+                }
+              };
+
+              const renderAxisInput = (label, key, value) => {
+                const draftKey = formationPositionDraftKey(phase.id, droneId, key);
+                const displayValue =
+                  formationPositionDrafts[draftKey] ??
+                  (value === undefined || value === null ? '' : String(value));
+                return (
+                  <div key={label}>
+                    <div style={phaseCardLabelStyle}>{label}</div>
+                    <input
+                      value={displayValue}
+                      placeholder="—"
+                      inputMode="decimal"
+                      disabled={!droneId}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        if (!droneId) return;
+                        const raw = e.target.value;
+                        if (!isPartialDecimalInput(raw)) return;
+                        setFormationPositionDrafts((prev) => ({
+                          ...prev,
+                          [draftKey]: raw,
+                        }));
+                        if (raw === '' || raw === '-' || raw.endsWith('.')) return;
+                        if (!Number.isFinite(Number(raw))) return;
+                        commitFormationAxisValue(key, raw);
+                      }}
+                      onBlur={() => {
+                        const raw = formationPositionDrafts[draftKey];
+                        if (raw === undefined) return;
+                        setFormationPositionDrafts((prev) => {
+                          const next = { ...prev };
+                          delete next[draftKey];
+                          return next;
+                        });
+                        commitFormationAxisValue(key, raw);
+                      }}
+                      style={formationFieldStyle}
+                    />
+                  </div>
+                );
+              };
 
               return (
                 <div
                   key={phase.id}
+                  onDragOver={(e) => {
+                    if (dragPhaseIndex == null) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverPhaseIndex !== idx) setDragOverPhaseIndex(idx);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = dragPhaseIndex;
+                    if (from != null && from !== idx) {
+                      onReorderFormationPhase(from, idx);
+                    }
+                    setDragPhaseIndex(null);
+                    setDragOverPhaseIndex(null);
+                  }}
                   style={{
-                    padding: 16,
                     ...formationSurfaceStyle,
-                    ...(isPhaseSelected
-                      ? {
-                          border: `1px solid ${FORMATION_ACCENT}`,
-                          boxShadow: `0 0 0 1px ${FORMATION_ACCENT}55`,
-                        }
-                      : {}),
+                    overflow: 'hidden',
+                    opacity: isDragging ? 0.4 : 1,
+                    borderTopColor: isDropTarget ? FORMATION_ACCENT : FORMATION_BORDER,
+                    borderColor: isPhaseSelected
+                      ? FORMATION_ACCENT
+                      : isDropTarget
+                        ? FORMATION_ACCENT
+                        : FORMATION_BORDER,
+                    boxShadow: isPhaseSelected
+                      ? `0 0 0 1px ${FORMATION_ACCENT}44`
+                      : '0 6px 16px rgba(0,0,0,0.22)',
                   }}
                 >
                   <div
                     onClick={() => {
-                      const willSelect = !isPhaseSelected;
-                      onTogglePhaseSelected(String(phase.id));
-                      // 선택하는 순간 3D 씬의 모든 드론을 이 phase의
-                      // 좌표로 이동시켜 실제 대형을 눈으로 확인하게 한다.
-                      if (willSelect) {
+                      const willExpand = !isExpanded;
+                      setExpandedPhaseId(willExpand ? phase.id : null);
+                      if (willExpand) {
+                        if (!isPhaseSelected) {
+                          onTogglePhaseSelected(String(phase.id));
+                        }
                         onApplyAllDronesInPhase(phase.id);
                       }
                     }}
-                    title="클릭: phase 선택 + 모든 드론을 이 phase 위치로 이동. 선택 상태에서 클러스터(그룹)를 만들 수 있습니다"
+                    title="클릭: 세부 옵션 펼치기 / 접기"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 10,
+                      gap: 7,
+                      padding: '7px 9px',
                       cursor: 'pointer',
                     }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                    }}
                   >
+                    {isExpanded ? (
+                      <KeyboardArrowDown
+                        sx={{ fontSize: 14, color: FORMATION_MUTED, flexShrink: 0 }}
+                      />
+                    ) : (
+                      <KeyboardArrowRight
+                        sx={{ fontSize: 14, color: FORMATION_MUTED, flexShrink: 0 }}
+                      />
+                    )}
                     <span
                       style={{
-                        color: isPhaseSelected ? FORMATION_ACCENT : '#5b5e67',
-                        fontSize: 15,
-                        lineHeight: 1,
-                        letterSpacing: -2,
-                        userSelect: 'none',
-                        flexShrink: 0,
-                      }}
-                    >
-                      ⠿⠿
-                    </span>
-                    <span
-                      style={{
-                        minWidth: 26,
-                        height: 24,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: isPhaseSelected
-                          ? '#22304a'
-                          : FORMATION_INPUT_BG,
-                        border: `1px solid ${
-                          isPhaseSelected ? FORMATION_ACCENT : FORMATION_BORDER
-                        }`,
-                        borderRadius: 7,
+                        fontSize: 10.5,
                         ...formationMonoStyle,
-                        fontSize: 12,
-                        color: isPhaseSelected ? '#9cc0ff' : '#9a9ca3',
+                        color: FORMATION_MUTED,
                         flexShrink: 0,
                       }}
                     >
@@ -1547,19 +1681,40 @@ export default function DroneInfoPanel({
                       }
                       placeholder="phase 이름"
                       style={{
-                        ...formationFieldStyle,
                         flex: 1,
                         minWidth: 0,
-                        fontWeight: 600,
-                        fontSize: 13.5,
+                        border: 'none',
+                        background: 'transparent',
+                        color: '#e8e9ec',
+                        fontSize: 13,
+                        fontWeight: 500,
+                        outline: 'none',
+                        padding: 0,
                         fontFamily: 'inherit',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}
                     />
+                    {hasCapturedPosition ? (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          background: 'rgba(103,180,255,0.18)',
+                          color: FORMATION_ACCENT,
+                          flexShrink: 0,
+                        }}
+                      >
+                        캡쳐됨
+                      </span>
+                    ) : null}
                     {clusterCount > 0 ? (
                       <span
                         style={{
-                          fontSize: 10.5,
-                          fontWeight: 700,
+                          fontSize: 10,
+                          fontWeight: 600,
                           color: '#7ee787',
                           flexShrink: 0,
                         }}
@@ -1567,579 +1722,370 @@ export default function DroneInfoPanel({
                         그룹 {clusterCount}
                       </span>
                     ) : null}
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      marginTop: 12,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: FORMATION_MUTED, fontWeight: 500 }}>
-                      지속 시간
-                    </span>
-                    <div
+                    <span
+                      title="드래그해 순서 변경"
+                      draggable
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', String(idx));
+                        setDragPhaseIndex(idx);
+                      }}
+                      onDragEnd={() => {
+                        setDragPhaseIndex(null);
+                        setDragOverPhaseIndex(null);
+                      }}
                       style={{
                         display: 'inline-flex',
-                        alignItems: 'center',
-                        background: FORMATION_INPUT_BG,
-                        border: `1px solid ${FORMATION_BORDER}`,
-                        borderRadius: 8,
-                        overflow: 'hidden',
+                        color: 'rgba(255,255,255,0.28)',
+                        cursor: 'grab',
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = FORMATION_ACCENT;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = 'rgba(255,255,255,0.28)';
                       }}
                     >
-                      <input
-                        value={holdMs}
-                        onChange={(e) =>
-                          onUpdateFormationPhaseMeta(phase.id, {
-                            holdMs: e.target.value === '' ? 0 : Number(e.target.value),
-                          })
-                        }
-                        placeholder="0"
-                        title="이 phase 완성 후 머무는 시간(ms)"
-                        inputMode="numeric"
-                        style={{
-                          width: 74,
-                          background: 'none',
-                          border: 'none',
-                          color: '#e8e9ec',
-                          ...formationMonoStyle,
-                          fontSize: 13.5,
-                          textAlign: 'right',
-                          padding: '8px 8px',
-                          outline: 'none',
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: '#7c7f88',
-                          padding: '0 10px 0 4px',
-                          borderLeft: `1px solid ${FORMATION_BORDER}`,
-                          alignSelf: 'stretch',
-                          display: 'flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        ms
-                      </span>
-                    </div>
-                    <span style={{ fontSize: 11.5, color: FORMATION_DIM }}>
-                      ≈ {formatFormationHoldSec(holdMs)}초
+                      <DragIndicator sx={{ fontSize: 16 }} />
                     </span>
                   </div>
 
-                  <div style={{ marginTop: 14 }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginBottom: 8,
-                        gap: 8,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: FORMATION_MUTED,
-                          letterSpacing: 0.3,
-                        }}
-                      >
-                        이 드론의 위치
-                      </span>
-                      {hasCaptured ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1.15fr 1fr 1fr 1fr 1fr',
+                      gap: 5,
+                      padding: '0 9px 8px',
+                    }}
+                  >
+                    <div>
+                      <div style={phaseCardLabelStyle}>지속</div>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          value={holdMs}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) =>
+                            onUpdateFormationPhaseMeta(phase.id, {
+                              holdMs:
+                                e.target.value === '' ? 0 : Number(e.target.value),
+                            })
+                          }
+                          placeholder="0"
+                          title={`이 phase 완성 후 머무는 시간(ms) ≈ ${formatFormationHoldSec(holdMs)}초`}
+                          inputMode="numeric"
+                          style={{
+                            ...formationFieldStyle,
+                            paddingRight: 20,
+                          }}
+                        />
                         <span
                           style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            color: '#5fc08a',
-                            background: 'rgba(95,192,138,0.14)',
-                            padding: '2px 8px',
-                            borderRadius: 20,
+                            position: 'absolute',
+                            right: 5,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            fontSize: 9,
+                            color: FORMATION_LABEL,
+                            pointerEvents: 'none',
                           }}
                         >
-                          {hasCapturedPosition ? '캡처됨' : 'yaw만'}
+                          ms
                         </span>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            color: '#d6a24a',
-                            background: 'rgba(214,162,74,0.15)',
-                            padding: '2px 8px',
-                            borderRadius: 20,
-                          }}
-                        >
-                          초기 위치 사용
-                        </span>
-                      )}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(4, 1fr)',
-                        gap: 7,
-                      }}
-                    >
-                      {[
-                        { label: 'X', key: 'x', value: px },
-                        { label: 'Y', key: 'y', value: py },
-                        { label: 'Z', key: 'z', value: pz },
-                        { label: 'Yaw°', key: 'yaw', value: pyaw },
-                      ].map(({ label, key, value }) => {
-                        const draftKey = formationPositionDraftKey(phase.id, droneId, key);
-                        const displayValue =
-                          formationPositionDrafts[draftKey] ??
-                          (value === undefined || value === null ? '' : String(value));
+                    {renderAxisInput('X', 'x', px)}
+                    {renderAxisInput('Y', 'y', py)}
+                    {renderAxisInput('Z', 'z', pz)}
+                    {renderAxisInput('Yaw°', 'yaw', pyaw)}
+                  </div>
 
-                        const commitFormationAxisValue = (raw) => {
-                          if (raw === '' && !hasCaptured) return;
-
-                          const next = copyCapturedFormationAxes(captured);
-                          if (raw === '') {
-                            if (key === 'yaw') {
-                              delete next.yaw;
-                            } else {
-                              next[key] = 0;
+                  {isExpanded ? (
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ padding: '10px 9px' }}>
+                        <div style={{ ...phaseCardLabelStyle, marginBottom: 6 }}>
+                          위치
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          <FormationActionButton
+                            title="현재 3D 위치를 이 phase에 캡처"
+                            onClick={() =>
+                              droneId &&
+                              onCaptureDronePositionInPhase(phase.id, droneId)
                             }
-                          } else {
-                            const parsed = Number(raw);
-                            if (!Number.isFinite(parsed)) return;
-                            next[key] = parsed;
-                          }
-                          onUpdateFormationDronePosition(
-                            phase.id,
-                            droneId,
-                            Object.keys(next).length ? next : null
-                          );
-                          if (key === 'yaw') {
-                            window.dispatchEvent(
-                              new CustomEvent('drone-yaw-set', {
-                                detail: {
-                                  id: droneId,
-                                  yaw: Number.isFinite(Number(next.yaw))
-                                    ? Number(next.yaw)
-                                    : null,
-                                },
-                              })
-                            );
-                          }
-                        };
-
-                        return (
-                          <div key={label}>
-                            <div
+                            disabled={!droneId}
+                            variant="primary"
+                            style={phaseCardBtnStyle}
+                          >
+                            <GpsFixed sx={{ fontSize: 14, color: 'inherit' }} />
+                            현재 위치 캡쳐
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title="이 phase의 위치로 드론을 이동"
+                            onClick={() =>
+                              droneId &&
+                              onApplyDronePositionInPhase(phase.id, droneId)
+                            }
+                            disabled={!droneId || !hasCapturedPosition}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            <NearMe sx={{ fontSize: 14, color: 'inherit' }} />
+                            이 위치로 이동
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title="이 드론의 캡처된 위치를 제거 (초기 위치로 fallback)"
+                            onClick={() =>
+                              droneId &&
+                              onUpdateFormationDronePosition(phase.id, droneId, null)
+                            }
+                            disabled={!droneId || !hasCaptured}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            <LinkOff sx={{ fontSize: 14, color: 'inherit' }} />
+                            캡쳐 해제
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title={
+                              '이전 formation 위치에서 이 formation 위치까지 직선으로만 이동하도록 고정.\n' +
+                              '고정된 드론들은 자동 회피/시차 대기 없이 전원 동시에 출발합니다.'
+                            }
+                            onClick={() =>
+                              droneId && onToggleFixedStraight(phase.id, droneId)
+                            }
+                            disabled={!droneId}
+                            variant={isFixedStraight ? 'accent' : 'ghost'}
+                            style={phaseCardBtnStyle}
+                          >
+                            <Route sx={{ fontSize: 14, color: 'inherit' }} />
+                            {isFixedStraight ? '직선 고정됨' : '직선 고정'}
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title="등록된 모든 드론을 이 phase에서 직선 고정"
+                            onClick={() => onSetAllFixedStraight(phase.id, true)}
+                            disabled={droneCount === 0}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            <Groups sx={{ fontSize: 14, color: 'inherit' }} />
+                            모두 직선 고정
+                          </FormationActionButton>
+                          {fixedPathCount > 0 ? (
+                            <FormationActionButton
+                              title="이 phase의 직선 고정을 모두 해제"
+                              onClick={() => onSetAllFixedStraight(phase.id, false)}
+                              variant="ghost"
                               style={{
-                                fontSize: 10,
-                                color: FORMATION_DIM,
-                                marginBottom: 4,
-                                textAlign: 'center',
+                                ...phaseCardBtnStyle,
+                                color: FORMATION_MUTED,
                               }}
                             >
-                              {label}
-                            </div>
-                            <input
-                              value={displayValue}
-                              placeholder="—"
-                              inputMode="decimal"
-                              disabled={!droneId}
-                              onChange={(e) => {
-                                if (!droneId) return;
-                                const raw = e.target.value;
-                                if (!isPartialDecimalInput(raw)) return;
+                              <LinkOff sx={{ fontSize: 14, color: 'inherit' }} />
+                              모두 해제 ({fixedPathCount})
+                            </FormationActionButton>
+                          ) : null}
+                        </div>
+                      </div>
 
-                                setFormationPositionDrafts((prev) => ({
-                                  ...prev,
-                                  [draftKey]: raw,
-                                }));
-
-                                if (raw === '' || raw === '-' || raw.endsWith('.')) return;
-
-                                const parsed = Number(raw);
-                                if (!Number.isFinite(parsed)) return;
-
-                                commitFormationAxisValue(raw);
-                              }}
-                              onBlur={() => {
-                                const raw = formationPositionDrafts[draftKey];
-                                if (raw === undefined) return;
-
-                                setFormationPositionDrafts((prev) => {
-                                  const next = { ...prev };
-                                  delete next[draftKey];
-                                  return next;
-                                });
-
-                                commitFormationAxisValue(raw);
-                              }}
-                              style={{
-                                ...formationFieldStyle,
-                                borderRadius: 7,
-                                padding: '8px 6px',
-                                textAlign: 'center',
-                                fontSize: 13,
-                              }}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: 7,
-                      marginTop: 12,
-                    }}
-                  >
-                    <FormationActionButton
-                      title="현재 3D 위치를 이 phase에 캡처"
-                      onClick={() =>
-                        droneId && onCaptureDronePositionInPhase(phase.id, droneId)
-                      }
-                      disabled={!droneId}
-                      variant="accent"
-                    >
-                      <GpsFixed sx={iconSx} />
-                      현재 위치 캡처
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="이 phase의 위치로 드론을 이동"
-                      onClick={() =>
-                        droneId && onApplyDronePositionInPhase(phase.id, droneId)
-                      }
-                      disabled={!droneId || !hasCapturedPosition}
-                    >
-                      <NearMe sx={iconSx} />
-                      이 위치로 이동
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="이 드론의 캡처된 위치를 제거 (초기 위치로 fallback)"
-                      onClick={() =>
-                        droneId &&
-                        onUpdateFormationDronePosition(phase.id, droneId, null)
-                      }
-                      disabled={!droneId || !hasCaptured}
-                      style={{ color: '#9a9ca3' }}
-                    >
-                      <LinkOff sx={iconSx} />
-                      캡처 해제
-                    </FormationActionButton>
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: 7,
-                      marginTop: 8,
-                    }}
-                  >
-                    <FormationActionButton
-                      title={
-                        '이전 formation 위치에서 이 formation 위치까지 직선으로만 이동하도록 고정.\n' +
-                        '고정된 드론들은 자동 회피/시차 대기 없이 전원 동시에 출발합니다.'
-                      }
-                      onClick={() =>
-                        droneId && onToggleFixedStraight(phase.id, droneId)
-                      }
-                      disabled={!droneId}
-                      variant={isFixedStraight ? 'accent' : undefined}
-                    >
-                      <Route sx={iconSx} />
-                      {isFixedStraight ? '직선 고정됨' : '직선 고정'}
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="등록된 모든 드론을 이 phase에서 직선 고정"
-                      onClick={() => onSetAllFixedStraight(phase.id, true)}
-                      disabled={droneCount === 0}
-                    >
-                      <Groups sx={iconSx} />
-                      모두 직선 고정
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="이 phase의 직선 고정을 모두 해제 (자동 경로 계획으로 복귀)"
-                      onClick={() => onSetAllFixedStraight(phase.id, false)}
-                      disabled={fixedPathCount === 0}
-                      style={{ color: '#9a9ca3' }}
-                    >
-                      <LinkOff sx={iconSx} />
-                      모두 해제
-                    </FormationActionButton>
-                    {fixedPathCount > 0 ? (
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          color: isFixedStraight ? '#7ee787' : FORMATION_DIM,
-                          fontWeight: 600,
-                        }}
-                      >
-                        직선 고정 {fixedPathCount}대
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 12,
-                      paddingTop: 12,
-                      borderTop: '1px solid #26282f',
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10.5,
-                        color: FORMATION_DIM,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                        letterSpacing: 0.3,
-                      }}
-                    >
-                      클러스터 (그룹 이동)
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: '#6f727b',
-                        lineHeight: 1.55,
-                        marginBottom: 8,
-                      }}
-                    >
-                      클러스터는{' '}
-                      <b style={{ color: '#9cc0ff' }}>
-                        이전 phase → 이 phase(#{idx + 1})
-                      </b>
-                      로 <b style={{ color: '#9cc0ff' }}>들어오는</b> 전환에
-                      적용됩니다. 그룹 드론들은 대형을 유지한 채 직선 경로로
-                      전원 동시에 이동합니다. 이 phase에서 다음 phase로{' '}
-                      <b>나갈 때</b>의 그룹은 다음 phase 카드에 만드세요.
-                    </div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        gap: 7,
-                      }}
-                    >
-                      <FormationActionButton
-                        title={
-                          '좌측 "드론 선택" 탭에서 고른 드론들을 이 phase 전환의 ' +
-                          '클러스터로 추가합니다 (2대 이상 선택 필요)'
-                        }
-                        onClick={() => onAddClusterToPhase(phase.id)}
-                        disabled={multiSelectedDroneIds.length < 2}
-                        variant="accent"
-                      >
-                        <Groups sx={iconSx} />
-                        선택 드론 그룹 추가 ({multiSelectedDroneIds.length})
-                      </FormationActionButton>
-                      {clusterCount === 0 ? (
-                        <span style={{ fontSize: 10.5, color: FORMATION_DIM }}>
-                          그룹 없음 — 통짜 이동 블록은 자동 감지
-                        </span>
-                      ) : null}
-                    </div>
-                    {clusterCount > 0 ? (
-                      <div
-                        style={{
-                          marginTop: 6,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 4,
-                        }}
-                      >
-                        {phase.clusters.map((cluster, clusterIndex) => {
-                          // 그룹 전원이 지금 선택돼 있으면 하이라이트 —
-                          // 3D 뷰에서 그룹 멤버를 클릭했을 때 어떤 그룹이
-                          // 잡혔는지 바로 보인다.
-                          const members = (
-                            Array.isArray(cluster) ? cluster : []
-                          ).map(String);
-                          const active =
-                            members.length > 0 &&
-                            members.every((memberId) =>
-                              multiSelectedSet.has(memberId)
-                            );
-                          return (
-                          <div
-                            // eslint-disable-next-line react/no-array-index-key
-                            key={clusterIndex}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              padding: active ? '3px 6px' : 0,
-                              borderRadius: 5,
-                              background: active
-                                ? 'rgba(195, 155, 255, 0.16)'
-                                : 'transparent',
-                              boxShadow: active
-                                ? 'inset 2px 0 0 #c39bff'
-                                : 'none',
-                              fontSize: 10.5,
-                              color: active ? '#e6dbff' : '#b9bbc2',
-                            }}
+                      <div style={{ padding: '0 9px 10px' }}>
+                        <div style={{ ...phaseCardLabelStyle, marginBottom: 5 }}>
+                          클러스터 (그룹 이동)
+                        </div>
+                        <p
+                          style={{
+                            margin: '0 0 7px',
+                            fontSize: 11.5,
+                            lineHeight: 1.5,
+                            color: FORMATION_MUTED,
+                          }}
+                        >
+                          이전 phase → 이 phase로 들어오는 전환에 적용됩니다. 그룹
+                          드론은 상대 위치를 유지한 채 동시에 이동합니다.
+                        </p>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <FormationActionButton
+                            title={
+                              '좌측 "드론 선택" 탭에서 고른 드론들을 이 phase 전환의 ' +
+                              '클러스터로 추가합니다 (2대 이상 선택 필요)'
+                            }
+                            onClick={() => onAddClusterToPhase(phase.id)}
+                            disabled={multiSelectedDroneIds.length < 2}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
                           >
+                            <Groups sx={{ fontSize: 14, color: 'inherit' }} />
+                            선택 드론 그룹 추가 ({multiSelectedDroneIds.length})
+                          </FormationActionButton>
+                          {clusterCount === 0 ? (
                             <span
                               style={{
-                                flex: 1,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                fontWeight: active ? 700 : 400,
+                                fontSize: 11,
+                                color: 'rgba(255,255,255,0.28)',
                               }}
-                              title={cluster.join(', ')}
                             >
-                              그룹 {clusterIndex + 1} · {cluster.length}대
-                              {active ? ' · 선택됨' : ''} — {cluster.join(', ')}
+                              그룹 없음
                             </span>
-                            <FormationActionButton
-                              title="이 그룹 해제"
-                              onClick={() =>
-                                onRemoveClusterFromPhase(phase.id, clusterIndex)
-                              }
-                              variant="danger"
-                              style={{ fontSize: 10, padding: '3px 8px' }}
-                            >
-                              해제
-                            </FormationActionButton>
+                          ) : null}
+                        </div>
+                        {clusterCount > 0 ? (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 4,
+                            }}
+                          >
+                            {phase.clusters.map((cluster, clusterIndex) => {
+                              const members = (
+                                Array.isArray(cluster) ? cluster : []
+                              ).map(String);
+                              const active =
+                                members.length > 0 &&
+                                members.every((memberId) =>
+                                  multiSelectedSet.has(memberId)
+                                );
+                              return (
+                                <div
+                                  // eslint-disable-next-line react/no-array-index-key
+                                  key={clusterIndex}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    padding: active ? '3px 6px' : 0,
+                                    borderRadius: 5,
+                                    background: active
+                                      ? 'rgba(195, 155, 255, 0.16)'
+                                      : 'transparent',
+                                    boxShadow: active
+                                      ? 'inset 2px 0 0 #c39bff'
+                                      : 'none',
+                                    fontSize: 10.5,
+                                    color: active ? '#e6dbff' : '#b9bbc2',
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      flex: 1,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      fontWeight: active ? 700 : 400,
+                                    }}
+                                    title={cluster.join(', ')}
+                                  >
+                                    그룹 {clusterIndex + 1} · {cluster.length}대
+                                    {active ? ' · 선택됨' : ''} —{' '}
+                                    {cluster.join(', ')}
+                                  </span>
+                                  <FormationActionButton
+                                    title="이 그룹 해제"
+                                    onClick={() =>
+                                      onRemoveClusterFromPhase(
+                                        phase.id,
+                                        clusterIndex
+                                      )
+                                    }
+                                    variant="danger"
+                                    style={{
+                                      fontSize: 10,
+                                      padding: '3px 8px',
+                                      height: 24,
+                                    }}
+                                  >
+                                    해제
+                                  </FormationActionButton>
+                                </div>
+                              );
+                            })}
                           </div>
-                          );
-                        })}
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
 
-                  <div
-                    style={{
-                      marginTop: 12,
-                      paddingTop: 12,
-                      borderTop: '1px solid #26282f',
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10.5,
-                        color: FORMATION_DIM,
-                        fontWeight: 600,
-                        marginBottom: 8,
-                        letterSpacing: 0.3,
-                      }}
-                    >
-                      전체 드론 ({droneCount}대)
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                      <FormationActionButton
-                        title="격자 툴로 이 phase 대형 수정"
-                        onClick={() => onEditFormationPhaseGrid(phase.id)}
-                        variant="primary"
-                        disabled={droneCount === 0}
-                      >
-                        <GridOn sx={iconSx} />
-                        그리드 수정
-                      </FormationActionButton>
-                      <FormationActionButton
-                        title="이 phase에 저장된 좌표로 등록된 모든 드론 이동"
-                        onClick={() => onApplyAllDronesInPhase(phase.id)}
-                        disabled={droneCount === 0}
-                      >
-                        <Groups sx={iconSx} />
-                        모두 이 위치로 이동
-                      </FormationActionButton>
-                      <FormationActionButton
-                        title="이 phase에 모든 드론의 현재 위치를 다시 캡처"
-                        onClick={() => onCaptureAllPositionsInPhase(phase.id)}
-                      >
-                        <Replay sx={iconSx} />
-                        모두 현재 위치로 재캡처
-                      </FormationActionButton>
-                    </div>
-                  </div>
+                      <div style={{ padding: '0 9px 10px' }}>
+                        <div style={{ ...phaseCardLabelStyle, marginBottom: 6 }}>
+                          전체 드론 ({droneCount}대)
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          <FormationActionButton
+                            title="격자 툴로 이 phase 대형 수정"
+                            onClick={() => onEditFormationPhaseGrid(phase.id)}
+                            variant="primary"
+                            disabled={droneCount === 0}
+                            style={phaseCardBtnStyle}
+                          >
+                            <GridOn sx={{ fontSize: 14, color: 'inherit' }} />
+                            그리드 수정
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title="이 phase에 저장된 좌표로 등록된 모든 드론 이동"
+                            onClick={() => onApplyAllDronesInPhase(phase.id)}
+                            disabled={droneCount === 0}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            <Groups sx={{ fontSize: 14, color: 'inherit' }} />
+                            모두 이 위치로 이동
+                          </FormationActionButton>
+                          <FormationActionButton
+                            title="이 phase에 모든 드론의 현재 위치를 다시 캡처"
+                            onClick={() => onCaptureAllPositionsInPhase(phase.id)}
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            <Replay sx={{ fontSize: 14, color: 'inherit' }} />
+                            모두 재캡쳐
+                          </FormationActionButton>
+                        </div>
+                      </div>
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                      gap: 4,
-                      marginTop: 12,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <FormationActionButton
-                      title="위로 이동"
-                      onClick={() => onMoveFormationPhase(phase.id, 'up')}
-                      disabled={idx === 0}
-                      variant="ghost"
-                      style={{ fontSize: 11, padding: '6px 8px' }}
-                    >
-                      <KeyboardArrowUp sx={{ fontSize: 14, color: 'inherit' }} />
-                      위로
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="아래로 이동"
-                      onClick={() => onMoveFormationPhase(phase.id, 'down')}
-                      disabled={idx === formationPhases.length - 1}
-                      variant="ghost"
-                      style={{ fontSize: 11, padding: '6px 8px' }}
-                    >
-                      <KeyboardArrowDown sx={{ fontSize: 14, color: 'inherit' }} />
-                      아래로
-                    </FormationActionButton>
-                    <FormationActionButton
-                      title="이 phase 복제"
-                      onClick={() => onDuplicateFormationPhase(phase.id)}
-                      variant="ghost"
-                      style={{ fontSize: 11, padding: '6px 8px' }}
-                    >
-                      <ContentCopy sx={{ fontSize: 13, color: 'inherit' }} />
-                      복제
-                    </FormationActionButton>
-                    <span
-                      style={{
-                        width: 1,
-                        height: 16,
-                        background: FORMATION_BORDER,
-                        margin: '0 3px',
-                      }}
-                    />
-                    <FormationActionButton
-                      title="이 phase 삭제"
-                      onClick={() => onRemoveFormationPhase(phase.id)}
-                      variant="danger"
-                      style={{ fontSize: 11, padding: '6px 8px' }}
-                    >
-                      <DeleteOutline sx={{ fontSize: 14, color: 'inherit' }} />
-                      삭제
-                    </FormationActionButton>
-                  </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '8px 9px',
+                          borderTop: '1px solid rgba(255,255,255,0.06)',
+                        }}
+                      >
+                        <FormationActionButton
+                          title="이 phase 복제"
+                          onClick={() => onDuplicateFormationPhase(phase.id)}
+                          variant="ghost"
+                          style={phaseCardBtnStyle}
+                        >
+                          <ContentCopy sx={{ fontSize: 13, color: 'inherit' }} />
+                          복제
+                        </FormationActionButton>
+                        <span style={{ flex: 1 }} />
+                        <FormationActionButton
+                          title="이 phase 삭제"
+                          onClick={() => onRemoveFormationPhase(phase.id)}
+                          variant="danger"
+                          style={phaseCardBtnStyle}
+                        >
+                          <DeleteOutline sx={{ fontSize: 14, color: 'inherit' }} />
+                          삭제
+                        </FormationActionButton>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               );
-            })
+            })}
+            </>
           )}
-
-          {formationPhases.length > 2 ? (
-            <div
-              style={{
-                textAlign: 'center',
-                fontSize: 11.5,
-                color: '#5b5e67',
-                padding: '4px 0 2px',
-              }}
-            >
-              총 {formationPhases.length}개 phase
-            </div>
-          ) : null}
         </div>
 
         <div
@@ -2590,6 +2536,7 @@ export default function DroneInfoPanel({
 
   return (
     <div
+      data-three-d-ui="true"
       style={{
         position: 'absolute',
         top: 0,
@@ -2603,7 +2550,7 @@ export default function DroneInfoPanel({
         boxSizing: 'border-box',
         transform: open ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 200ms ease',
-        zIndex: 10,
+        zIndex: 12050,
         borderLeft: '1px solid rgba(255, 255, 255, 0.08)',
         backdropFilter: 'blur(10px)',
         overflowY: 'auto',
@@ -2611,7 +2558,7 @@ export default function DroneInfoPanel({
     >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>Drone Info</div>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>애니메이션 편집</div>
         <button
           onClick={onClose}
           style={{
@@ -2892,6 +2839,7 @@ DroneInfoPanel.propTypes = {
   canRecoverReversedFormationPhases: PropTypes.bool,
   onRemoveFormationPhase: PropTypes.func,
   onMoveFormationPhase: PropTypes.func,
+  onReorderFormationPhase: PropTypes.func,
   onDuplicateFormationPhase: PropTypes.func,
   onUpdateFormationPhaseMeta: PropTypes.func,
   onUpdateFormationDronePosition: PropTypes.func,
