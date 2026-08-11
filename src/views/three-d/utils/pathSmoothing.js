@@ -15,8 +15,22 @@
  *         unchanged; only the speed profile along it changes.
  */
 
+import {
+  DEFAULT_ACCEL_SHAPE,
+  DEFAULT_DECEL_SHAPE,
+  clampShape,
+  clampWidth,
+  makeProfile,
+  rampFromSmoothing,
+} from './velocityProfile';
+
 export const VELOCITY_SMOOTHING_STORAGE_KEY = 'pathPlanner.velocitySmoothing';
 export const DEFAULT_VELOCITY_SMOOTHING = 1.0;
+
+// 두 램프 폭의 합이 사실상 1이면 plateau가 사라진 것으로 본다.
+const PLATEAU_EPSILON = 1e-6;
+
+export { DEFAULT_ACCEL_SHAPE, DEFAULT_DECEL_SHAPE };
 
 const clamp01 = (value) => {
   const n = Number(value);
@@ -119,3 +133,147 @@ export const getProfileLog = () =>
   readThickness(PROFILE_LOG_STORAGE_KEY, DEFAULT_PROFILE_LOG);
 export const setProfileLog = (value) =>
   writeThickness(PROFILE_LOG_STORAGE_KEY, value, DEFAULT_PROFILE_LOG);
+
+/**
+ * 램프 모양(shape)과 폭(width) 전역 기본값.
+ *
+ * 백엔드의 `profile_accel_*` / `profile_decel_*`와 1:1 대응한다. 폭은 저장된
+ * 값이 없으면 `null`로 두고 스무딩에서 유도한다 — 즉 슬라이더를 한 번도 만지지
+ * 않은 사용자는 예전과 완전히 동일한 대칭 램프를 계속 쓴다. 슬라이더를 움직이는
+ * 순간부터 그 값이 고정된다 (`resetProfileWidths()`로 다시 연동 상태로 돌아감).
+ *
+ * plateau(등속 유지) 폭은 따로 저장하지 않는다. 남는 값 `1 - a - b`가 곧
+ * plateau이므로 폭 두 개가 단일 진실의 원천이다.
+ */
+export const PROFILE_ACCEL_SHAPE_STORAGE_KEY = 'pathPlanner.profileAccelShape';
+export const PROFILE_DECEL_SHAPE_STORAGE_KEY = 'pathPlanner.profileDecelShape';
+export const PROFILE_ACCEL_WIDTH_STORAGE_KEY = 'pathPlanner.profileAccelWidth';
+export const PROFILE_DECEL_WIDTH_STORAGE_KEY = 'pathPlanner.profileDecelWidth';
+
+const readRaw = (key) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeRaw = (key, value) => {
+  try {
+    if (value == null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, String(value));
+    }
+  } catch {
+    // ignore: storage may be unavailable; the in-memory value still applies
+  }
+  notifyKnobListeners();
+};
+
+const readShape = (key, fallback) => clampShape(readRaw(key), fallback);
+
+export const getProfileAccelShape = () =>
+  readShape(PROFILE_ACCEL_SHAPE_STORAGE_KEY, DEFAULT_ACCEL_SHAPE);
+export const getProfileDecelShape = () =>
+  readShape(PROFILE_DECEL_SHAPE_STORAGE_KEY, DEFAULT_DECEL_SHAPE);
+
+export const setProfileAccelShape = (value) => {
+  const shape = clampShape(value, DEFAULT_ACCEL_SHAPE);
+  writeRaw(PROFILE_ACCEL_SHAPE_STORAGE_KEY, shape);
+  return shape;
+};
+export const setProfileDecelShape = (value) => {
+  const shape = clampShape(value, DEFAULT_DECEL_SHAPE);
+  writeRaw(PROFILE_DECEL_SHAPE_STORAGE_KEY, shape);
+  return shape;
+};
+
+/** 저장된 폭이 없으면 스무딩에서 유도한다 (기존 동작 보존). */
+const readWidth = (key) => {
+  const raw = readRaw(key);
+  if (raw == null || raw === '') return rampFromSmoothing(getVelocitySmoothing());
+  return clampWidth(raw);
+};
+
+export const getProfileAccelWidth = () => readWidth(PROFILE_ACCEL_WIDTH_STORAGE_KEY);
+export const getProfileDecelWidth = () => readWidth(PROFILE_DECEL_WIDTH_STORAGE_KEY);
+
+/** 폭이 스무딩에 연동된 상태인지 (아직 직접 지정하지 않았는지) */
+export const areProfileWidthsLinkedToSmoothing = () =>
+  readRaw(PROFILE_ACCEL_WIDTH_STORAGE_KEY) == null &&
+  readRaw(PROFILE_DECEL_WIDTH_STORAGE_KEY) == null;
+
+/**
+ * 한쪽 폭을 지정한다. 반대쪽이 아직 연동 상태였다면 현재 유도값으로 함께
+ * 고정해서, 한쪽만 움직였는데 나머지가 나중에 슬그머니 바뀌는 일이 없게 한다.
+ * 두 폭의 합은 1을 넘을 수 없으므로 반대쪽을 밀어내며 클램프한다.
+ */
+const setWidth = (key, otherKey, value) => {
+  const clamped = clampWidth(value);
+  if (readRaw(otherKey) == null) {
+    writeRaw(otherKey, clampWidth(readWidth(otherKey)));
+  }
+  const other = clampWidth(readWidth(otherKey));
+  if (clamped + other > 1) {
+    writeRaw(otherKey, 1 - clamped);
+  }
+  writeRaw(key, clamped);
+  return clamped;
+};
+
+export const setProfileAccelWidth = (value) =>
+  setWidth(PROFILE_ACCEL_WIDTH_STORAGE_KEY, PROFILE_DECEL_WIDTH_STORAGE_KEY, value);
+export const setProfileDecelWidth = (value) =>
+  setWidth(PROFILE_DECEL_WIDTH_STORAGE_KEY, PROFILE_ACCEL_WIDTH_STORAGE_KEY, value);
+
+/** 폭을 다시 스무딩 연동 상태로 되돌린다. */
+export const resetProfileWidths = () => {
+  writeRaw(PROFILE_ACCEL_WIDTH_STORAGE_KEY, null);
+  writeRaw(PROFILE_DECEL_WIDTH_STORAGE_KEY, null);
+};
+
+/**
+ * 현재 전역 노브에서 *실효* 프로파일을 만든다.
+ *
+ * plateau가 0으로 완전히 눌린 경우(양쪽 폭의 합이 1) 남는 등속 구간이 없으므로
+ * 양쪽 램프를 `none`으로 고정한다 — 즉 구간 전체가 등속이 된다. 이 잠금 상태는
+ * `plateauCollapsed`로 노출되어 UI가 shape/곡률 컨트롤을 비활성화할 수 있다.
+ * 스무딩이 0인 경우도 같은 의미이므로 동일하게 처리한다.
+ */
+export const getVelocityProfile = () => {
+  const smoothing = getVelocitySmoothing();
+  const accelWidth = getProfileAccelWidth();
+  const decelWidth = getProfileDecelWidth();
+  const plateauCollapsed =
+    smoothing <= 0 || accelWidth + decelWidth >= 1 - PLATEAU_EPSILON;
+
+  const profile = plateauCollapsed
+    ? makeProfile({ accelShape: 'none', decelShape: 'none' })
+    : makeProfile({
+        accelShape: getProfileAccelShape(),
+        accelCurve: getProfileExp(),
+        accelWidth,
+        decelShape: getProfileDecelShape(),
+        decelCurve: getProfileLog(),
+        decelWidth,
+      });
+
+  return { ...profile, plateauCollapsed, smoothing };
+};
+
+/** 생성 요청 본문에 그대로 펼쳐 넣을 수 있는 프로파일 필드들. */
+export const getVelocityProfileRequestFields = () => {
+  const p = getVelocityProfile();
+  return {
+    velocity_smoothing: p.smoothing,
+    profile_exp: getProfileExp(),
+    profile_log: getProfileLog(),
+    profile_accel_shape: p.accelShape,
+    profile_accel_curve: p.accelCurve,
+    profile_accel_width: p.accelWidth,
+    profile_decel_shape: p.decelShape,
+    profile_decel_curve: p.decelCurve,
+    profile_decel_width: p.decelWidth,
+  };
+};

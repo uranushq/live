@@ -42,11 +42,7 @@ import {
   parsePositionLike,
   slicePathByElapsedMs,
 } from './utils/threeDViewUtils';
-import {
-  getProfileExp,
-  getProfileLog,
-  getVelocitySmoothing,
-} from './utils/pathSmoothing';
+import { getVelocityProfileRequestFields } from './utils/pathSmoothing';
 import { exportPatchedSkycFromShow } from './utils/skycExportUtils';
 import { getShowSpecDroneConfigForThreeDView } from './showSpecDroneConfig';
 
@@ -2958,10 +2954,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
       cruise_speed: sanitized.cruise_speed,
       auto_upload: sanitized.auto_upload,
       min_separation: sanitized.min_separation,
-      // 관성 프로파일 (전역 공유값): 스무딩 = 램프 비율, exp/log = 곡률
-      velocity_smoothing: getVelocitySmoothing(),
-      profile_exp: getProfileExp(),
-      profile_log: getProfileLog(),
+      // 관성 프로파일 (전역 공유값): 스무딩 마스터 + 가속/감속 램프 모양·폭·곡률
+      ...getVelocityProfileRequestFields(),
     };
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.
     if (sanitized.output) {

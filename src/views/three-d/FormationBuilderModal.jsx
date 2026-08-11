@@ -2,8 +2,7 @@ import PropTypes from 'prop-types';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import {
-  getProfileExp,
-  getProfileLog,
+  getVelocityProfileRequestFields,
   getVelocitySmoothing,
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
@@ -156,9 +155,7 @@ export default function FormationBuilderModal({ open, onClose, droneIds }) {
           : 0.1,
       takeoff_time:
         Number.isFinite(Number(takeoffTime)) && Number(takeoffTime) >= 0 ? Number(takeoffTime) : 5,
-      velocity_smoothing: smoothing,
-      profile_exp: getProfileExp(),
-      profile_log: getProfileLog(),
+      ...getVelocityProfileRequestFields(),
       auto_upload: !!autoUpload,
       output,
     };

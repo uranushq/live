@@ -12,8 +12,7 @@ import React from 'react';
 
 import VelocityProfileChart from './VelocityProfileChart';
 import {
-  getProfileExp,
-  getProfileLog,
+  getVelocityProfile,
   getVelocitySmoothing,
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
@@ -114,19 +113,16 @@ export default function PathControlPanel({
     setSmoothing(setVelocitySmoothing(value));
   };
 
-  // 관성 속도 프로파일 그래프 (스무딩·곡률 값에 따라 실시간 갱신)
+  // 관성 속도 프로파일 그래프 (모양·폭·곡률이 바뀌면 실시간 갱신)
   const [profileOpen, setProfileOpen] = React.useState(false);
-  const [profileKnobs, setProfileKnobs] = React.useState(() => ({
-    exp: getProfileExp(),
-    log: getProfileLog(),
-  }));
+  const [profile, setProfile] = React.useState(getVelocityProfile);
 
   // formation 탭 등 다른 UI에서 같은 전역값을 바꾸면 여기도 실시간 반영
   React.useEffect(
     () =>
       subscribeSmoothingKnobs(() => {
         setSmoothing(getVelocitySmoothing());
-        setProfileKnobs({ exp: getProfileExp(), log: getProfileLog() });
+        setProfile(getVelocityProfile());
       }),
     []
   );
@@ -223,13 +219,7 @@ export default function PathControlPanel({
               ...panelSurface,
             }}
           >
-            <VelocityProfileChart
-              smoothing={smoothing}
-              kExp={profileKnobs.exp}
-              kLog={profileKnobs.log}
-              width={320}
-              height={140}
-            />
+            <VelocityProfileChart profile={profile} width={320} height={140} />
           </div>
         )}
 

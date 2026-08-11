@@ -1,7 +1,8 @@
 import { Base64 } from 'js-base64';
 import JSZip from 'jszip';
 
-import { getVelocitySmoothing } from './pathSmoothing';
+import { getVelocityProfile } from './pathSmoothing';
+import { profilePeak, speedProfile } from './velocityProfile';
 import { getPathPointArrivalTimesMs, toFiniteHoldMs } from './threeDViewUtils';
 
 const MS_TO_SEC = 0.001;
@@ -10,6 +11,12 @@ const TIME_ROUND_DECIMALS = 6;
 // Direction change above which a waypoint is treated as a "corner" where speed
 // must ramp down. Mirrors CORNER_ANGLE_THRESHOLD_DEG in the path-planner backend.
 const CORNER_ANGLE_THRESHOLD_DEG = 5.0;
+
+// Hard velocity limits. Must match MAX_VELOCITY_XY / MAX_VELOCITY_Z in the
+// path-planner backend, otherwise a locally patched .skyc could carry speeds
+// the server would have refused.
+const MAX_VELOCITY_XY = 8.0;
+const MAX_VELOCITY_Z = 2.5;
 
 const roundSeconds = (value) => {
   const factor = 10 ** TIME_ROUND_DECIMALS;
@@ -81,21 +88,22 @@ const mergeCollinearRuns = (points, angleThresholdDeg = CORNER_ANGLE_THRESHOLD_D
   return result;
 };
 
-/**
- * Give the trajectory a smooth speed profile by replacing each moving segment's
- * control points with a cubic Bézier whose interior control points lie ON the
- * straight line between the keyframes. Geometry is unchanged (the path is still
- * the same straight dot-to-dot line); only the speed along it changes. This is a
- * faithful port of `_apply_velocity_smoothing` in the path-planner backend so
- * the local .skyc patch and the server-generated shows behave identically.
- *
- * Mutates and returns `points` (each entry is `[timeSec, position, controls]`).
- * `smoothing` in [0, 1]: 0 clears controls (constant-velocity linear segments);
- * >0 ramps speed to/from zero at the start, end and holds; larger values also
- * slow down more at direction-change corners.
- */
-const applyVelocitySmoothingToPoints = (points, smoothing) => {
-  if (!(smoothing > 0) || points.length < 2) {
+/** Control-point distances along the segment line; mirrors `_control_distances`. */
+const controlDistances = (v0, v1, length, dt) => {
+  let d1 = (v0 * dt) / 3;
+  let d2 = length - (v1 * dt) / 3;
+  d1 = Math.max(0, Math.min(d1, length));
+  d2 = Math.max(0, Math.min(d2, length));
+  if (d2 < d1) {
+    d1 = 0.5 * (d1 + d2);
+    d2 = d1;
+  }
+  return [d1, d2];
+};
+
+const applyVelocitySmoothingToPoints = (points, profile) => {
+  const smoothing = Number(profile?.smoothing ?? 0);
+  if (!profile || profile.isConstant || !(smoothing > 0) || points.length < 2) {
     // Disabled: make every segment linear (drop any stale control points).
     for (const p of points) p[2] = [];
     return points;
@@ -112,6 +120,7 @@ const applyVelocitySmoothingToPoints = (points, smoothing) => {
 
   const segDir = new Array(n).fill(null);
   const segLen = new Array(n).fill(0);
+  const segDt = new Array(n).fill(0);
   const segCruise = new Array(n).fill(0);
   for (let k = 1; k < n; k += 1) {
     const a = pos[k - 1];
@@ -120,6 +129,7 @@ const applyVelocitySmoothingToPoints = (points, smoothing) => {
     const L = Math.hypot(d[0], d[1], d[2]);
     const dt = time[k] - time[k - 1];
     segLen[k] = L;
+    segDt[k] = dt;
     if (L > 1e-9 && dt > 1e-9) {
       segDir[k] = [d[0] / L, d[1] / L, d[2] / L];
       segCruise[k] = L / dt;
@@ -143,34 +153,153 @@ const applyVelocitySmoothingToPoints = (points, smoothing) => {
       angleDeg > CORNER_ANGLE_THRESHOLD_DEG ? (1 - s) * passThrough : passThrough;
   }
 
-  for (let k = 0; k < n; k += 1) {
-    if (k === 0) {
-      merged[0][2] = []; // first keyframe must have no control points
-      continue;
-    }
+  // Velocity safety, mirroring `apply_velocity_smoothing`: easing raises the
+  // peak above cruise, so segments that would break a limit get their easing
+  // relaxed toward cruise. Without this the local patch could emit a .skyc the
+  // server would have clamped.
+  const segLimit = new Array(n).fill(Infinity);
+  for (let k = 1; k < n; k += 1) {
     const u = segDir[k];
+    if (!u) continue;
+    const hxy = Math.hypot(u[0], u[1]);
+    const vz = Math.abs(u[2]);
+    let limit = Infinity;
+    if (hxy > 1e-9) limit = Math.min(limit, MAX_VELOCITY_XY / hxy);
+    if (vz > 1e-9) limit = Math.min(limit, MAX_VELOCITY_Z / vz);
+    segLimit[k] = limit;
+    if (segCruise[k] > limit * (1 + 1e-6)) {
+      // Even constant speed is unflyable at this timing; the server rejects
+      // this outright, so leave the path un-eased and say so loudly.
+      console.warn(
+        `[skyc] segment ending at t=${time[k].toFixed(2)}s needs ` +
+          `${segCruise[k].toFixed(2)} m/s, above the ${limit.toFixed(2)} m/s limit; ` +
+          'exporting it without velocity smoothing.'
+      );
+      for (const p of points) p[2] = [];
+      return points;
+    }
+  }
+
+  const needsEasing = (k) =>
+    Boolean(segDir[k]) &&
+    (Math.abs(speedAt[k - 1] - segCruise[k]) > 1e-9 ||
+      Math.abs(speedAt[k] - segCruise[k]) > 1e-9);
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    let violated = false;
+    for (let k = 1; k < n; k += 1) {
+      if (!needsEasing(k)) continue;
+      const peak = profilePeak(
+        speedAt[k - 1],
+        speedAt[k],
+        segLen[k],
+        segDt[k],
+        profile
+      );
+      if (peak <= segLimit[k] * (1 + 1e-9)) continue;
+      violated = true;
+      const cruise = segCruise[k];
+      const beta = Math.max(
+        0,
+        Math.min(1, (segLimit[k] - cruise) / Math.max(peak - cruise, 1e-9))
+      );
+      for (const endpoint of [k - 1, k]) {
+        const current = speedAt[endpoint];
+        const demanded = cruise + beta * (current - cruise);
+        const bounds = [];
+        if (endpoint >= 1 && segDir[endpoint]) bounds.push(segCruise[endpoint]);
+        if (endpoint + 1 < n && segDir[endpoint + 1]) {
+          bounds.push(segCruise[endpoint + 1]);
+        }
+        const bound = bounds.length ? Math.min(...bounds) : cruise;
+        speedAt[endpoint] = Math.min(Math.max(current, demanded), bound);
+      }
+    }
+    if (!violated) break;
+  }
+
+  // Still over a limit with easing? Fall back to constant speed everywhere.
+  for (let k = 1; k < n; k += 1) {
+    if (!needsEasing(k)) continue;
+    const peak = profilePeak(speedAt[k - 1], speedAt[k], segLen[k], segDt[k], profile);
+    if (peak > segLimit[k] * (1 + 1e-6)) {
+      for (const p of points) p[2] = [];
+      return points;
+    }
+  }
+
+  // Sub-knots at the ramp boundaries, exactly as the backend renders them, so
+  // the ramp SHAPE (not just its endpoint speeds) survives into the .skyc.
+  const rampA = profile.accelWidth;
+  const rampB = profile.decelWidth;
+  const subTaus = [];
+  for (const tau of [rampA * 0.5, rampA, 1 - rampB, 1 - rampB * 0.5]) {
+    if (
+      tau > 1e-9 &&
+      tau < 1 - 1e-9 &&
+      (subTaus.length === 0 || tau > subTaus[subTaus.length - 1] + 1e-9)
+    ) {
+      subTaus.push(tau);
+    }
+  }
+  subTaus.push(1);
+
+  const out = [[merged[0][0], merged[0][1], []]];
+  for (let k = 1; k < n; k += 1) {
+    const u = segDir[k];
+    const template = merged[k][1];
     if (!u) {
-      merged[k][2] = []; // hold / degenerate segment stays constant
+      out.push([merged[k][0], template, []]); // hold / degenerate -> constant
       continue;
     }
     const a = pos[k - 1];
-    const L = segLen[k];
-    const dt = time[k] - time[k - 1];
-    let d1 = (speedAt[k - 1] * dt) / 3;
-    let d2 = L - (speedAt[k] * dt) / 3;
-    d1 = Math.max(0, Math.min(d1, L));
-    d2 = Math.max(0, Math.min(d2, L));
-    if (d2 < d1) {
-      d1 = 0.5 * (d1 + d2);
-      d2 = d1;
+    const t0 = time[k - 1];
+    const { speed, arc } = speedProfile(
+      speedAt[k - 1],
+      speedAt[k],
+      segLen[k],
+      segDt[k],
+      profile
+    );
+    let prevTau = 0;
+    let prevArc = 0;
+    // A zero-width side never flies its knot speed; read both off the profile.
+    let prevSpeed = Math.max(0, speed(0));
+    const exitSpeed = Math.max(0, speed(1));
+    for (let i = 0; i < subTaus.length; i += 1) {
+      const tau = subTaus[i];
+      const last = i === subTaus.length - 1;
+      const sArc = last
+        ? segLen[k]
+        : Math.min(segLen[k], Math.max(prevArc, arc(tau)));
+      const v = last ? exitSpeed : Math.max(0, speed(tau));
+      const [d1, d2] = controlDistances(
+        prevSpeed,
+        v,
+        sArc - prevArc,
+        (tau - prevTau) * segDt[k]
+      );
+      const p1 = [0, 1, 2].map((j) => a[j] + u[j] * (prevArc + d1));
+      const p2 = [0, 1, 2].map((j) => a[j] + u[j] * (prevArc + d2));
+      const knotTime = last ? merged[k][0] : roundSeconds(t0 + tau * segDt[k]);
+      const knotPos = last
+        ? template
+        : makeControlLike(
+            template,
+            [0, 1, 2].map((j) => a[j] + u[j] * sArc)
+          );
+      out.push([
+        knotTime,
+        knotPos,
+        [makeControlLike(template, p1), makeControlLike(template, p2)],
+      ]);
+      prevTau = tau;
+      prevArc = sArc;
+      prevSpeed = v;
     }
-    const p1 = [a[0] + u[0] * d1, a[1] + u[1] * d1, a[2] + u[2] * d1];
-    const p2 = [a[0] + u[0] * d2, a[1] + u[1] * d2, a[2] + u[2] * d2];
-    const template = merged[k][1];
-    merged[k][2] = [makeControlLike(template, p1), makeControlLike(template, p2)];
   }
 
-  return merged;
+  return out;
 };
 
 const isObjectCoordinate = (value) =>
@@ -310,10 +439,11 @@ export const patchTrajectoryFromPath = (originalTrajectory, path) => {
     }
   }
 
-  // Recompute control points so the edited (straight) path gets the same
-  // ease-in/ease-out speed profile as the server-generated shows. Collinear
-  // runs are merged into one segment, so this may return fewer keyframes.
-  const smoothedPoints = applyVelocitySmoothingToPoints(points, getVelocitySmoothing());
+  // Recompute the keyframes so the edited (straight) path gets the same speed
+  // profile as the server-generated shows — same ramp shapes, widths and
+  // curvatures. Collinear runs are merged into one segment and eased segments
+  // are subdivided at the ramp boundaries, so the keyframe count changes.
+  const smoothedPoints = applyVelocitySmoothingToPoints(points, getVelocityProfile());
 
   const patched = {
     ...originalTrajectory,

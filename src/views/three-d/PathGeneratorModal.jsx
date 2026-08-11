@@ -2,8 +2,7 @@ import PropTypes from 'prop-types';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import {
-  getProfileExp,
-  getProfileLog,
+  getVelocityProfileRequestFields,
   getVelocitySmoothing,
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
@@ -467,9 +466,7 @@ export default function PathGeneratorModal({ open, onClose }) {
                       target: payload.target,
                       step_size,
                       duration_ms,
-                      velocity_smoothing: smoothing,
-                      profile_exp: getProfileExp(),
-                      profile_log: getProfileLog(),
+                      ...getVelocityProfileRequestFields(),
                       output: 'skyc',
                       download: true,
                     }),

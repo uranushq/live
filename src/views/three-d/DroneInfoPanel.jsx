@@ -25,14 +25,26 @@ import {
 import {
   PROFILE_THICKNESS_MAX,
   PROFILE_THICKNESS_MIN,
+  areProfileWidthsLinkedToSmoothing,
+  getProfileAccelShape,
+  getProfileAccelWidth,
+  getProfileDecelShape,
+  getProfileDecelWidth,
   getProfileExp,
   getProfileLog,
+  getVelocityProfile,
   getVelocitySmoothing,
+  resetProfileWidths,
+  setProfileAccelShape,
+  setProfileAccelWidth,
+  setProfileDecelShape,
+  setProfileDecelWidth,
   setProfileExp,
   setProfileLog,
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
 } from './utils/pathSmoothing';
+import { RAMP_SHAPES, RAMP_SHAPE_LABELS } from './utils/velocityProfile';
 import VelocityProfileChart from './VelocityProfileChart';
 
 // 첫 번째 항목 ''은 "백엔드 기본값(.skyc 다운로드) 사용". payload에서 output 키를 생략.
@@ -589,26 +601,47 @@ export default function DroneInfoPanel({
   const [formationSettingsDrafts, setFormationSettingsDrafts] = useState({});
 
   // 관성 속도 프로파일 노브 (전역 공유, localStorage에 저장되어 모든 생성
-  // 요청이 함께 쓴다): 스무딩 = 램프 비율, exp/log = 각 램프 곡률.
-  const [profileSmoothing, setProfileSmoothingState] = useState(() =>
-    getVelocitySmoothing()
+  // 요청이 함께 쓴다). 가속 램프 / 등속 plateau / 감속 램프 세 구간이고,
+  // plateau 폭은 남는 값(1 - a - b)이라 따로 저장하지 않는다.
+  const readProfileKnobs = () => ({
+    smoothing: getVelocitySmoothing(),
+    accelShape: getProfileAccelShape(),
+    accelCurve: getProfileExp(),
+    accelWidth: getProfileAccelWidth(),
+    decelShape: getProfileDecelShape(),
+    decelCurve: getProfileLog(),
+    decelWidth: getProfileDecelWidth(),
+    widthsLinked: areProfileWidthsLinkedToSmoothing(),
+  });
+  const [profileKnobs, setProfileKnobs] = useState(readProfileKnobs);
+  const refreshProfileKnobs = () => setProfileKnobs(readProfileKnobs());
+
+  // 실효 프로파일: plateau가 0으로 눌리면 양쪽 램프가 등속으로 고정된다.
+  const effectiveProfile = useMemo(
+    () => getVelocityProfile(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profileKnobs]
   );
-  const [profileExp, setProfileExpState] = useState(() => getProfileExp());
-  const [profileLog, setProfileLogState] = useState(() => getProfileLog());
-  const handleProfileSmoothing = (value) =>
-    setProfileSmoothingState(setVelocitySmoothing(value));
-  const handleProfileExp = (value) => setProfileExpState(setProfileExp(value));
-  const handleProfileLog = (value) => setProfileLogState(setProfileLog(value));
+  const plateauLocked = effectiveProfile.plateauCollapsed;
+
+  const applyKnob = (setter) => (value) => {
+    setter(value);
+    refreshProfileKnobs();
+  };
+  const handleProfileSmoothing = applyKnob(setVelocitySmoothing);
+  const handleProfileExp = applyKnob(setProfileExp);
+  const handleProfileLog = applyKnob(setProfileLog);
+  const handleAccelShape = applyKnob(setProfileAccelShape);
+  const handleDecelShape = applyKnob(setProfileDecelShape);
+  const handleAccelWidth = applyKnob(setProfileAccelWidth);
+  const handleDecelWidth = applyKnob(setProfileDecelWidth);
+  const handleResetWidths = () => {
+    resetProfileWidths();
+    refreshProfileKnobs();
+  };
+
   // 재생바 등 다른 UI에서 같은 전역값을 바꾸면 여기도 실시간 반영
-  useEffect(
-    () =>
-      subscribeSmoothingKnobs(() => {
-        setProfileSmoothingState(getVelocitySmoothing());
-        setProfileExpState(getProfileExp());
-        setProfileLogState(getProfileLog());
-      }),
-    []
-  );
+  useEffect(() => subscribeSmoothingKnobs(refreshProfileKnobs), []);
 
   // 드론 바뀔 때 경로 초기화 / JSON에서 path가 오면 반영
   useEffect(() => {
@@ -2201,8 +2234,10 @@ export default function DroneInfoPanel({
           </div>
 
           {/* 관성 속도 프로파일: cruise_speed 아래에서 곡선을 직접 보며
-              램프 비율(스무딩)과 지수/로그 곡률을 조절한다. 전역 공유값이라
-              모든 생성 요청(plan/delivery/skyc 패치)에 함께 적용된다. */}
+              가속 램프 / 등속 plateau / 감속 램프를 각각 조절한다. 전역
+              공유값이라 모든 생성 요청(plan/delivery/skyc 패치)에 함께 적용된다.
+              plateau 폭은 남는 값(1 - 가속폭 - 감속폭)이라 별도 노브가 없고,
+              0이 되면 남는 등속 구간이 없으므로 양쪽 램프를 등속으로 잠근다. */}
           <div
             style={{
               marginTop: 10,
@@ -2213,44 +2248,156 @@ export default function DroneInfoPanel({
             }}
           >
             <VelocityProfileChart
-              smoothing={profileSmoothing}
-              kExp={profileExp}
-              kLog={profileLog}
+              profile={effectiveProfile}
               width={252}
               height={104}
             />
+
+            {/* 램프 모양 선택 (가속 / 감속). plateau가 눌리면 비활성화된다. */}
             {[
               {
-                label: '스무딩 (램프 비율)',
-                value: profileSmoothing,
+                key: 'accel',
+                label: '가속 램프',
+                value: profileKnobs.accelShape,
+                onChange: handleAccelShape,
+                title:
+                  '가속 램프의 모양. exp = 출발이 완만하고 등속 직전에 가속이 몰림, ' +
+                  'log = 출발이 급하고 등속에 부드럽게 붙음, linear = 일정 가속, ' +
+                  'none = 가속 램프 없이 곧바로 등속.',
+              },
+              {
+                key: 'decel',
+                label: '감속 램프',
+                value: profileKnobs.decelShape,
+                onChange: handleDecelShape,
+                title:
+                  '감속 램프의 모양. 시간이 거꾸로 대입되므로 exp = 도착 순간이 ' +
+                  '가장 완만(오버슛에 유리), log = 도착 순간에 제동이 가장 강함, ' +
+                  'linear = 일정 감속, none = 감속 없이 등속으로 도착.',
+              },
+            ].map(({ key, label, value, onChange, title }) => (
+              <div
+                key={key}
+                title={title}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 6,
+                  opacity: plateauLocked ? 0.45 : 1,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: FORMATION_DIM,
+                    width: 108,
+                    flexShrink: 0,
+                  }}
+                >
+                  {label}
+                </span>
+                <select
+                  value={value}
+                  disabled={plateauLocked}
+                  onChange={(e) => onChange(e.target.value)}
+                  style={{
+                    flex: 1,
+                    fontSize: 11,
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                    background: 'rgba(255,255,255,0.06)',
+                    color: '#d3d5db',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    cursor: plateauLocked ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {RAMP_SHAPES.map((s) => (
+                    <option key={s} value={s} style={{ background: '#22242a' }}>
+                      {RAMP_SHAPE_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+
+            {plateauLocked && (
+              <div
+                style={{
+                  fontSize: 10,
+                  marginTop: 6,
+                  padding: '4px 6px',
+                  borderRadius: 4,
+                  color: '#ffb26b',
+                  background: 'rgba(255, 178, 107, 0.10)',
+                  lineHeight: 1.4,
+                }}
+              >
+                {profileKnobs.smoothing <= 0
+                  ? '스무딩 0 — 구간 전체가 등속입니다.'
+                  : '등속 구간 0% — 남는 plateau가 없어 양쪽 램프를 등속으로 고정했습니다. 폭을 줄이면 해제됩니다.'}
+              </div>
+            )}
+
+            {[
+              {
+                label: '스무딩 (마스터)',
+                value: profileKnobs.smoothing,
                 min: 0,
                 max: 1,
                 step: 0.05,
                 onChange: handleProfileSmoothing,
+                disabled: false,
                 title:
-                  '가속·감속 램프가 구간에서 차지하는 비율. 0 = 등속(관성 없음), 1 = 양쪽 각 40%까지 램프.',
+                  '0 = 관성 없음(구간 전체 등속). 코너에서의 감속량도 함께 정합니다 ' +
+                  '(1 = 방향 전환마다 완전 정지). 램프 폭을 직접 지정하지 않았다면 폭도 이 값을 따릅니다.',
               },
               {
-                label: '지수 곡률 kₑ (가속)',
-                value: profileExp,
+                label: '가속 폭 a',
+                value: profileKnobs.accelWidth,
+                min: 0,
+                max: 1,
+                step: 0.05,
+                onChange: handleAccelWidth,
+                disabled: false,
+                title:
+                  '가속 램프가 구간에서 차지하는 비율. 등속 plateau는 남는 1 - a - b이며, ' +
+                  'a + b가 1을 넘지 않도록 반대쪽이 밀려납니다.',
+              },
+              {
+                label: '감속 폭 b',
+                value: profileKnobs.decelWidth,
+                min: 0,
+                max: 1,
+                step: 0.05,
+                onChange: handleDecelWidth,
+                disabled: false,
+                title:
+                  '감속 램프가 구간에서 차지하는 비율. 등속 plateau는 남는 1 - a - b입니다.',
+              },
+              {
+                label: '가속 곡률 kₐ',
+                value: profileKnobs.accelCurve,
                 min: PROFILE_THICKNESS_MIN,
                 max: PROFILE_THICKNESS_MAX,
                 step: 0.05,
                 onChange: handleProfileExp,
+                disabled: plateauLocked || profileKnobs.accelShape === 'none',
                 title:
-                  '가속 램프의 지수(exp) 곡률. 작을수록 직선 램프, 클수록 초반이 완만하고 등속 구간 직전에 가속이 몰립니다.',
+                  '가속 램프의 곡률. 작을수록 직선에 가깝고, 클수록 모양(exp/log)이 뚜렷해집니다. linear에는 영향이 없습니다.',
               },
               {
-                label: '로그 곡률 kₗ (감속)',
-                value: profileLog,
+                label: '감속 곡률 k_d',
+                value: profileKnobs.decelCurve,
                 min: PROFILE_THICKNESS_MIN,
                 max: PROFILE_THICKNESS_MAX,
                 step: 0.05,
                 onChange: handleProfileLog,
+                disabled: plateauLocked || profileKnobs.decelShape === 'none',
                 title:
-                  '감속 램프의 로그(log) 곡률. 작을수록 직선 램프, 클수록 초반에 빨리 줄고 도착 직전이 완만해집니다.',
+                  '감속 램프의 곡률. log 모양에서는 클수록 도착 직전 제동이 강해져 오버슛이 커집니다. linear에는 영향이 없습니다.',
               },
-            ].map(({ label, value, min, max, step, onChange, title }) => (
+            ].map(({ label, value, min, max, step, onChange, title, disabled }) => (
               <div
                 key={label}
                 title={title}
@@ -2259,6 +2406,7 @@ export default function DroneInfoPanel({
                   alignItems: 'center',
                   gap: 8,
                   marginTop: 6,
+                  opacity: disabled ? 0.45 : 1,
                 }}
               >
                 <span
@@ -2277,8 +2425,13 @@ export default function DroneInfoPanel({
                   max={max}
                   step={step}
                   value={value}
+                  disabled={disabled}
                   onChange={(e) => onChange(e.target.value)}
-                  style={{ flex: 1, accentColor: '#67b4ff', cursor: 'pointer' }}
+                  style={{
+                    flex: 1,
+                    accentColor: '#67b4ff',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                  }}
                 />
                 <span
                   style={{
@@ -2293,6 +2446,46 @@ export default function DroneInfoPanel({
                 </span>
               </div>
             ))}
+
+            {/* plateau는 파생값이라 슬라이더가 없고 읽기 전용으로만 보여준다. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                marginTop: 8,
+                paddingTop: 6,
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 10,
+                color: FORMATION_DIM,
+              }}
+            >
+              <span
+                title="등속 유지 구간의 폭. 1 - 가속폭 - 감속폭으로 자동 계산됩니다."
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                등속 구간 {(effectiveProfile.plateauWidth * 100).toFixed(0)}%
+              </span>
+              <button
+                type="button"
+                onClick={handleResetWidths}
+                disabled={profileKnobs.widthsLinked}
+                title="가속·감속 폭을 다시 스무딩 값에 연동시킵니다."
+                style={{
+                  fontSize: 10,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: profileKnobs.widthsLinked ? FORMATION_DIM : '#d3d5db',
+                  cursor: profileKnobs.widthsLinked ? 'default' : 'pointer',
+                  opacity: profileKnobs.widthsLinked ? 0.5 : 1,
+                }}
+              >
+                {profileKnobs.widthsLinked ? '스무딩 연동 중' : '폭 연동 복구'}
+              </button>
+            </div>
           </div>
 
           <div
