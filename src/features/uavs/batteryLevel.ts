@@ -37,25 +37,34 @@ export function resolveBatteryPercentage(
   return undefined;
 }
 
-/** 80–100% */
-export function getBatteryLevelColor(percentage: number): string {
-  if (percentage >= 80) {
+/**
+ * Resolves pack voltage for list coloring.
+ */
+export function resolveBatteryVoltage(
+  voltage?: number | string
+): number | undefined {
+  return toFiniteNumber(voltage);
+}
+
+/** ≥21V green, >19V and <21V yellow, ≤19V red */
+export function getBatteryLevelColor(voltage: number): string {
+  if (voltage >= 21) {
     return BATTERY_LEVEL_COLOR_HIGH;
   }
 
-  if (percentage >= 35) {
+  if (voltage > 19) {
     return BATTERY_LEVEL_COLOR_MID;
   }
 
   return BATTERY_LEVEL_COLOR_LOW;
 }
 
-export function getBatteryLevelStyle(percentage?: number): CSSProperties | undefined {
-  if (percentage === undefined) {
+export function getBatteryLevelStyle(voltage?: number): CSSProperties | undefined {
+  if (voltage === undefined) {
     return undefined;
   }
 
-  const backgroundColor = getBatteryLevelColor(percentage);
+  const backgroundColor = getBatteryLevelColor(voltage);
 
   return {
     backgroundColor,

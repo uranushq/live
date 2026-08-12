@@ -8,7 +8,7 @@ import { makeStyles } from '@skybrush/app-theme-mui';
 import Colors from '~/components/colors';
 import {
   getBatteryLevelStyle,
-  resolveBatteryPercentage,
+  resolveBatteryVoltage,
 } from '~/features/uavs/batteryLevel';
 
 import { BatteryFormatter, DEFAULT_BATTERY_FORMATTER } from './battery';
@@ -63,16 +63,8 @@ const BatteryIndicator = ({
   const batteryIcon = formatter.getBatteryIcon(percentage, status, charging);
 
   const classes = useStyles();
-  const resolvedPercentage = listLevelColors
-    ? resolveBatteryPercentage(
-        percentage,
-        voltage,
-        formatter.estimatePercentageFromVoltage,
-        cellCount
-      )
-    : undefined;
   const listLevelStyle = listLevelColors
-    ? getBatteryLevelStyle(resolvedPercentage)
+    ? getBatteryLevelStyle(resolveBatteryVoltage(voltage))
     : undefined;
   const rootClass = clsx(
     className,

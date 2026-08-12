@@ -26,7 +26,7 @@ import {
   isShowOutdoor,
 } from '~/features/show/selectors';
 import { getUploadStatusCodeMapping } from '~/features/upload/selectors';
-import { getBatteryLevelStyle, resolveBatteryPercentage } from '~/features/uavs/batteryLevel';
+import { getBatteryLevelStyle, resolveBatteryVoltage } from '~/features/uavs/batteryLevel';
 import { isPathUploadedForUav, getPathUploadPillStyle } from '~/features/uavs/pathUpload';
 import {
   getSingleUAVStatusSummary,
@@ -538,12 +538,6 @@ export default connect((state, { drone }) => {
     geofenceSet
   );
   const batteryStatus = uav.battery;
-  const batteryPercentage = resolveBatteryPercentage(
-    batteryStatus?.percentage,
-    batteryStatus?.voltage,
-    batteryFormatter.estimatePercentageFromVoltage,
-    batteryStatus?.cellCount
-  );
 
   return {
     drone,
@@ -562,7 +556,7 @@ export default connect((state, { drone }) => {
       geofenceSet,
       showStartTimeSet: hasScheduledStartTime(state),
     }),
-    batteryStyle: getBatteryLevelStyle(batteryPercentage),
+    batteryStyle: getBatteryLevelStyle(resolveBatteryVoltage(batteryStatus?.voltage)),
     fltModeSlotLabel: getFltModeSlotLabelForUavId(state, uavId),
     gpsFixType: uav.gpsFix?.type,
     gpsNumSatellites: uav.gpsFix?.numSatellites,
