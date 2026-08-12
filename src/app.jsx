@@ -20,6 +20,7 @@ import DockDetailsDialog from './features/docks/DockDetailsDialog';
 import FirmwareUpdateSetupDialog from './features/firmware-update/FirmwareUpdateSetupDialog';
 import AppHotkeys from './features/hotkeys/AppHotkeys';
 import LedPlaybackDriver from './features/led-editor/LedPlaybackDriver';
+import JRHealthPoller from './features/jr-control/JRHealthPoller';
 import HotkeyDialog from './features/hotkeys/HotkeyDialog';
 import PendingUAVIdOverlay from './features/hotkeys/PendingUAVIdOverlay';
 import LicenseInfoDialog from './features/license-info/LicenseInfoDialog';
@@ -232,6 +233,7 @@ const App = ({ onFirstRender }) => (
       <ShowStartReadinessUpdater />
       <ShowFileWatcher />
       {hasFeature('ledShow') && <LedPlaybackDriver />}
+      {hasFeature('ledShow') && <JRHealthPoller />}
 
       <dialogs.AppSettingsDialog />
       <dialogs.AuthenticationDialog />

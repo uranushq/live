@@ -12,10 +12,12 @@ import CloudDownload from '@mui/icons-material/CloudDownload';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -33,11 +35,26 @@ import {
   refreshAllBoards,
   refreshBoardHealth,
 } from '~/features/jr-control/actions';
+import { JR_HEALTH_POLL_INTERVAL_MS } from '~/features/jr-control/JRHealthPoller';
+import {
+  getJRBoardRows,
+  getJRBoardStatusCounts,
+  getJRHealthCheckDisabledReason,
+  isJRHealthCheckEnabled,
+  JR_IP_PREFIX,
+} from '~/features/jr-control/selectors';
 import {
   addBoard,
   removeBoard,
   setArmParams,
+  setHealthCheckEnabled,
 } from '~/features/jr-control/slice';
+import {
+  JR_BOARD_STATUS_COLOR,
+  JR_BOARD_STATUS_LABEL,
+  JRBoardStatus,
+  type JRBoardStatusId,
+} from '~/features/jr-control/status';
 import {
   getFps,
   getLedStartDelaySec,
@@ -45,6 +62,25 @@ import {
 } from '~/features/led-editor/selectors';
 import { type RootState } from '~/store/reducers';
 import { type AppDispatch } from '~/store/reducers';
+
+/** 요약 줄에 보여줄 상태 순서 (사용자가 신경 쓰는 4개 먼저) */
+const SUMMARY_STATUS_ORDER: JRBoardStatusId[] = [
+  JRBoardStatus.ARM_WAIT,
+  JRBoardStatus.GNSS_PPS_WAIT,
+  JRBoardStatus.DOWNLOADING,
+  JRBoardStatus.ERROR,
+  JRBoardStatus.OTHER,
+  JRBoardStatus.UNKNOWN,
+];
+
+const formatCheckedAt = (timestamp?: number): string => {
+  if (!timestamp) {
+    return '—';
+  }
+
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  return seconds < 1 ? '방금' : `${seconds}s 전`;
+};
 
 // Only the fields a user must set are shown. FPS and frame count are derived
 // from the authored LED show at broadcast time (see broadcastArm), so they are
@@ -59,7 +95,10 @@ const armFields: Array<{
 
 const JRControlPanel = (): JSX.Element => {
   const dispatch = useDispatch<AppDispatch>();
-  const boards = useSelector((state: RootState) => state.jrControl.boards);
+  const rows = useSelector(getJRBoardRows);
+  const statusCounts = useSelector(getJRBoardStatusCounts);
+  const healthCheckEnabled = useSelector(isJRHealthCheckEnabled);
+  const healthCheckDisabledReason = useSelector(getJRHealthCheckDisabledReason);
   const arm = useSelector((state: RootState) => state.jrControl.arm);
   const lastArmSummary = useSelector(
     (state: RootState) => state.jrControl.lastArmSummary
@@ -95,7 +134,7 @@ const JRControlPanel = (): JSX.Element => {
         <TextField
           size='small'
           label='Board IP'
-          placeholder='192.168.11.3'
+          placeholder={`${JR_IP_PREFIX}3`}
           value={ipInput}
           onChange={(event) => setIpInput(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && handleAdd()}
@@ -113,60 +152,123 @@ const JRControlPanel = (): JSX.Element => {
         </IconButton>
       </Stack>
 
+      {/* 헬스체크 on/off — ARM 브로드캐스트를 보내면 자동으로 꺼진다 */}
+      <Stack
+        direction='row'
+        spacing={1}
+        alignItems='center'
+        flexWrap='wrap'
+        useFlexGap
+        sx={{ mb: 1 }}
+      >
+        <FormControlLabel
+          control={
+            <Switch
+              size='small'
+              checked={healthCheckEnabled}
+              onChange={(event) =>
+                dispatch(setHealthCheckEnabled(event.target.checked))
+              }
+            />
+          }
+          label={`헬스체크 ${JR_HEALTH_POLL_INTERVAL_MS / 1000}초 주기`}
+        />
+        <Typography variant='caption' color='text.secondary'>
+          연결된 드론 번호 → {JR_IP_PREFIX}N · 감시 {rows.length}대
+        </Typography>
+        {SUMMARY_STATUS_ORDER.filter((status) => statusCounts[status]).map(
+          (status) => (
+            <Chip
+              key={status}
+              size='small'
+              variant='outlined'
+              color={JR_BOARD_STATUS_COLOR[status]}
+              label={`${JR_BOARD_STATUS_LABEL[status]} ${statusCounts[status]}`}
+            />
+          )
+        )}
+      </Stack>
+
+      {!healthCheckEnabled && (
+        <Typography
+          variant='caption'
+          color='warning.main'
+          sx={{ display: 'block', mb: 1 }}
+        >
+          {healthCheckDisabledReason ?? '헬스체크가 꺼져 있습니다.'} 다시 보려면
+          위 토글을 켜세요.
+        </Typography>
+      )}
+
       <Table size='small'>
         <TableHead>
           <TableRow>
+            <TableCell>Drone</TableCell>
             <TableCell>IP</TableCell>
-            <TableCell>State</TableCell>
+            <TableCell>Status</TableCell>
             <TableCell>PPS</TableCell>
             <TableCell>Show</TableCell>
-            <TableCell>Uptime</TableCell>
+            <TableCell>Checked</TableCell>
             <TableCell align='right'>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {boards.length === 0 && (
+          {rows.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={7}>
                 <Typography variant='caption' color='text.secondary'>
-                  No boards added yet.
+                  연결된 드론이 없습니다. 드론이 붙으면 자동으로 나타나고, 필요하면
+                  IP 를 직접 추가할 수 있습니다.
                 </Typography>
               </TableCell>
             </TableRow>
           )}
-          {boards.map((board) => (
-            <TableRow key={board.ip}>
-              <TableCell>{board.ip}</TableCell>
+          {rows.map((row) => (
+            <TableRow key={row.ip}>
               <TableCell>
-                {board.error ? (
-                  <Typography variant='caption' color='error'>
-                    unreachable
-                  </Typography>
+                {row.uavId ? (
+                  row.uavId
                 ) : (
-                  board.health?.state ?? '—'
+                  <Typography variant='caption' color='text.secondary'>
+                    manual
+                  </Typography>
                 )}
               </TableCell>
-              <TableCell>{board.health?.pps?.state ?? '—'}</TableCell>
+              <TableCell>{row.ip}</TableCell>
               <TableCell>
-                {board.health?.show?.loaded ? 'loaded' : '—'}
+                <Chip
+                  size='small'
+                  color={JR_BOARD_STATUS_COLOR[row.status]}
+                  variant={
+                    row.status === JRBoardStatus.UNKNOWN ? 'outlined' : 'filled'
+                  }
+                  label={
+                    row.statusDetail
+                      ? `${JR_BOARD_STATUS_LABEL[row.status]} (${row.statusDetail})`
+                      : JR_BOARD_STATUS_LABEL[row.status]
+                  }
+                  title={row.error ?? row.health?.state ?? ''}
+                />
               </TableCell>
+              <TableCell>{row.health?.pps?.state ?? '—'}</TableCell>
               <TableCell>
-                {board.health?.uptime_ms !== undefined
-                  ? `${Math.floor(board.health.uptime_ms / 1000)}s`
+                {row.health?.show?.loaded
+                  ? `${row.health.show.frames ?? '?'}f`
                   : '—'}
               </TableCell>
+              <TableCell>{formatCheckedAt(row.lastCheckedAt)}</TableCell>
               <TableCell align='right'>
                 <IconButton
                   size='small'
                   title='Refresh'
-                  onClick={() => dispatch(refreshBoardHealth(board.ip))}
+                  onClick={() => dispatch(refreshBoardHealth(row.ip))}
                 >
                   <Refresh fontSize='small' />
                 </IconButton>
                 <IconButton
                   size='small'
                   title='Re-download'
-                  onClick={() => dispatch(redownloadBoard(board.ip))}
+                  onClick={() => dispatch(redownloadBoard(row.ip))}
                 >
                   <CloudDownload fontSize='small' />
                 </IconButton>
@@ -174,18 +276,20 @@ const JRControlPanel = (): JSX.Element => {
                   size='small'
                   title='Reboot'
                   color='warning'
-                  onClick={() => dispatch(rebootBoard(board.ip))}
+                  onClick={() => dispatch(rebootBoard(row.ip))}
                 >
                   <RestartAlt fontSize='small' />
                 </IconButton>
-                <IconButton
-                  size='small'
-                  title='Remove'
-                  color='error'
-                  onClick={() => dispatch(removeBoard(board.ip))}
-                >
-                  ✕
-                </IconButton>
+                {row.manual && (
+                  <IconButton
+                    size='small'
+                    title='Remove'
+                    color='error'
+                    onClick={() => dispatch(removeBoard(row.ip))}
+                  >
+                    ✕
+                  </IconButton>
+                )}
               </TableCell>
             </TableRow>
           ))}
@@ -272,6 +376,13 @@ const JRControlPanel = (): JSX.Element => {
         sx={{ display: 'block', mt: 1 }}
       >
         FPS {fps} · Frames {derivedFrameCount} (LED 쇼에서 자동 계산)
+      </Typography>
+      <Typography
+        variant='caption'
+        color='text.secondary'
+        sx={{ display: 'block' }}
+      >
+        ARM 을 보내면 헬스체크가 자동으로 꺼집니다 (재생 타이밍 보호).
       </Typography>
       <Stack direction='row' spacing={1} alignItems='center' sx={{ mt: 1.5 }}>
         <Button

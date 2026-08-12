@@ -9,8 +9,11 @@ import { showError, showSuccess } from '~/features/snackbar/actions';
 import { timelineDurationSec } from '~/features/led-editor/utils';
 import { type AppThunk, type RootState } from '~/store/reducers';
 
+import { getJRMonitorTargetIps } from './selectors';
 import {
   setBoardHealth,
+  setBoardHealthBatch,
+  setHealthCheckEnabled,
   setLastArmSummary,
   type ArmParams,
   type JRHealth,
@@ -18,30 +21,59 @@ import {
 
 const JR_BASE = '/api/v1/jr';
 
+/**
+ * Per-request timeout for `/health`. Kept below the 5 s poll period so a dead
+ * board cannot stretch a polling round much past its own interval (the
+ * server-side proxy gives up at 5 s anyway).
+ */
+const HEALTH_TIMEOUT_MS = 4500;
+
+/**
+ * Fetches one board's `/health`. A failed request is reported as an `error`
+ * field rather than thrown, so a dead board cannot abort a polling round.
+ */
+const fetchBoardHealth = async (
+  ip: string
+): Promise<{ ip: string; health?: JRHealth; error?: string }> => {
+  try {
+    const health = await ky
+      .get(`${JR_BASE}/health/${ip}`, { timeout: HEALTH_TIMEOUT_MS, retry: 0 })
+      .json<JRHealth>();
+    return { ip, health };
+  } catch (error) {
+    return {
+      ip,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
 /** Poll a single board's `/health` and store the result. */
 export const refreshBoardHealth =
   (ip: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
-    try {
-      const health = await ky
-        .get(`${JR_BASE}/health/${ip}`, { timeout: 8000 })
-        .json<JRHealth>();
-      dispatch(setBoardHealth({ ip, health }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      dispatch(setBoardHealth({ ip, error: message }));
-    }
+    dispatch(setBoardHealth(await fetchBoardHealth(ip)));
   };
 
-/** Poll all configured boards' health. */
+/** Poll the given board IPs in parallel and store the round in one update. */
+export const refreshBoardHealthForIps =
+  (ips: string[]): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    if (ips.length === 0) {
+      return;
+    }
+
+    dispatch(setBoardHealthBatch(await Promise.all(ips.map(fetchBoardHealth))));
+  };
+
+/**
+ * Poll every watched board — the ones derived from connected drones plus the
+ * manually added IPs.
+ */
 export const refreshAllBoards =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const state: RootState = getState();
-    await Promise.all(
-      state.jrControl.boards.map((board) =>
-        dispatch(refreshBoardHealth(board.ip))
-      )
-    );
+    await dispatch(refreshBoardHealthForIps(getJRMonitorTargetIps(state)));
   };
 
 /** Reboot a board. */
@@ -110,6 +142,15 @@ export const broadcastArm =
         setLastArmSummary(
           `ARM sent ×${summary.sent}, start_time=${summary.startTimeUs} µs`
         )
+      );
+      // ARM 이후 보드는 PLAYING 으로 넘어가 프레임 타이밍이 중요해진다 —
+      // 폴링이 HTTP 서버를 계속 두드리지 않도록 헬스체크를 끈다. 다시 보려면
+      // JR control 패널의 토글로 켠다.
+      dispatch(
+        setHealthCheckEnabled({
+          enabled: false,
+          reason: 'ARM 브로드캐스트를 보내 헬스체크를 멈췄습니다.',
+        })
       );
       dispatch(showSuccess(`ARM broadcast sent (${summary.sent} packets).`));
     } catch (error) {

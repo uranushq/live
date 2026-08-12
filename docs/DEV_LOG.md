@@ -7,6 +7,44 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-11 17:09:58 +0900 — `c5240bd6` smoothinglogic
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 실제 코드 변경 없이, 직전 커밋(`298fb159` 속도 프로파일/경로 스무딩 재설계)의 상세 개발 이력을 `docs/DEV_LOG.md`에 기록한 문서 전용 커밋이다.
+
+**주요 변경점**:
+- `docs/DEV_LOG.md`에 19줄 추가(신규 엔트리 1건), 소스 코드 변경 0
+- 3구간 속도 프로파일 모델(가속 램프·등속 plateau·감속 램프) 재설계, `plateauCollapsed` 상태/경고 UI, `profileKnobs` 통합 리팩터링, 신규 `utils/pathSmoothing.js` 등 직전 작업 내용을 요약·리스크까지 정리해 기록
+- ENTRIES 마커 하위에 최신 항목을 시간 역순으로 추가하는 로그 컨벤션 유지
+
+**의미/영향**: 코드 자체는 바뀌지 않았고, 속도 프로파일/경로 스무딩 고도화라는 실질 작업의 맥락과 하위 호환성 리스크를 프로젝트 표준 문서에 남긴 추적성 관리 커밋이다. PROJECT_STATUS와 DEV_LOG를 분리 운용하는 문서화 흐름이 실제로 지속되고 있음을 보여주며, 커밋 이력만으로도 경로/비행 품질 정교화 단계의 진행을 파악할 수 있게 한다.
+
+**주의/리스크**: 특이사항 없음 (문서 전용 변경이라 런타임 영향 없음; 다만 기록된 원 작업의 localStorage/skyc 하위 호환성 검증 필요성은 여전히 유효함).
+
+---
+
+
+## 2026-08-11 17:09:56 +0900 — `258755fc` Merge branch 'dev' of https://github.com/uranushq/live into dev
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 3D 뷰의 경로 제어 패널(PathControlPanel)을 팝오버 기반 UI로 재설계하고, 드론 시각화(구체/모양 마커·FBX 모델·drone-flock) 관련 파일들을 함께 정리한 dev 브랜치 동기화 머지 커밋.
+
+**주요 변경점**:
+- `PathControlPanel.jsx` 대폭 개편(+737): 인라인 체크박스 툴바 → `status`/`settings` 팝오버 방식으로 전환, 재사용 `ToggleRow` 컴포넌트와 `popoverStyle`/`sectionLabelStyle` 도입, 배경 오버레이(외부 클릭 닫기) 추가
+- 시퀀스 정보 팝오버 신설(소스·경로 모드·드론 수·길이·LED 동기화·스무딩 표시), `.skyc` 쇼 스펙 무시/재표시 토글 연동
+- 속도 프로파일 그래프 상태를 `profile` 단일값에서 `exp`/`log` 노브(knobs) 기반으로 변경, "곡선 보간" 토글로 노출
+- 3D 드론 렌더링 계열 정리: `DroneSphereMarkers`(+196/-), `DroneInfoPanel`(대규모 리라이트), `DroneShapeMarkers`, `fbx-model.js`, `drone-flock.js`, `ThreeDView`/`ThreeDTopLevelView` 및 `MapRightSidebar` 수정
+- 다수 파일에서 JSX 속성 따옴표 스타일을 큰따옴표→작은따옴표로 통일(포맷 정리)
+
+**의미/영향**: 최근 방향인 3D 뷰·드론 시뮬레이션(구체 인스턴싱 렌더링, 관성 속도 프로파일, LED 동기화) 고도화의 연장선으로, 특히 경로 제어 패널의 UX를 정보/설정 팝오버로 구조화해 대량 드론 편집 화면의 가독성과 조작성을 높였다. 여러 feature 브랜치 작업을 dev로 합치는 동기화 커밋이라 개별 신기능보다는 3D 편집 워크플로 전반의 정리·안정화 성격이 강하다.
+
+**주의/리스크**: 머지 충돌 해소(`<<<`/`+++` 마커) 흔적이 있어 병합 로직이 의도대로 반영됐는지 확인 필요. 속도 프로파일 상태 모델이 `profile`↔`exp/log 노브`로 갈라진 부분과 `VelocityProfileChart` prop 시그니처(profile vs kExp/kLog) 불일치가 남지 않았는지 점검 권장.
+
+---
+
+
 ## 2026-08-11 17:08:46 +0900 — `298fb159` smoothing logic
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
