@@ -14,6 +14,8 @@ import React from 'react';
 
 import VelocityProfileChart from './VelocityProfileChart';
 import {
+  getProfileExp,
+  getProfileLog,
   getVelocityProfile,
   getVelocitySmoothing,
   setVelocitySmoothing,
@@ -186,6 +188,9 @@ export default function PathControlPanel({
   const handleSmoothingChange = (value) => {
     setSmoothing(setVelocitySmoothing(value));
   };
+
+  const [panel, setPanel] = React.useState(null);
+  const [profile, setProfile] = React.useState(getVelocityProfile());
 
   // 관성 속도 프로파일 그래프 (모양·폭·곡률이 바뀌면 실시간 갱신)
   const [profileOpen, setProfileOpen] = React.useState(false);
