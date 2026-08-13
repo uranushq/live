@@ -1507,9 +1507,17 @@ export default function DroneInfoPanel({
                 ? phase.fixedDroneIds.map(String)
                 : [];
               const fixedPathCount = fixedIdsInPhase.length;
-              const isFixedStraight = !!(
-                droneId && fixedIdsInPhase.includes(String(droneId))
-              );
+              // 그룹(여러 대)을 잡은 상태면 직선 고정은 선택 전체에 걸린다.
+              const straightTargets =
+                droneId && multiSelectedSet.has(String(droneId)) &&
+                multiSelectedDroneIds.length > 1
+                  ? multiSelectedDroneIds.map(String)
+                  : droneId
+                    ? [String(droneId)]
+                    : [];
+              const isFixedStraight =
+                straightTargets.length > 0 &&
+                straightTargets.every((id) => fixedIdsInPhase.includes(id));
               const clusterCount = Array.isArray(phase.clusters)
                 ? phase.clusters.length
                 : 0;
@@ -1851,7 +1859,10 @@ export default function DroneInfoPanel({
                           <FormationActionButton
                             title={
                               '이전 formation 위치에서 이 formation 위치까지 직선으로만 이동하도록 고정.\n' +
-                              '고정된 드론들은 자동 회피/시차 대기 없이 전원 동시에 출발합니다.'
+                              '고정된 드론들은 자동 회피/시차 대기 없이 전원 동시에 출발합니다.' +
+                              (straightTargets.length > 1
+                                ? `\n선택한 ${straightTargets.length}대(그룹)에 함께 적용됩니다.`
+                                : '')
                             }
                             onClick={() =>
                               droneId && onToggleFixedStraight(phase.id, droneId)
@@ -1862,6 +1873,9 @@ export default function DroneInfoPanel({
                           >
                             <Route sx={{ fontSize: 14, color: 'inherit' }} />
                             {isFixedStraight ? '직선 고정됨' : '직선 고정'}
+                            {straightTargets.length > 1
+                              ? ` (${straightTargets.length}대)`
+                              : ''}
                           </FormationActionButton>
                           <FormationActionButton
                             title="등록된 모든 드론을 이 phase에서 직선 고정"

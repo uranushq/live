@@ -2598,20 +2598,30 @@ const ThreeDView = React.forwardRef((props, ref) => {
    * 직선 경로 고정: 이 phase로의 전환 동안 해당 드론이 자동 회피 없이 이전
    * formation 위치 → 이 phase 위치를 잇는 직선을 그대로 날도록 지정한다.
    * 고정된 드론들은 디스패치 대기 없이 전원 동시에 출발한다.
+   *
+   * 그룹(또는 여러 대)을 잡은 상태에서 누르면 선택된 드론 전체에 함께
+   * 걸린다 — 그룹은 통째로 직선·동시 이동해야 하기 때문이다. 일부만
+   * 고정돼 있으면 나머지를 마저 고정하고, 전원 고정돼 있으면 전원 해제한다.
    */
   const handleToggleFixedStraight = useCallback((phaseId, droneId) => {
     const pid = phaseId != null ? String(phaseId) : '';
     const did = droneId != null ? String(droneId) : '';
     if (!pid || !did) return;
+    const selection = multiSelectedListRef.current;
+    const targets =
+      selection.length > 1 && selection.includes(did) ? [...selection] : [did];
+    const targetSet = new Set(targets);
     setFormationPhases((prev) =>
       prev.map((phase) => {
         if (String(phase.id) !== pid) return phase;
         const current = Array.isArray(phase.fixedDroneIds)
           ? phase.fixedDroneIds.map(String)
           : [];
-        const next = current.includes(did)
-          ? current.filter((id) => id !== did)
-          : [...current, did];
+        const currentSet = new Set(current);
+        const allFixed = targets.every((id) => currentSet.has(id));
+        const next = allFixed
+          ? current.filter((id) => !targetSet.has(id))
+          : [...current, ...targets.filter((id) => !currentSet.has(id))];
         return { ...phase, fixedDroneIds: next };
       })
     );
