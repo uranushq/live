@@ -163,6 +163,14 @@ const ThreeDTopLevelView = ({
     }
   }, [isCreateMode]);
 
+  // Always enter 3D View in Navigate mode. Edit is opt-in after opening.
+  useEffect(() => {
+    if (forcedInteractionMode) {
+      return;
+    }
+    onSetInteractionMode(ThreeDInteractionMode.VIEW);
+  }, [forcedInteractionMode, onSetInteractionMode]);
+
   const threeDViewRef = useRef(null);
   const hostNodeRef = useRef(null);
   const hostParentRef = useRef(null);
@@ -360,7 +368,12 @@ const ThreeDTopLevelView = ({
     }
 
     const onStateChanged = () => debouncedLayoutStateChangedRef.current();
-    const onPanelShown = () => scheduleSceneResize();
+    const onPanelShown = () => {
+      scheduleSceneResize();
+      if (!forcedInteractionMode) {
+        onSetInteractionMode(ThreeDInteractionMode.VIEW);
+      }
+    };
 
     layoutManager?.on('stateChanged', onStateChanged);
     // GoldenLayout fires these when a stacked tab becomes visible again.
@@ -374,7 +387,12 @@ const ThreeDTopLevelView = ({
       glContainer?.off?.('shown', onPanelShown);
       glContainer?.off?.('open', onPanelShown);
     };
-  }, [glContainer, scheduleSceneResize]);
+  }, [
+    forcedInteractionMode,
+    glContainer,
+    onSetInteractionMode,
+    scheduleSceneResize,
+  ]);
 
   return (
     <IgnoreKeys style={{ height: '100%', width: '100%', overflow: 'hidden' }}>

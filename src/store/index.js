@@ -115,8 +115,14 @@ const persistConfig = {
     // Store only the persistent settings of the upload procedure
     createFilter('upload', ['settings']),
 
-    // We do not wish to save 3D view tooltips, camera pose or the scene ID
-    createBlacklistFilter('threeD', ['camera', 'tooltip', 'sceneId']),
+    // We do not wish to save 3D view tooltips, camera pose, scene ID, or
+    // interaction mode (always open in Navigate)
+    createBlacklistFilter('threeD', [
+      'camera',
+      'tooltip',
+      'sceneId',
+      'interactionMode',
+    ]),
   ],
 };
 
