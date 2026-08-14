@@ -7,6 +7,26 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-14 18:01:49 +0900 — `2c05c6b2` 0814
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 3D 뷰 드론 ID 뱃지 표시, 지오펜스 이탈 경고(아바타 테두리색), 착륙 확인창 위치/크기 개선 등 UI/UX 다수를 묶은 일일 커밋(0814).
+
+**주요 변경점**:
+- **3D 드론 ID 뱃지**: `drone-flock.js`에 카메라를 항상 바라보는 스프라이트(주황 원 + 드론 번호) 추가 — Navigate 모드에서 개별 드론 식별 용이
+- **지오펜스 이탈 경고**: `uavAlert.ts`에 `isFenceViolation`/`isAirborne` 헬퍼 추가, `DroneAvatar`가 펜스 밖 드론을 감지해 아바타 테두리색(`ComplexAvatar` 신규 `borderColor` prop)으로 시각화
+- **착륙 확인창 개선**: `ConfirmationDialog`에 `anchor`(center/bottom-left) prop 추가, 착륙 명령 시 좌하단에 큰 버튼/텍스트로 표시
+- **JR 헬스체크**: `/health` 타임아웃 로직은 유지하되, 서버가 보드 UDP 헬스 캐시를 즉시 응답하는 구조로 바뀌었음을 반영한 주석 갱신
+- 그 외 `ThreeDView`, `DroneInfoPanel`, `FormationGridModal`, `PathControlPanel`, `DroneStatusLine` 등 3D/상태 표시 관련 다수 파일 손질
+
+**의미/영향**: 최근 방향인 "드론 명령 강화·3D 시각화 개선"의 연장선으로, 운용자가 다수 드론을 3D에서 식별하고 안전 상태(지오펜스 이탈)를 한눈에 파악하도록 하는 실전 UX 보강이다. 착륙 확인창을 좌하단·대형으로 바꾼 것은 오조작 방지와 현장 가시성을 노린 개선이다. JR 컨트롤은 이전 in-memory 캐시 전환의 후속 정리로 기능 변화보다 문서/일관성 정리에 가깝다.
+
+**주의/리스크**: 커밋 메시지가 날짜("0814")뿐이라 변경 이력 추적성이 떨어진다. 서로 다른 기능(3D 뱃지·지오펜스 경고·착륙창·JR)을 한 커밋에 묶어 회귀 시 원인 격리가 어렵다. 스프라이트 뱃지는 드론 수 증가 시 렌더 부하, 지오펜스 판정은 좌표/펜스 데이터 정확도에 의존하므로 실기 검증 필요.
+
+---
+
+
 ## 2026-08-11 17:09:58 +0900 — `c5240bd6` smoothinglogic
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
