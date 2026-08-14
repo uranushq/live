@@ -46,10 +46,13 @@ const DRONE_BODY_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 const DRONE_BADGE_COLOR = '#ff8c00';
 const DRONE_BADGE_TEXT_COLOR = '#ffffff';
 const DRONE_BADGE_CANVAS_SIZE = 128;
-/** Sprite world size vs preferred drone radius. */
-const DRONE_BADGE_SCALE = 1.6;
-/** Height above the body centre vs preferred drone radius. */
-const DRONE_BADGE_HEIGHT_SCALE = 2.6;
+/** Sprite world size vs preferred drone radius — small, overlaid on the body
+ * itself rather than a large halo, so neighbouring drones' badges don't
+ * overlap each other in screen space. */
+const DRONE_BADGE_SCALE = 0.85;
+/** Height above the body centre vs preferred drone radius — small on purpose
+ * so the badge sits on/over the drone's own body instead of floating above it. */
+const DRONE_BADGE_HEIGHT_SCALE = 0.15;
 
 /** Short label for the badge: trailing digits of the id, else the raw id. */
 const shortDroneLabel = (id) => {
