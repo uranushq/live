@@ -960,6 +960,7 @@ const LargeControlButtonGroup = ({
         </Box>
 
         <ConfirmationDialog
+          anchor={pendingCommand === 'land' ? 'bottom-left' : 'center'}
           open={confirmOpen}
           message={confirmMessage}
           onConfirm={handleConfirmAction}
@@ -1109,15 +1110,11 @@ const LargeControlButtonGroup = ({
       ))}
 
       <ConfirmationDialog
-
+        anchor={pendingCommand === 'land' ? 'bottom-left' : 'center'}
         open={confirmOpen}
-
         message={confirmMessage}
-
         onConfirm={handleConfirmAction}
-
         onCancel={handleConfirmClose}
-
       />
 
       <ShowStartDelayDialog

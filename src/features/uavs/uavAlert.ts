@@ -79,6 +79,19 @@ const GPS_ERROR_CODES: readonly UAVErrorCode[] = [
 const hasAnyError = (errors: readonly number[], codes: readonly number[]): boolean =>
   codes.some((code) => errors.includes(code));
 
+const isFenceViolation = (
+  errors: readonly number[],
+  ctx: UavAlertContext
+): boolean =>
+  Boolean(
+    ctx.uavOutsideGeofence ||
+      errors.includes(UAVErrorCode.GEOFENCE_VIOLATION) ||
+      errors.includes(UAVErrorCode.GEOFENCE_VIOLATION_WARNING)
+  );
+
+const isAirborne = (uav: StoredUAV): boolean =>
+  Boolean(uav.position && Math.abs(uav.position.ahl ?? 0) >= 0.3);
+
 const collectRedReasons = (
   uav: StoredUAV,
   ctx: UavAlertContext
@@ -113,11 +126,7 @@ const collectRedReasons = (
     reasons.push('GEO');
   }
 
-  if (
-    ctx.uavOutsideGeofence ||
-    errors.includes(UAVErrorCode.GEOFENCE_VIOLATION) ||
-    errors.includes(UAVErrorCode.GEOFENCE_VIOLATION_WARNING)
-  ) {
+  if (isFenceViolation(errors, ctx)) {
     reasons.push('FENCE');
   }
 
@@ -210,6 +219,53 @@ export function getUavAlertPillStyle(level: UavAlertLevel): CSSProperties {
     backgroundColor,
     color: createColor(backgroundColor).isLight() ? '#000' : '#fff',
   };
+}
+
+export enum UavBorderReason {
+  NONE = 'none',
+  FENCE = 'fence',
+  AIRBORNE = 'airborne',
+}
+
+const BORDER_COLOR_FENCE = '#ffca28';
+const BORDER_COLOR_AIRBORNE = '#b388ff';
+
+/**
+ * Determines the reason (if any) that the UAV's status card border should be
+ * tinted for, independently of the (severity-based) alert level. FENCE takes
+ * priority since it signals an active problem; AIRBORNE is a plain flight-
+ * state hint shown only when nothing more urgent applies.
+ */
+export function getUavBorderReason(
+  uav: StoredUAV | undefined,
+  ctx: UavAlertContext = {}
+): UavBorderReason {
+  if (!uav) {
+    return UavBorderReason.NONE;
+  }
+
+  if (isFenceViolation(uav.errors ?? [], ctx)) {
+    return UavBorderReason.FENCE;
+  }
+
+  if (isAirborne(uav)) {
+    return UavBorderReason.AIRBORNE;
+  }
+
+  return UavBorderReason.NONE;
+}
+
+export function getUavBorderColor(
+  reason: UavBorderReason
+): string | undefined {
+  switch (reason) {
+    case UavBorderReason.FENCE:
+      return BORDER_COLOR_FENCE;
+    case UavBorderReason.AIRBORNE:
+      return BORDER_COLOR_AIRBORNE;
+    default:
+      return undefined;
+  }
 }
 
 export function getUavAlertSemantics(level: UavAlertLevel): Status {

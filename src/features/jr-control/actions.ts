@@ -22,9 +22,10 @@ import {
 const JR_BASE = '/api/v1/jr';
 
 /**
- * Per-request timeout for `/health`. Kept below the 5 s poll period so a dead
- * board cannot stretch a polling round much past its own interval (the
- * server-side proxy gives up at 5 s anyway).
+ * Per-request timeout for `/health`. The server answers instantly either way
+ * (it now reads a board's last UDP health push from an in-memory cache
+ * instead of proxying a live HTTP call to the board, so this is just a
+ * safety net against a wedged server rather than a per-board network wait).
  */
 const HEALTH_TIMEOUT_MS = 4500;
 

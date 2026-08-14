@@ -591,6 +591,7 @@ const UAVOperationsButtonGroup = ({
 
       {!hideFlightCommands && (
         <ConfirmationDialog
+          anchor={pendingFlightCommand === 'land' ? 'bottom-left' : 'center'}
           open={flightConfirmOpen}
           message={flightConfirmMessage}
           onConfirm={handleFlightConfirmAction}

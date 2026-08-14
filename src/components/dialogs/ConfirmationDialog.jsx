@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { DraggableDialog } from '@skybrush/mui-components';
 
 const ConfirmationDialog = ({
+  anchor = 'center',
   cancelLabel,
   children,
   confirmLabel,
@@ -23,25 +24,59 @@ const ConfirmationDialog = ({
   title,
 }) => {
   const { t } = useTranslation();
+  const isBottomLeft = anchor === 'bottom-left';
 
   return (
     <DraggableDialog
       maxWidth='xs'
       open={open}
       title={title ?? t('general.confirmDialog.title')}
+      sx={
+        isBottomLeft
+          ? {
+              '& .MuiDialog-container': {
+                alignItems: 'flex-end',
+                justifyContent: 'flex-start',
+              },
+              '& .MuiPaper-root': {
+                margin: 0,
+                marginLeft: '28px',
+                marginBottom: '28px',
+                minWidth: 360,
+              },
+            }
+          : undefined
+      }
     >
       <DialogContent>
         {message ? (
-          <DialogContentText component='div'>{message}</DialogContentText>
+          <DialogContentText
+            component='div'
+            sx={isBottomLeft ? { fontSize: '1.05rem' } : undefined}
+          >
+            {message}
+          </DialogContentText>
         ) : (
           children
         )}
       </DialogContent>
-      <DialogActions>
-        <Button color='primary' variant='contained' onClick={onConfirm}>
+      <DialogActions
+        sx={isBottomLeft ? { padding: '8px 20px 20px', gap: 1 } : undefined}
+      >
+        <Button
+          color='primary'
+          variant='contained'
+          size={isBottomLeft ? 'large' : 'medium'}
+          onClick={onConfirm}
+          sx={isBottomLeft ? { fontSize: '1.1rem', px: 3, py: 1.25 } : undefined}
+        >
           {confirmLabel ?? t('general.action.yes')}
         </Button>
-        <Button onClick={onCancel}>
+        <Button
+          size={isBottomLeft ? 'large' : 'medium'}
+          onClick={onCancel}
+          sx={isBottomLeft ? { fontSize: '1.1rem', px: 3, py: 1.25 } : undefined}
+        >
           {cancelLabel ?? t('general.action.cancel')}
         </Button>
       </DialogActions>
@@ -50,6 +85,7 @@ const ConfirmationDialog = ({
 };
 
 ConfirmationDialog.propTypes = {
+  anchor: PropTypes.oneOf(['center', 'bottom-left']),
   cancelLabel: PropTypes.string,
   children: PropTypes.node,
   confirmLabel: PropTypes.string,

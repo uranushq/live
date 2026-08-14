@@ -160,6 +160,9 @@ const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   output: '',
   // 드론 간 최소 간격 (모든 축, m). 1.5 미만으로는 내려갈 수 없다.
   min_separation: HARD_MIN_SEPARATION_M,
+  // 복귀(return-to-start) 시 착륙 지점을 이륙 지점보다 더 넓게 벌릴지 여부와 간격 (m).
+  landing_grid: false,
+  landing_spacing: 4.0,
 });
 
 // 첫 번째 항목('')은 "백엔드 기본값(=skyc) 사용". 그 외 값을 선택하면 명시적으로 전송.
@@ -275,6 +278,10 @@ const sanitizeFormationSettings = (settings) => {
   const resolvedMinSeparation = Number.isFinite(minSeparation)
     ? Math.max(HARD_MIN_SEPARATION_M, minSeparation)
     : HARD_MIN_SEPARATION_M;
+  const landingSpacing = Number(merged.landing_spacing);
+  const resolvedLandingSpacing = Number.isFinite(landingSpacing)
+    ? Math.max(HARD_MIN_SEPARATION_M, landingSpacing)
+    : DEFAULT_FORMATION_SETTINGS.landing_spacing;
   return {
     step_size: resolvedStepSize,
     cruise_speed: Number.isFinite(cruiseSpeed) && cruiseSpeed > 0
@@ -286,6 +293,8 @@ const sanitizeFormationSettings = (settings) => {
     auto_upload: !!merged.auto_upload,
     output,
     min_separation: resolvedMinSeparation,
+    landing_grid: !!merged.landing_grid,
+    landing_spacing: resolvedLandingSpacing,
   };
 };
 
@@ -2250,10 +2259,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
         const y = Number(pos.y);
         const z = Number(pos.z);
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        const yaw = Number(pos.yaw);
         points[droneId] = {
           x: roundCoord(x),
           y: roundCoord(y),
           z: roundCoord(z),
+          yaw: Number.isFinite(yaw) ? yaw : 0,
         };
       }
       if (!Object.keys(points).length) return;
@@ -2385,7 +2396,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
           Number.isFinite(y) &&
           Number.isFinite(z)
         ) {
-          previousDrones.push({ id, x, y, z });
+          const yaw = Number(point?.yaw);
+          previousDrones.push({ id, x, y, z, yaw: Number.isFinite(yaw) ? yaw : 0 });
         }
       }
 
@@ -2448,21 +2460,30 @@ const ThreeDView = React.forwardRef((props, ref) => {
           Number.isFinite(Number(fromPhase.y)) &&
           Number.isFinite(Number(fromPhase.z))
         ) {
+          const yaw = Number(fromPhase.yaw);
           return {
             id,
             x: Number(fromPhase.x),
             y: Number(fromPhase.y),
             z: Number(fromPhase.z),
+            yaw: Number.isFinite(yaw) ? yaw : 0,
             fromPhase: gridIdSet ? gridIdSet.has(id) : true,
           };
         }
         // phase에 없는 드론은 이전 상태(직전 phase / 현재 위치)를 그대로 유지
         const previous = previousById[id];
         if (previous) {
-          return { id, x: previous.x, y: previous.y, z: previous.z };
+          const yaw = Number(previous.yaw);
+          return {
+            id,
+            x: previous.x,
+            y: previous.y,
+            z: previous.z,
+            yaw: Number.isFinite(yaw) ? yaw : 0,
+          };
         }
         const [x, y, z] = getDroneInitialPositionTuple(d);
-        return { id, x, y, z };
+        return { id, x, y, z, yaw: 0 };
       });
   }, [
     effectiveConfig,
@@ -2935,10 +2956,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         }
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
         const yaw = Number(captured?.yaw);
-        const detail = { id: d.id, x, y, z };
-        if (Number.isFinite(yaw)) {
-          detail.yaw = yaw;
-        }
+        const detail = { id: d.id, x, y, z, yaw: Number.isFinite(yaw) ? yaw : 0 };
         window.dispatchEvent(
           new CustomEvent('drone-move-request', {
             detail,
@@ -2964,30 +2982,25 @@ const ThreeDView = React.forwardRef((props, ref) => {
         .map((d) => {
           const id = String(d.id);
           const captured = phase.points?.[id];
-          const yaw = Number(captured?.yaw);
+          const yawValue = Number.isFinite(Number(captured?.yaw))
+            ? Number(captured.yaw)
+            : 0;
           if (
             captured &&
             Number.isFinite(Number(captured.x)) &&
             Number.isFinite(Number(captured.y)) &&
             Number.isFinite(Number(captured.z))
           ) {
-            const point = {
+            return {
               droneId: id,
               x: Number(captured.x),
               y: Number(captured.y),
               z: Number(captured.z),
+              yaw: yawValue,
             };
-            if (Number.isFinite(yaw)) {
-              point.yaw = yaw;
-            }
-            return point;
           }
           const [x, y, z] = getDroneInitialPositionTuple(d);
-          const point = { droneId: id, x, y, z };
-          if (Number.isFinite(yaw)) {
-            point.yaw = yaw;
-          }
-          return point;
+          return { droneId: id, x, y, z, yaw: yawValue };
         });
 
       const holdMs = Math.max(0, Math.round(Number(phase.holdMs) || 0));
@@ -3046,6 +3059,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
     // output은 빈 문자열이면 생략 → 백엔드가 기본값(.skyc 다운로드)으로 처리.
     if (sanitized.output) {
       payload.output = sanitized.output;
+    }
+    // landing_grid는 옵트인 기능 — 켜졌을 때만 간격과 함께 전송.
+    if (sanitized.landing_grid) {
+      payload.landing_grid = true;
+      payload.landing_spacing = sanitized.landing_spacing;
     }
     // takeoff_time은 옵션값이므로 0보다 클 때만 포함 (백엔드 기본 포맷과 정렬)
     if (Number(sanitized.takeoff_time) > 0) {

@@ -42,6 +42,41 @@ const DRONE_PICK_RADIUS_SCALE = 1.8;
 /** Model origin is at the feet; lift helpers to body mid-height. */
 const DRONE_BODY_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 
+/** Navigate-mode ID badge: orange circle + drone number, always facing the camera. */
+const DRONE_BADGE_COLOR = '#ff8c00';
+const DRONE_BADGE_TEXT_COLOR = '#ffffff';
+const DRONE_BADGE_CANVAS_SIZE = 128;
+/** Sprite world size vs preferred drone radius. */
+const DRONE_BADGE_SCALE = 1.6;
+/** Height above the body centre vs preferred drone radius. */
+const DRONE_BADGE_HEIGHT_SCALE = 2.6;
+
+/** Short label for the badge: trailing digits of the id, else the raw id. */
+const shortDroneLabel = (id) => {
+  const raw = String(id ?? '');
+  const match = raw.match(/(\d+)\s*$/);
+  return match ? match[1] : raw;
+};
+
+/** Draws an orange circle with a centred label onto a canvas for a sprite texture. */
+const paintBadgeCanvas = (canvas, label) => {
+  const size = canvas.width;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 6, 0, Math.PI * 2);
+  ctx.fillStyle = DRONE_BADGE_COLOR;
+  ctx.fill();
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = DRONE_BADGE_TEXT_COLOR;
+  ctx.stroke();
+  ctx.fillStyle = DRONE_BADGE_TEXT_COLOR;
+  ctx.font = `bold ${Math.round(size * 0.42)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, size / 2, size / 2 + size * 0.02);
+};
+
 const getDroneBodyColorFromUAV = (uav) =>
   uav.errors.includes(UAVErrorCode.MOTORS_RUNNING_WHILE_ON_GROUND)
     ? DRONE_ARMED_COLOR
@@ -159,7 +194,7 @@ AFrame.registerSystem('drone-flock', {
     };
   },
 
-  createNewUAVEntity() {
+  createNewUAVEntity(id) {
     const element = document.createElement('a-entity');
     element.setAttribute('position', '0 0 0');
 
@@ -169,8 +204,39 @@ AFrame.registerSystem('drone-flock', {
     element.appendChild(visual);
 
     this.updateEntityGeometry(element);
+    this._attachIdBadge(element, id);
 
     return element;
+  },
+
+  /** Orange circle + drone number, sprite-billboarded so it always faces the camera. */
+  _attachIdBadge(entity, id) {
+    const canvas = document.createElement('canvas');
+    canvas.width = DRONE_BADGE_CANVAS_SIZE;
+    canvas.height = DRONE_BADGE_CANVAS_SIZE;
+    paintBadgeCanvas(canvas, shortDroneLabel(id));
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    entity.object3D.add(sprite);
+    entity.idBadge = sprite;
+
+    this._layoutIdBadge(entity);
+  },
+
+  _layoutIdBadge(entity) {
+    if (!entity?.idBadge) return;
+
+    const scale = this._droneRadius * DRONE_BADGE_SCALE;
+    entity.idBadge.scale.set(scale, scale, 1);
+    entity.idBadge.position.z =
+      DRONE_BODY_CENTER_Z + this._droneRadius * DRONE_BADGE_HEIGHT_SCALE;
   },
 
   _applyEntityYaw(entity, yaw) {
@@ -333,6 +399,8 @@ AFrame.registerSystem('drone-flock', {
     pickMesh.position.z = DRONE_BODY_CENTER_Z;
     entity.object3D.add(pickMesh);
     entity.pickVolume = pickMesh;
+
+    this._layoutIdBadge(entity);
   },
 
   setEntityHovered(entity, hovered) {
@@ -531,7 +599,7 @@ AFrame.registerComponent('drone-flock', {
     const { id } = uav;
 
     if (id && id.length > 0) {
-      const entity = this.system.createNewUAVEntity();
+      const entity = this.system.createNewUAVEntity(id);
 
       if (entity) {
         this.el.append(entity);

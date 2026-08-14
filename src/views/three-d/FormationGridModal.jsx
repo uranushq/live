@@ -39,6 +39,7 @@ const makeFallbackDrones = (n) => {
     x: ((i % per) - (per - 1) / 2) * 10,
     y: -46 + Math.floor(i / per) * 10,
     z: 0,
+    yaw: 0,
   }));
 };
 
@@ -480,6 +481,8 @@ export default function FormationGridModal({
    * 평면 축을 오름차순으로 자동 사용한다.
    */
   const [fillDirs, setFillDirs] = useState([]);
+  /** 일괄 기입용 yaw 값 (뷰 회전 yaw와 무관 — 드론 헤딩) */
+  const [bulkYaw, setBulkYaw] = useState(0);
   const [yaw, setYaw] = useState(35);
   const [zoom, setZoom] = useState(1);
   /** 휠 버튼 드래그로 옮기는 화면 이동량 (px) */
@@ -511,6 +514,7 @@ export default function FormationGridModal({
             x: Number(d.x) || 0,
             y: Number(d.y) || 0,
             z: Number(d.z) || 0,
+            yaw: Number.isFinite(Number(d.yaw)) ? Number(d.yaw) : 0,
             fromPhase: !!d.fromPhase,
             label: shortLabel(d.id, i),
           }))
@@ -1157,6 +1161,25 @@ export default function FormationGridModal({
     });
   };
 
+  /** 보유한 모든 드론(대기 포함)에 같은 yaw를 일괄 기입 */
+  const applyYawToAll = (value) => {
+    const { drones: cur, occupancy: occ } = placementRef.current;
+    commitPlacement({
+      drones: cur.map((d) => ({ ...d, yaw: value })),
+      occupancy: occ,
+    });
+  };
+
+  /** 선택된 드론 한 대만 yaw를 덮어씀 */
+  const setSelectedDroneYaw = (value) => {
+    const { drones: cur, occupancy: occ, selectedId: sel } = placementRef.current;
+    if (!sel) return;
+    commitPlacement({
+      drones: cur.map((d) => (d.id === sel ? { ...d, yaw: value } : d)),
+      occupancy: occ,
+    });
+  };
+
   const handleConfirm = () => {
     const points = {};
     const gridDroneIds = [];
@@ -1170,6 +1193,7 @@ export default function FormationGridModal({
         x: Math.round(d.x * 10000) / 10000,
         y: Math.round(d.y * 10000) / 10000,
         z: Math.round(d.z * 10000) / 10000,
+        yaw: Number.isFinite(Number(d.yaw)) ? Number(d.yaw) : 0,
       };
       if (placed.has(d.id)) gridDroneIds.push(d.id);
     });
@@ -1533,6 +1557,34 @@ export default function FormationGridModal({
                   onChange={setAz}
                 />
               </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={labStyle}>Yaw · 일괄 기입 (°)</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <NumberField value={bulkYaw} step={1} free allowNegative onChange={setBulkYaw} />
+                <button
+                  type="button"
+                  style={{ ...btnStyle(false), flex: '0 0 auto', padding: '8px 12px', fontSize: 12 }}
+                  onClick={() => applyYawToAll(bulkYaw)}
+                >
+                  전체 적용
+                </button>
+              </div>
+              {selectedId && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <span style={{ fontSize: 11, opacity: 0.6, flexShrink: 0 }}>
+                    {droneById[selectedId]?.label || selectedId} 개별 yaw
+                  </span>
+                  <NumberField
+                    value={droneById[selectedId]?.yaw ?? 0}
+                    step={1}
+                    free
+                    allowNegative
+                    onChange={setSelectedDroneYaw}
+                  />
+                </div>
+              )}
             </div>
 
             <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />

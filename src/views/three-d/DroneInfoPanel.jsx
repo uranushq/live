@@ -1204,6 +1204,8 @@ export default function DroneInfoPanel({
     auto_upload: false,
     output: '',
     min_separation: 1.45,
+    landing_grid: false,
+    landing_spacing: 4.0,
   };
 
   const renderPathTab = () => (
@@ -1535,8 +1537,7 @@ export default function DroneInfoPanel({
                 if (raw === '' && !hasCaptured) return;
                 const next = copyCapturedFormationAxes(captured);
                 if (raw === '') {
-                  if (key === 'yaw') delete next.yaw;
-                  else next[key] = 0;
+                  next[key] = 0;
                 } else {
                   const parsed = Number(raw);
                   if (!Number.isFinite(parsed)) return;
@@ -2142,6 +2143,8 @@ export default function DroneInfoPanel({
                   '그보다 작은 값을 입력해도 1.45로 강제됩니다. ' +
                   '초기 배치·모든 phase 좌표·비행 중 경로 전부에 적용됩니다.',
               },
+              // landing_spacing은 여기 두면 눈에 안 띄어서, 아래 landing_grid
+              // 체크박스 바로 옆에 한 세트로 붙여 렌더링한다.
             ].map(({ key, label, placeholder, title }) => {
               const displayValue =
                 formationSettingsDrafts[key] ??
@@ -2476,6 +2479,70 @@ export default function DroneInfoPanel({
               />
               <span>auto_upload</span>
             </label>
+            <div
+              style={{
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+                fontSize: 12,
+                color: '#d3d5db',
+              }}
+              title="복귀(return-to-start) 시 착륙 지점을 이륙 지점보다 이 간격만큼 넓게 벌립니다. 체크해야 적용됩니다."
+            >
+              <label
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!safeFormationSettings.landing_grid}
+                  onChange={(e) =>
+                    onUpdateFormationSettings({ landing_grid: e.target.checked })
+                  }
+                />
+                <span>landing_grid</span>
+              </label>
+              <input
+                value={
+                  formationSettingsDrafts.landing_spacing ??
+                  String(safeFormationSettings.landing_spacing ?? '')
+                }
+                disabled={!safeFormationSettings.landing_grid}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (!isPartialDecimalInput(raw)) return;
+                  setFormationSettingsDrafts((prev) => ({
+                    ...prev,
+                    landing_spacing: raw,
+                  }));
+                  if (raw === '' || raw === '-' || raw.endsWith('.')) return;
+                  commitFormationSetting('landing_spacing', raw);
+                }}
+                onBlur={() => {
+                  const raw = formationSettingsDrafts.landing_spacing;
+                  if (raw === undefined) return;
+                  setFormationSettingsDrafts((prev) => {
+                    const next = { ...prev };
+                    delete next.landing_spacing;
+                    return next;
+                  });
+                  commitFormationSetting('landing_spacing', raw);
+                }}
+                inputMode="decimal"
+                placeholder="4.0"
+                style={{
+                  ...formationFieldStyle,
+                  width: 52,
+                  flex: '0 0 auto',
+                  opacity: safeFormationSettings.landing_grid ? 1 : 0.4,
+                }}
+              />
+              <span style={{ fontSize: 10.5, color: FORMATION_MUTED }}>m</span>
+            </div>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, minWidth: 140 }}>
               <span style={{ fontSize: 10.5, color: FORMATION_MUTED }}>output</span>
               <select
@@ -2841,6 +2908,8 @@ DroneInfoPanel.propTypes = {
     takeoff_time: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     auto_upload: PropTypes.bool,
     output: PropTypes.string,
+    landing_grid: PropTypes.bool,
+    landing_spacing: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   }),
   isSendingFormation: PropTypes.bool,
   formationSendStartedAt: PropTypes.number,

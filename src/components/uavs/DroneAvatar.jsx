@@ -3,9 +3,18 @@ import { connect } from 'react-redux';
 import { createSelector } from '@reduxjs/toolkit';
 
 import { ComplexAvatar } from '~/components/avatar';
-import { getReverseMissionMapping } from '~/features/mission/selectors';
+import {
+  getGeofencePolygonInWorldCoordinates,
+  getReverseMissionMapping,
+  hasActiveGeofencePolygon,
+} from '~/features/mission/selectors';
+import { isUavOutsideActiveGeofence } from '~/features/safety/selectors';
 import { getBatteryFormatter } from '~/features/settings/selectors';
-import { createSingleUAVStatusSummarySelector } from '~/features/uavs/selectors';
+import {
+  createSingleUAVStatusSummarySelector,
+  getUAVById,
+} from '~/features/uavs/selectors';
+import { getUavBorderColor, getUavBorderReason } from '~/features/uavs/uavAlert';
 import { formatMissionId } from '~/utils/formatting';
 
 /**
@@ -21,16 +30,30 @@ const DroneAvatar = connect(
       getBatteryFormatter,
       getReverseMissionMapping,
       (state, { id }) => statusSummarySelector(state, id),
+      (state, { id }) => getUAVById(state, id),
+      getGeofencePolygonInWorldCoordinates,
+      hasActiveGeofencePolygon,
       (_state, ownProps) => ownProps,
       (
         batteryFormatter,
         reverseMissionMapping,
         statusSummary,
+        uav,
+        geofencePoints,
+        geofenceSet,
         { hint, id, label, selected, variant = 'full' }
       ) => {
+        const uavOutsideGeofence = isUavOutsideActiveGeofence(
+          uav,
+          geofencePoints,
+          geofenceSet
+        );
         const props = {
           batteryFormatter,
           selected,
+          borderColor: getUavBorderColor(
+            getUavBorderReason(uav, { uavOutsideGeofence })
+          ),
           ...statusSummary,
         };
 

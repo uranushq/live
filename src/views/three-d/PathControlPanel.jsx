@@ -16,7 +16,6 @@ import VelocityProfileChart from './VelocityProfileChart';
 import {
   getProfileExp,
   getProfileLog,
-  getVelocityProfile,
   getVelocitySmoothing,
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
@@ -189,11 +188,8 @@ export default function PathControlPanel({
     setSmoothing(setVelocitySmoothing(value));
   };
 
-  const [panel, setPanel] = React.useState(null);
-  const [profile, setProfile] = React.useState(getVelocityProfile());
-
-  // 관성 속도 프로파일 그래프 (모양·폭·곡률이 바뀌면 실시간 갱신)
   const [profileOpen, setProfileOpen] = React.useState(false);
+  const [panel, setPanel] = React.useState(null); // 'status' | 'settings' | null
   const [profileKnobs, setProfileKnobs] = React.useState(() => ({
     exp: getProfileExp(),
     log: getProfileLog(),
@@ -203,7 +199,7 @@ export default function PathControlPanel({
     () =>
       subscribeSmoothingKnobs(() => {
         setSmoothing(getVelocitySmoothing());
-        setProfile(getVelocityProfile());
+        setProfileKnobs({ exp: getProfileExp(), log: getProfileLog() });
       }),
     []
   );
@@ -362,7 +358,13 @@ export default function PathControlPanel({
               boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
             }}
           >
-            <VelocityProfileChart profile={profile} width={320} height={140} />
+            <VelocityProfileChart
+              smoothing={smoothing}
+              kExp={profileKnobs.exp}
+              kLog={profileKnobs.log}
+              width={320}
+              height={140}
+            />
           </div>
         )}
 

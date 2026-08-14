@@ -27,6 +27,8 @@ import { getUploadStatusCodeMapping } from '~/features/upload/selectors';
 import { isPathUploadedForUav } from '~/features/uavs/pathUpload';
 import {
   getUavAlert,
+  getUavBorderColor,
+  getUavBorderReason,
   resolveUavAlertBatteryPercentage,
 } from '~/features/uavs/uavAlert';
 import {
@@ -184,6 +186,7 @@ const DroneStatusLine = ({
   alert,
   batteryFormatter,
   batteryStatus,
+  borderColor,
   color,
   coordinateFormatter,
   debugString,
@@ -215,7 +218,12 @@ const DroneStatusLine = ({
   const detailColumnText = formatDetailColumnText(details, text, debugString);
 
   return (
-    <div className={clsx(classes.root, gone && classes.gone)}>
+    <div
+      className={clsx(classes.root, gone && classes.gone)}
+      style={
+        borderColor ? { boxShadow: `inset 0 0 0 2px ${borderColor}` } : undefined
+      }
+    >
       <div
         className={clsx(classes.col, classes.colRight, classes.idLabel)}
         style={listIdColumnStyle(idColumns.primary)}
@@ -412,6 +420,7 @@ DroneStatusLine.propTypes = {
     voltage: PropTypes.number,
     percentage: PropTypes.number,
   }),
+  borderColor: PropTypes.string,
   color: PropTypes.string,
   coordinateFormatter: PropTypes.func,
   debugString: PropTypes.string,
@@ -496,6 +505,9 @@ export default connect(
           geofenceSet,
           showStartTimeSet: hasScheduledStartTime(state),
         }),
+        borderColor: getUavBorderColor(
+          getUavBorderReason(uav, { uavOutsideGeofence })
+        ),
         batteryFormatter,
         color,
         pathUploaded: isPathUploadedForUav(uav, uploadStatus, pathUploadContext),

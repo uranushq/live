@@ -90,6 +90,7 @@ const ComplexAvatar = ({
   AvatarProps,
   batteryFormatter,
   batteryStatus,
+  borderColor,
   hint,
   crossed,
   details,
@@ -122,6 +123,9 @@ const ComplexAvatar = ({
           gone && classes.gone,
           selected && classes.avatarSelected
         )}
+        style={
+          borderColor ? { boxShadow: `0 0 0 2px ${borderColor}` } : undefined
+        }
       >
         <SemanticAvatar
           status={editing ? Status.NEXT : status}
@@ -168,6 +172,7 @@ ComplexAvatar.propTypes = {
     voltage: PropTypes.number,
     percentage: PropTypes.number,
   }),
+  borderColor: PropTypes.string,
   hint: PropTypes.string,
   crossed: PropTypes.bool,
   details: PropTypes.string,
