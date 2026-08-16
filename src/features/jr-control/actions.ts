@@ -131,6 +131,101 @@ export const redownloadBoard =
     }
   };
 
+/**
+ * Solid colour for the LED wiring check. `off` wins over the channels — the
+ * firmware looks for the word "off" before it parses any numbers.
+ */
+export type JRLedColor = {
+  red?: number;
+  green?: number;
+  blue?: number;
+  white?: number;
+  off?: boolean;
+};
+
+/** Preset colours offered by the panel; `white` doubles as "everything on". */
+export const JR_LED_PRESETS: Array<{ id: string; label: string; color: JRLedColor }> =
+  [
+    { id: 'white', label: '백색', color: { red: 255, green: 255, blue: 255 } },
+    { id: 'red', label: '적', color: { red: 255, green: 0, blue: 0 } },
+    { id: 'green', label: '녹', color: { red: 0, green: 255, blue: 0 } },
+    { id: 'blue', label: '청', color: { red: 0, green: 0, blue: 255 } },
+  ];
+
+/** The colour the board reports it actually applied, e.g. "led 255,0,0,0". */
+const ledActionOf = (reply: unknown): string =>
+  (reply as { action?: string })?.action ?? 'led';
+
+/**
+ * Light one board's LEDs solid (or turn them off) for a wiring check.
+ *
+ * Boards ignore this while PLAYING, so it fails with a timeout during a show —
+ * that is the firmware protecting the frame task's I2C bus, not a fault.
+ */
+export const setBoardLed =
+  (ip: string, color: JRLedColor = {}): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      const reply = await ky
+        .post(`${JR_BASE}/led/${ip}`, { json: color, timeout: 8000 })
+        .json();
+      dispatch(showSuccess(`${ip}: ${ledActionOf(reply)}`));
+    } catch (error) {
+      dispatch(
+        showError(`LED failed for ${ip}: ${await describeRequestError(error)}`)
+      );
+    }
+  };
+
+/**
+ * Apply one colour to every watched board at once.
+ *
+ * Reports a single summary instead of one snackbar per board — with a full
+ * fleet that would otherwise bury the screen. Boards are addressed in parallel
+ * and a failure on one never blocks the rest.
+ */
+export const setAllBoardsLed =
+  (color: JRLedColor = {}): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const state: RootState = getState();
+    const ips = getJRMonitorTargetIps(state);
+    if (ips.length === 0) {
+      dispatch(showError('LED를 보낼 보드가 없습니다.'));
+      return;
+    }
+
+    const results = await Promise.all(
+      ips.map(async (ip) => {
+        try {
+          await ky.post(`${JR_BASE}/led/${ip}`, { json: color, timeout: 8000 }).json();
+          return { ip, ok: true as const };
+        } catch (error) {
+          return { ip, ok: false as const, why: await describeRequestError(error) };
+        }
+      })
+    );
+
+    const failed = results.filter((r) => !r.ok);
+    const what = color.off ? '소등' : '점등';
+    if (failed.length === 0) {
+      dispatch(showSuccess(`전체 ${what} 완료 (${results.length}대).`));
+      return;
+    }
+
+    // Name a few of the offenders; the rest would not fit in a snackbar.
+    const sample = failed
+      .slice(0, 3)
+      .map((r) => r.ip)
+      .join(', ');
+    const more = failed.length > 3 ? ` 외 ${failed.length - 3}대` : '';
+    dispatch(
+      showError(
+        `전체 ${what}: ${results.length - failed.length}/${results.length} 성공. ` +
+          `실패 ${sample}${more} — ${(failed[0] as { why: string }).why}`
+      )
+    );
+  };
+
 /** Broadcast an ARM sync packet to all boards over UDP. */
 export const broadcastArm =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {

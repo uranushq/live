@@ -6,6 +6,7 @@
  * (`/api/v1/jr`); the browser cannot send UDP broadcasts itself.
  */
 
+import Lightbulb from '@mui/icons-material/Lightbulb';
 import Refresh from '@mui/icons-material/Refresh';
 import RestartAlt from '@mui/icons-material/RestartAlt';
 import CloudDownload from '@mui/icons-material/CloudDownload';
@@ -30,10 +31,13 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import {
   broadcastArm,
+  JR_LED_PRESETS,
   rebootBoard,
   redownloadBoard,
   refreshAllBoards,
   refreshBoardHealth,
+  setAllBoardsLed,
+  setBoardLed,
 } from '~/features/jr-control/actions';
 import { JR_HEALTH_POLL_INTERVAL_MS } from '~/features/jr-control/JRHealthPoller';
 import {
@@ -108,6 +112,10 @@ const JRControlPanel = (): JSX.Element => {
   const ledStartDelaySec = useSelector(getLedStartDelaySec);
   const derivedFrameCount = Math.max(1, Math.round(showDuration * fps));
   const [ipInput, setIpInput] = useState('');
+  // 결선 확인용 LED 색. 행의 전구 버튼과 '전체 점등'이 같은 색을 쓴다.
+  const [ledPresetId, setLedPresetId] = useState(JR_LED_PRESETS[0]!.id);
+  const ledColor =
+    (JR_LED_PRESETS.find((p) => p.id === ledPresetId) ?? JR_LED_PRESETS[0]!).color;
 
   // The 3D view reports how long the drones take to reach the first formation
   // (the "path" value). In auto mode this drives the ARM start-in; in manual
@@ -267,6 +275,13 @@ const JRControlPanel = (): JSX.Element => {
                 </IconButton>
                 <IconButton
                   size='small'
+                  title={`LED 점등 (${ledPresetId}) — 다시 누르면 같은 색으로 갱신`}
+                  onClick={() => dispatch(setBoardLed(row.ip, ledColor))}
+                >
+                  <Lightbulb fontSize='small' />
+                </IconButton>
+                <IconButton
+                  size='small'
                   title='Re-download'
                   onClick={() => dispatch(redownloadBoard(row.ip))}
                 >
@@ -295,6 +310,57 @@ const JRControlPanel = (): JSX.Element => {
           ))}
         </TableBody>
       </Table>
+
+      <Divider sx={{ my: 2 }} />
+
+      {/* 결선 확인용 LED 점등. 보드는 PLAYING 중엔 명령을 버리므로(프레임
+          태스크의 I2C 보호) 쇼 재생 중에는 타임아웃이 정상이다. 점등은 끄거나
+          다음 쇼가 덮어쓸 때까지 유지된다. */}
+      <Typography variant='subtitle2' sx={{ mb: 1 }}>
+        LED 결선 확인 (UDP 16550)
+      </Typography>
+      <Stack
+        direction='row'
+        spacing={1}
+        flexWrap='wrap'
+        useFlexGap
+        alignItems='center'
+        sx={{ mb: 1 }}
+      >
+        {JR_LED_PRESETS.map((preset) => (
+          <Button
+            key={preset.id}
+            size='small'
+            variant={preset.id === ledPresetId ? 'contained' : 'outlined'}
+            onClick={() => setLedPresetId(preset.id)}
+          >
+            {preset.label}
+          </Button>
+        ))}
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size='small'
+          variant='outlined'
+          startIcon={<Lightbulb fontSize='small' />}
+          disabled={rows.length === 0}
+          onClick={() => dispatch(setAllBoardsLed(ledColor))}
+        >
+          전체 점등
+        </Button>
+        <Button
+          size='small'
+          variant='outlined'
+          color='inherit'
+          disabled={rows.length === 0}
+          onClick={() => dispatch(setAllBoardsLed({ off: true }))}
+        >
+          전체 소등
+        </Button>
+      </Stack>
+      <Typography variant='caption' color='text.secondary' sx={{ display: 'block', mb: 2 }}>
+        선택한 색은 표의 전구 버튼에도 적용됩니다. 쇼 재생(PLAYING) 중에는 보드가
+        명령을 무시하므로 타임아웃이 납니다 — 확인 후 전체 소등으로 꺼주세요.
+      </Typography>
 
       <Divider sx={{ my: 2 }} />
 

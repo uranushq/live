@@ -7,6 +7,25 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-16 18:24:02 +0900 — `679c7878` ㄴ
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: JR 컨트롤(`jr-control`)의 서버 오류 처리를 개선해, 실패 시 서버가 내려준 실제 원인 메시지를 사용자에게 보여주도록 바꾼 커밋이다(+DEV_LOG 문서 갱신).
+
+**주요 변경점**:
+- `actions.ts`에 `describeRequestError()` 헬퍼 신설: `HTTPError`의 응답 본문(`{"error": "..."}`)을 우선 읽어 실제 실패 원인을 추출하고, JSON이 아니면 `HTTP <status> <statusText>`로, 그 외엔 일반 `Error.message`로 폴백
+- `fetchBoardHealth`(헬스 폴링), `rebootBoard`(재부팅), `redownloadBoard`(재다운로드), `broadcastArm`(ARM 브로드캐스트)의 catch 블록을 모두 이 헬퍼 사용으로 통일
+- 기존엔 ky의 제네릭 메시지("Request failed with status code 502")만 노출되던 것을, "no ack from JR board ...", "health report is stale ..." 같은 구체적 원인으로 대체
+- `DEV_LOG.md`에 직전 커밋(`0dc30913`, 드론 배지 스케일 조정) 이력 19줄 추가(코드 무관 문서 갱신)
+
+**의미/영향**: 진행 현황의 "JR 컨트롤(조이스틱/보드 제어)" 흐름에서 운영 편의성을 높이는 개선이다. 재부팅·재다운로드·ARM·헬스 체크 실패 시 사용자가 스낵바로 실제 실패 이유(어느 보드가 응답 없음, 헬스 리포트가 오래됨 등)를 바로 확인할 수 있어 현장 디버깅과 문제 격리가 쉬워진다. 로직 자체가 아닌 오류 표시 계층 개선이라 기능 범위는 제한적이지만, 다수 보드를 다루는 실사용 시나리오에서 체감 효과가 크다.
+
+**주의/리스크**: 서버 오류 본문(`error` 필드)이 그대로 UI에 노출되므로 메시지에 내부 IP/포트 등 민감 정보가 포함될 수 있고, 문구가 영어라 한국어 UI와 혼재될 여지가 있다. 또한 빈 메시지(".", "ㄴ") 커밋과 문서 커밋을 다시 문서로 재기록하는 자기참조 누적 패턴이 계속되어 히스토리 추적성 저하가 우려된다.
+
+---
+
+
 ## 2026-08-14 18:19:18 +0900 — `0dc30913` .
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
