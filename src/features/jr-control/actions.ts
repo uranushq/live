@@ -3,7 +3,7 @@
  * server's `jr_control` extension at `/api/v1/jr`.
  */
 
-import ky from 'ky';
+import ky, { HTTPError } from 'ky';
 
 import { showError, showSuccess } from '~/features/snackbar/actions';
 import { timelineDurationSec } from '~/features/led-editor/utils';
@@ -30,6 +30,33 @@ const JR_BASE = '/api/v1/jr';
 const HEALTH_TIMEOUT_MS = 4500;
 
 /**
+ * Human-readable reason for a failed `/api/v1/jr` call.
+ *
+ * The extension answers failures with `{"error": "<why>"}` and a 4xx/5xx —
+ * and that body is the only place the actual cause lives ("no ack from JR
+ * board 192.168.11.5:16550 for 'reboot' within 3.0s", "health report is stale
+ * (23.4s old)", ...). `HTTPError.message` is just ky's generic
+ * "Request failed with status code 502", so read the body first and only fall
+ * back to the status line when there is nothing better.
+ */
+const describeRequestError = async (error: unknown): Promise<string> => {
+  if (error instanceof HTTPError) {
+    try {
+      const body = await error.response.json<{ error?: string }>();
+      if (body?.error) {
+        return body.error;
+      }
+    } catch {
+      // Not a JSON body (proxy error page, empty response) — fall through.
+    }
+
+    return `HTTP ${error.response.status} ${error.response.statusText}`.trim();
+  }
+
+  return error instanceof Error ? error.message : String(error);
+};
+
+/**
  * Fetches one board's `/health`. A failed request is reported as an `error`
  * field rather than thrown, so a dead board cannot abort a polling round.
  */
@@ -42,10 +69,7 @@ const fetchBoardHealth = async (
       .json<JRHealth>();
     return { ip, health };
   } catch (error) {
-    return {
-      ip,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return { ip, error: await describeRequestError(error) };
   }
 };
 
@@ -85,8 +109,9 @@ export const rebootBoard =
       await ky.post(`${JR_BASE}/reboot/${ip}`, { timeout: 8000 }).json();
       dispatch(showSuccess(`Reboot requested for ${ip}`));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      dispatch(showError(`Reboot failed for ${ip}: ${message}`));
+      dispatch(
+        showError(`Reboot failed for ${ip}: ${await describeRequestError(error)}`)
+      );
     }
   };
 
@@ -98,8 +123,11 @@ export const redownloadBoard =
       await ky.post(`${JR_BASE}/redownload/${ip}`, { timeout: 8000 }).json();
       dispatch(showSuccess(`Re-download requested for ${ip}`));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      dispatch(showError(`Re-download failed for ${ip}: ${message}`));
+      dispatch(
+        showError(
+          `Re-download failed for ${ip}: ${await describeRequestError(error)}`
+        )
+      );
     }
   };
 
@@ -155,7 +183,7 @@ export const broadcastArm =
       );
       dispatch(showSuccess(`ARM broadcast sent (${summary.sent} packets).`));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = await describeRequestError(error);
       dispatch(setLastArmSummary(`ARM failed: ${message}`));
       dispatch(showError(`ARM broadcast failed: ${message}`));
     }
