@@ -6,6 +6,7 @@ import Colors from '~/components/colors';
 
 import FillDirectionPicker from './FillDirectionPicker';
 import GridSatelliteGround from './GridSatelliteGround';
+import ImageToDotsModal from './ImageToDotsModal';
 import {
   axisIndices,
   PLANE_AXES,
@@ -201,11 +202,15 @@ const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
 };
 
 /**
- * occupancy 기준 재배치 — 격자에 올린 드론만 슬롯으로 옮기고, 올리지 않은
- * 드론은 homePos(모달을 열 때의 좌표 = 이전 상태)를 그대로 유지한다.
- * 배치했다가 다시 빼면 원래 있던 자리로 돌아간다.
+ * 좌표 우선순위대로 드론을 다시 배치한다.
+ *
+ *   1. 격자 슬롯 (occupancy)
+ *   2. 자유 평면 배치 (freePos) — 이미지/3D 모델을 평면에 쏜 결과. 격자와
+ *      무관한 연속 좌표라 슬롯에 스냅하지 않는다.
+ *   3. homePos — 모달을 열었을 때의 좌표(= 이전 상태). 어디에도 올리지 않은
+ *      드론은 이 값을 그대로 유지하고, 배치를 풀면 여기로 돌아온다.
  */
-const relayoutDrones = (drones, occupancy, lattice, homePos) => {
+const relayoutDrones = (drones, occupancy, lattice, homePos, freePos) => {
   if (!Array.isArray(drones) || !drones.length) return drones;
   const placedPos = {};
   Object.entries(occupancy || {}).forEach(([key, droneId]) => {
@@ -215,6 +220,8 @@ const relayoutDrones = (drones, occupancy, lattice, homePos) => {
   });
   return drones.map((d) => {
     if (placedPos[d.id]) return { ...d, ...placedPos[d.id] };
+    const free = freePos?.[d.id];
+    if (free) return { ...d, ...free };
     const home = homePos?.[d.id];
     return home ? { ...d, ...home } : d;
   });
@@ -436,6 +443,7 @@ export default function FormationGridModal({
   initialLattice = null,
   previousDrones = null,
   previousLabel = '',
+  minSeparation = 1.45,
 }) {
   const isEdit = mode === 'edit';
   const viewRef = useRef(null);
@@ -457,11 +465,22 @@ export default function FormationGridModal({
    * 드론은 이 좌표를 그대로 유지하고, 확정할 때도 이 값이 그대로 나간다.
    */
   const homePosRef = useRef({});
-  const placementRef = useRef({ drones: [], occupancy: {}, homeDrones: [], selectedId: null });
+  const placementRef = useRef({
+    drones: [],
+    occupancy: {},
+    freePos: {},
+    homeDrones: [],
+    selectedId: null,
+  });
   const [drones, setDrones] = useState([]);
   const [homeDrones, setHomeDrones] = useState([]);
   /** key -> droneId : 격자에 바로 배치된 드론 */
   const [occupancy, setOccupancy] = useState({});
+  /**
+   * droneId -> {x, y, z} : 이미지/3D 모델을 평면에 쏴서 놓은 드론.
+   * 격자 슬롯이 아니라 연속 좌표라 occupancy와 따로 관리한다.
+   */
+  const [freePos, setFreePos] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [nx, setNx] = useState(DEFAULT_LATTICE.nx);
   const [ny, setNy] = useState(DEFAULT_LATTICE.ny);
@@ -495,11 +514,13 @@ export default function FormationGridModal({
   const [view, setView] = useState({ w: 900, h: 560 });
   const [guide, setGuide] = useState(true);
   const [orbiting, setOrbiting] = useState(false);
+  /** 이미지/3D 모델 → 평면 배치 모달 */
+  const [imagePlaneOpen, setImagePlaneOpen] = useState(false);
   const [, setPaintTick] = useState(0);
 
   useEffect(() => {
-    placementRef.current = { drones, occupancy, homeDrones, selectedId };
-  }, [drones, occupancy, homeDrones, selectedId]);
+    placementRef.current = { drones, occupancy, freePos, homeDrones, selectedId };
+  }, [drones, occupancy, freePos, homeDrones, selectedId]);
 
   useEffect(() => {
     yawRef.current = yaw;
@@ -562,7 +583,7 @@ export default function FormationGridModal({
       homePos[d.id] = { x: d.x, y: d.y, z: d.z };
     });
     homePosRef.current = homePos;
-    const laidOut = relayoutDrones(seeded, occ, lattice, homePos);
+    const laidOut = relayoutDrones(seeded, occ, lattice, homePos, {});
 
     setNx(lattice.nx);
     setNy(lattice.ny);
@@ -574,6 +595,7 @@ export default function FormationGridModal({
     setAy(lattice.ay);
     setAz(lattice.az);
     setOccupancy(occ);
+    setFreePos({});
     setDrones(laidOut);
     setHomeDrones(laidOut.map((d) => ({ ...d })));
     setLayer(0);
@@ -584,6 +606,7 @@ export default function FormationGridModal({
     setZoom(1);
     setPan(ZERO_PAN);
     setGuide(!isEdit);
+    setImagePlaneOpen(false);
     paintRef.current = null;
     // dronesProp / mode / initialLattice는 open 시점에만 시드
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- seed on open only
@@ -709,6 +732,8 @@ export default function FormationGridModal({
     };
     const onKey = (e) => {
       if (e.key === 'Escape') {
+        // 위에 뜬 평면 배치 모달이 자기 Escape를 처리한다.
+        if (imagePlaneOpen) return;
         if (guide) setGuide(false);
         else onClose();
       }
@@ -742,7 +767,7 @@ export default function FormationGridModal({
       panRef.current = null;
       resizeRef.current = null;
     };
-  }, [open, guide, onClose, applyResize]);
+  }, [open, guide, imagePlaneOpen, onClose, applyResize]);
 
   const beginOrbit = useCallback((clientX) => {
     orbitRef.current = { startX: clientX, startYaw: yawRef.current };
@@ -810,7 +835,13 @@ export default function FormationGridModal({
       Object.keys(occupancy).some((k) => nextOcc[k] !== occupancy[k]);
 
     setDrones((prev) => {
-      const next = relayoutDrones(prev, nextOcc, lattice, homePosRef.current);
+      const next = relayoutDrones(
+        prev,
+        nextOcc,
+        lattice,
+        homePosRef.current,
+        placementRef.current.freePos
+      );
       const changed = next.some(
         (d, i) => d.x !== prev[i]?.x || d.y !== prev[i]?.y || d.z !== prev[i]?.z
       );
@@ -977,7 +1008,12 @@ export default function FormationGridModal({
   }, [laxis, nx, ny, nz, layer, nodePos]);
 
   const occupiedCount = Object.keys(occupancy).length;
-  const placedDroneIds = useMemo(() => new Set(Object.values(occupancy)), [occupancy]);
+  const freeDroneIds = useMemo(() => new Set(Object.keys(freePos)), [freePos]);
+  /** 격자 슬롯이든 평면이든 어딘가에 올라간 드론 (= 대기가 아닌 드론) */
+  const placedDroneIds = useMemo(
+    () => new Set([...Object.values(occupancy), ...freeDroneIds]),
+    [occupancy, freeDroneIds]
+  );
   const idleDrones = useMemo(
     () =>
       drones
@@ -987,16 +1023,34 @@ export default function FormationGridModal({
     [drones, placedDroneIds]
   );
 
+  /**
+   * 평면 배치의 기본 위치 — 대형(열었을 때 좌표) 최북단 + 10 m. 그림 평면이
+   * 이륙 지역을 관통하면 드론들이 차오르는 벽을 가로질러야 해서 진입 계획이
+   * 교착되기 쉽다.
+   */
+  const suggestedPlaneX = useMemo(() => {
+    let maxX = 0;
+    for (const pos of Object.values(homePosRef.current || {})) {
+      const x = Number(pos?.x);
+      if (Number.isFinite(x) && x > maxX) maxX = x;
+    }
+    return maxX + 10;
+  }, [homeDrones]); // eslint-disable-line react-hooks/exhaustive-deps -- homePosRef는 homeDrones와 함께 시드된다
+
   const commitPlacement = useCallback((next) => {
     if (!next) return;
+    const nextFree =
+      next.freePos !== undefined ? next.freePos : placementRef.current.freePos;
     placementRef.current = {
       ...placementRef.current,
       drones: next.drones,
       occupancy: next.occupancy,
+      freePos: nextFree,
       selectedId: next.selectedId !== undefined ? next.selectedId : placementRef.current.selectedId,
     };
     setDrones(next.drones);
     setOccupancy(next.occupancy);
+    if (next.freePos !== undefined) setFreePos(next.freePos);
     if (next.selectedId !== undefined) setSelectedId(next.selectedId);
   }, []);
 
@@ -1007,18 +1061,23 @@ export default function FormationGridModal({
 
   const placeAtKey = useCallback(
     (key, preferredId) => {
-      const { drones: prevDrones, occupancy: prevOcc } = placementRef.current;
+      const {
+        drones: prevDrones,
+        occupancy: prevOcc,
+        freePos: prevFree,
+      } = placementRef.current;
       if (prevOcc[key]) return null;
       const lattice = latticeParams();
       const pos = slotWorldPos(key, lattice);
       if (!pos) return null;
       const used = new Set(Object.values(prevOcc));
       let droneId = preferredId && !used.has(preferredId) ? preferredId : null;
-      // 선택 없이 배치할 때는 대기 스택 순서(id 정렬)대로 꺼냄
+      // 선택 없이 배치할 때는 대기 스택 순서(id 정렬)대로 꺼냄. 평면에 쏜
+      // 드론은 대기가 아니므로 층 채우기가 그림을 갉아먹지 않는다.
       if (!droneId) {
         const idleIds = prevDrones
           .map((d) => d.id)
-          .filter((id) => !used.has(id))
+          .filter((id) => !used.has(id) && !prevFree?.[id])
           .sort(compareDroneId);
         droneId = idleIds[0] || null;
       }
@@ -1029,8 +1088,25 @@ export default function FormationGridModal({
         if (id === droneId) delete nextOcc[slot];
       }
       nextOcc[key] = droneId;
-      const nextDrones = relayoutDrones(prevDrones, nextOcc, lattice, homePosRef.current);
-      return { drones: nextDrones, occupancy: nextOcc, selectedId: null };
+      // 슬롯에 올린 드론은 평면 배치에서 빠진다 — 두 자리를 동시에 차지할 수 없다.
+      let nextFree = prevFree;
+      if (prevFree?.[droneId]) {
+        nextFree = { ...prevFree };
+        delete nextFree[droneId];
+      }
+      const nextDrones = relayoutDrones(
+        prevDrones,
+        nextOcc,
+        lattice,
+        homePosRef.current,
+        nextFree
+      );
+      return {
+        drones: nextDrones,
+        occupancy: nextOcc,
+        freePos: nextFree,
+        selectedId: null,
+      };
     },
     [latticeParams]
   );
@@ -1045,7 +1121,8 @@ export default function FormationGridModal({
         prevDrones,
         nextOcc,
         latticeParams(),
-        homePosRef.current
+        homePosRef.current,
+        placementRef.current.freePos
       );
       return { drones: nextDrones, occupancy: nextOcc };
     },
@@ -1155,11 +1232,76 @@ export default function FormationGridModal({
   const clearAll = () => {
     const { drones: prevDrones } = placementRef.current;
     commitPlacement({
-      drones: relayoutDrones(prevDrones, {}, latticeParams(), homePosRef.current),
+      drones: relayoutDrones(prevDrones, {}, latticeParams(), homePosRef.current, {}),
       occupancy: {},
+      freePos: {},
       selectedId: null,
     });
   };
+
+  /**
+   * 이미지/3D 모델을 평면에 쏜 결과를 배치에 얹는다.
+   *
+   * 격자 슬롯에 스냅하지 않고 계산된 연속 좌표를 그대로 쓴다 — 그림의 형상이
+   * 격자 해상도에 갇히지 않아야 하기 때문이다. 격자에 올라가 있던 드론이
+   * 그림에 포함되면 그 슬롯은 비운다.
+   */
+  const handlePlaceImagePoints = useCallback(
+    (points) => {
+      if (!points || typeof points !== 'object') return;
+      const {
+        drones: prevDrones,
+        occupancy: prevOcc,
+        freePos: prevFree,
+      } = placementRef.current;
+      const nextFree = { ...prevFree };
+      const nextOcc = { ...prevOcc };
+      let added = 0;
+      for (const [droneId, pos] of Object.entries(points)) {
+        const id = String(droneId);
+        const x = Number(pos?.x);
+        const y = Number(pos?.y);
+        const z = Number(pos?.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        nextFree[id] = { x, y, z };
+        added += 1;
+        for (const [slot, occupant] of Object.entries(nextOcc)) {
+          if (occupant === id) delete nextOcc[slot];
+        }
+      }
+      if (!added) return;
+      commitPlacement({
+        drones: relayoutDrones(
+          prevDrones,
+          nextOcc,
+          latticeParams(),
+          homePosRef.current,
+          nextFree
+        ),
+        occupancy: nextOcc,
+        freePos: nextFree,
+        selectedId: null,
+      });
+    },
+    [commitPlacement, latticeParams]
+  );
+
+  /** 평면에 쏜 드론을 전부 대기로 되돌린다 (격자 배치는 그대로) */
+  const clearImagePlacement = useCallback(() => {
+    const { drones: prevDrones, occupancy: prevOcc } = placementRef.current;
+    commitPlacement({
+      drones: relayoutDrones(
+        prevDrones,
+        prevOcc,
+        latticeParams(),
+        homePosRef.current,
+        {}
+      ),
+      occupancy: prevOcc,
+      freePos: {},
+      selectedId: null,
+    });
+  }, [commitPlacement, latticeParams]);
 
   /** 보유한 모든 드론(대기 포함)에 같은 yaw를 일괄 기입 */
   const applyYawToAll = (value) => {
@@ -1183,11 +1325,13 @@ export default function FormationGridModal({
   const handleConfirm = () => {
     const points = {};
     const gridDroneIds = [];
-    const { drones: cur, occupancy: occ } = placementRef.current;
+    const { drones: cur, occupancy: occ, freePos: free } = placementRef.current;
     const placed = new Set(Object.values(occ));
-    if (!placed.size) return;
-    // 격자에 올린 드론은 슬롯 좌표로, 나머지는 열었을 때의 좌표(이전 상태)
-    // 그대로 내보낸다 — 건드리지 않은 드론은 phase에서도 그대로 유지된다.
+    if (!placed.size && !Object.keys(free || {}).length) return;
+    // 격자에 올린 드론은 슬롯 좌표로, 평면에 쏜 드론은 그 좌표로, 나머지는
+    // 열었을 때의 좌표(이전 상태) 그대로 내보낸다 — 건드리지 않은 드론은
+    // phase에서도 그대로 유지된다. gridDroneIds에는 격자 소속만 담는다:
+    // 평면 배치는 슬롯이 아니라서 다시 열 때 스냅되면 안 된다.
     cur.forEach((d) => {
       points[d.id] = {
         x: Math.round(d.x * 10000) / 10000,
@@ -1323,7 +1467,9 @@ export default function FormationGridModal({
       });
     });
 
-    const atCap = occupiedCount >= drones.length;
+    // 빈 슬롯을 눌러도 꺼낼 드론이 없으면(대기 0) 클릭을 막는다 — 평면에 쏜
+    // 드론은 대기가 아니므로 여기서도 빠진다.
+    const atCap = idleDrones.length === 0;
     const nodes = [];
     for (let k = 0; k < nz; k += 1) {
       for (let j = 0; j < ny; j += 1) {
@@ -1364,7 +1510,9 @@ export default function FormationGridModal({
       return {
         key: d.id,
         label: d.label || shortLabel(d.id, idx),
-        title: placed
+        title: freeDroneIds.has(d.id)
+          ? `${d.id} · 평면 배치 (격자 슬롯 아님)`
+          : placed
           ? `${d.id} · 클릭하면 이전 위치로 되돌림`
           : selected
             ? `${d.id} · 선택됨 — 격자 클릭으로 배치`
@@ -1432,7 +1580,7 @@ export default function FormationGridModal({
     planeGeom,
     proj,
     occupancy,
-    occupiedCount,
+    idleDrones,
     drones,
     droneById,
     placedDroneIds,
@@ -1440,6 +1588,7 @@ export default function FormationGridModal({
     axIndex,
     layer,
     nodePos,
+    freeDroneIds,
   ]);
 
   const layerRows = useMemo(() => {
@@ -1493,7 +1642,8 @@ export default function FormationGridModal({
             </div>
           </div>
           <span style={{ fontSize: 12, opacity: 0.55, flexShrink: 0 }}>
-            {occupiedCount} / {drones.length} 배치
+            {placedDroneIds.size} / {drones.length} 배치
+            {freeDroneIds.size ? ` · 평면 ${freeDroneIds.size}` : ''}
           </span>
           <button type="button" style={iconBtnStyle} onClick={() => setGuide(true)} aria-label="도움말">
             ?
@@ -1703,6 +1853,27 @@ export default function FormationGridModal({
               </button>
             </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={labStyle}>평면 배치 · 격자와 별개</span>
+              <button
+                type="button"
+                style={{ ...btnStyle(false), padding: '8px 10px', fontSize: 12 }}
+                onClick={() => setImagePlaneOpen(true)}
+                title="이미지·3D 모델에서 뽑은 점을 원하는 평면에 그대로 겁니다. 격자 슬롯에 맞추지 않고 계산된 좌표를 씁니다."
+              >
+                이미지 → 평면에 쏘기
+              </button>
+              {freeDroneIds.size > 0 && (
+                <button
+                  type="button"
+                  style={{ ...btnStyle(false), padding: '8px 10px', fontSize: 12 }}
+                  onClick={clearImagePlacement}
+                >
+                  평면 배치 {freeDroneIds.size}대 해제
+                </button>
+              )}
+            </div>
+
             <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1751,20 +1922,26 @@ export default function FormationGridModal({
                   fontSize: 13,
                 }}
               >
-                <span style={{ opacity: 0.55 }}>배치된 드론</span>
+                <span style={{ opacity: 0.55 }}>격자 배치</span>
                 <span>{occupiedCount}</span>
+                {freeDroneIds.size > 0 && (
+                  <>
+                    <span style={{ opacity: 0.55 }}>평면 배치</span>
+                    <span>{freeDroneIds.size}</span>
+                  </>
+                )}
                 <span style={{ opacity: 0.55 }}>보유 드론</span>
                 <span>{drones.length}</span>
                 <span style={{ opacity: 0.55 }}>대기 드론</span>
-                <span>{Math.max(0, drones.length - occupiedCount)}</span>
+                <span>{idleDrones.length}</span>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
               <button
                 type="button"
-                style={{ ...btnStyle(true, occupiedCount === 0), flex: 1 }}
-                disabled={occupiedCount === 0}
+                style={{ ...btnStyle(true, placedDroneIds.size === 0), flex: 1 }}
+                disabled={placedDroneIds.size === 0}
                 onClick={handleConfirm}
               >
                 {isEdit ? 'Phase 수정 적용' : 'Phase로 추가'}
@@ -2313,9 +2490,9 @@ export default function FormationGridModal({
               >
                 <div>파란 점 = 슬롯 · 노란 점 = 드론</div>
                 <div>
-                  {occupiedCount >= drones.length
+                  {placedDroneIds.size >= drones.length
                     ? '모두 배치됨'
-                    : `배치 ${occupiedCount} / ${drones.length}`}
+                    : `배치 ${placedDroneIds.size} / ${drones.length}`}
                 </div>
               </div>
             </div>
@@ -2432,6 +2609,16 @@ export default function FormationGridModal({
             </div>
           </div>
         ) : null}
+
+        <ImageToDotsModal
+          open={imagePlaneOpen}
+          mode="place"
+          droneIds={drones.map((d) => d.id)}
+          minSeparation={minSeparation}
+          suggestedPlaneX={suggestedPlaneX}
+          onPlacePoints={handlePlaceImagePoints}
+          onClose={() => setImagePlaneOpen(false)}
+        />
       </div>
     </div>,
     document.body
@@ -2464,6 +2651,8 @@ FormationGridModal.propTypes = {
   ),
   /** 범례에 보여줄 이전 phase 이름 */
   previousLabel: PropTypes.string,
+  /** 이미지 → 평면 배치가 지켜야 할 최소 간격 (m) */
+  minSeparation: PropTypes.number,
   initialLattice: PropTypes.shape({
     nx: PropTypes.number,
     ny: PropTypes.number,

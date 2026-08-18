@@ -574,6 +574,7 @@ export default function DroneInfoPanel({
   onCaptureAllPositionsInPhase = () => {},
   onToggleFixedStraight = () => {},
   onSetAllFixedStraight = () => {},
+  onSetAllYawInPhase = () => {},
   selectedPhaseId = null,
   onTogglePhaseSelected = () => {},
   multiSelectedDroneIds = [],
@@ -613,6 +614,8 @@ export default function DroneInfoPanel({
     const timer = setInterval(update, 500);
     return () => clearInterval(timer);
   }, [isSendingFormation, formationSendStartedAt]);
+  /** phaseId -> yaw 일괄 기입 입력값 (기입 전까지 임시로 들고 있는 문자열) */
+  const [bulkYawDrafts, setBulkYawDrafts] = useState({});
   const [pathPoints, setPathPoints] = useState([
     { x: '', y: '', z: '', durationMs: 0, holdMs: 0, highlighted: false },
   ]);
@@ -2063,6 +2066,64 @@ export default function DroneInfoPanel({
                             모두 재캡쳐
                           </FormationActionButton>
                         </div>
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            marginTop: 6,
+                          }}
+                        >
+                          <span
+                            style={{
+                              ...phaseCardLabelStyle,
+                              marginBottom: 0,
+                              flexShrink: 0,
+                            }}
+                          >
+                            Yaw 일괄
+                          </span>
+                          <input
+                            value={bulkYawDrafts[phase.id] ?? ''}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              setBulkYawDrafts((prev) => ({
+                                ...prev,
+                                [phase.id]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                              const value = Number(bulkYawDrafts[phase.id]);
+                              if (Number.isFinite(value)) {
+                                onSetAllYawInPhase(phase.id, value);
+                              }
+                            }}
+                            placeholder="0"
+                            inputMode="decimal"
+                            title="이 phase에 좌표가 있는 모든 드론의 yaw를 이 값으로 덮어씁니다 (°)"
+                            style={{ ...formationFieldStyle, width: 72, flex: '0 0 auto' }}
+                          />
+                          <FormationActionButton
+                            title="이 phase의 모든 드론 yaw를 입력값으로 한 번에 기입"
+                            onClick={() => {
+                              const value = Number(bulkYawDrafts[phase.id]);
+                              if (!Number.isFinite(value)) return;
+                              onSetAllYawInPhase(phase.id, value);
+                            }}
+                            disabled={
+                              !Number.isFinite(Number(bulkYawDrafts[phase.id])) ||
+                              (bulkYawDrafts[phase.id] ?? '') === ''
+                            }
+                            variant="ghost"
+                            style={phaseCardBtnStyle}
+                          >
+                            전체 기입
+                          </FormationActionButton>
+                        </div>
                       </div>
 
                       <div
@@ -2930,6 +2991,7 @@ DroneInfoPanel.propTypes = {
   onCaptureAllPositionsInPhase: PropTypes.func,
   onToggleFixedStraight: PropTypes.func,
   onSetAllFixedStraight: PropTypes.func,
+  onSetAllYawInPhase: PropTypes.func,
   selectedPhaseId: PropTypes.string,
   onTogglePhaseSelected: PropTypes.func,
   multiSelectedDroneIds: PropTypes.arrayOf(PropTypes.string),

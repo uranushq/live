@@ -326,6 +326,8 @@ export function layoutModelDots(
     planeX = 0,
     minSeparation = 1.45,
     spacingFactor = 1.4,
+    // 세로 간격 하한 (m) — 바닥 평면처럼 "세로"가 고도가 아니면 0을 넘긴다.
+    verticalSeparation = DOWNWASH_SAFE_VERTICAL_SEP,
   }
 ) {
   if (!modelDots.length) {
@@ -361,7 +363,7 @@ export function layoutModelDots(
   const scaledUp = enforceSeparation3D(
     pts,
     sep,
-    Math.max(sep, DOWNWASH_SAFE_VERTICAL_SEP)
+    Math.max(sep, verticalSeparation)
   );
 
   let loX = Infinity, hiX = -Infinity;

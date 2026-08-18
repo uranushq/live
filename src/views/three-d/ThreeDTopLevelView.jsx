@@ -135,6 +135,20 @@ const resizeThreeDScene = (sceneEl, hostEl) => {
   return false;
 };
 
+/**
+ * Stop A-Frame's loading screen from hijacking the render loop.
+ *
+ * `disconnectedCallback()` resets `hasLoaded` to false, and the reconnect
+ * re-arms `loadingScreen.setup()`, whose 200 ms timer only bails out when
+ * `hasLoaded` is true. Otherwise it claims `renderer.setAnimationLoop()` for
+ * itself and the panel is stuck on the flat gray loading screen forever.
+ */
+const suppressLoadingScreenTakeover = (sceneEl) => {
+  if (sceneEl?.renderStarted) {
+    sceneEl.hasLoaded = true;
+  }
+};
+
 const ThreeDTopLevelView = ({
   forcedInteractionMode,
   glContainer,
@@ -173,7 +187,12 @@ const ThreeDTopLevelView = ({
 
   const threeDViewRef = useRef(null);
   const hostNodeRef = useRef(null);
-  const hostParentRef = useRef(null);
+  /**
+   * The canvas A-Frame built for the scene we are currently driving. A-Frame
+   * only creates one in its (re)connect callback, so a different canvas is our
+   * signal that the panel was moved in the DOM.
+   */
+  const lastSceneCanvasRef = useRef(null);
   const resizeRetryTimerRef = useRef(null);
   const resizeGenerationRef = useRef(0);
   const sceneListenersCleanupRef = useRef(null);
@@ -234,10 +253,39 @@ const ThreeDTopLevelView = ({
       }
 
       if (!sceneEl?.addEventListener) {
+        lastSceneCanvasRef.current = null;
         return;
       }
 
+      // Baseline for the reparent check below: whatever canvas this scene is
+      // already drawing into is the one we consider live.
+      lastSceneCanvasRef.current = sceneEl.canvas ?? null;
+
       const onSceneReady = () => {
+        scheduleSceneResize();
+      };
+
+      /**
+       * A-Frame emits this from `setupCanvas()`, which only runs in its
+       * (re)connect callback. Getting a *new* canvas on a scene that had
+       * already started rendering means GoldenLayout re-parented the panel —
+       * splitting a stack, dropping the sibling of a split, switching
+       * perspective. That teardown is not survivable in place: the renderer was
+       * disposed, every entity in the subtree dropped its components, and the
+       * render loop does not restart because `renderStarted` is still true.
+       * Remount `<a-scene>` from React so the whole subtree is rebuilt.
+       */
+      const onRenderTargetLoaded = () => {
+        const canvas = sceneEl.canvas ?? null;
+        const previousCanvas = lastSceneCanvasRef.current;
+        lastSceneCanvasRef.current = canvas;
+
+        if (previousCanvas && canvas !== previousCanvas && sceneEl.renderStarted) {
+          suppressLoadingScreenTakeover(sceneEl);
+          onSceneReparented();
+          return;
+        }
+
         scheduleSceneResize();
       };
 
@@ -267,7 +315,7 @@ const ThreeDTopLevelView = ({
 
       sceneEl.addEventListener('loaded', onSceneReady);
       sceneEl.addEventListener('cameraready', onSceneReady);
-      sceneEl.addEventListener('render-target-loaded', onSceneReady);
+      sceneEl.addEventListener('render-target-loaded', onRenderTargetLoaded);
       sceneEl.addEventListener('render-target-loaded', bindCanvasHandlers);
       bindCanvasHandlers();
       scheduleSceneResize();
@@ -275,7 +323,7 @@ const ThreeDTopLevelView = ({
       sceneListenersCleanupRef.current = () => {
         sceneEl.removeEventListener('loaded', onSceneReady);
         sceneEl.removeEventListener('cameraready', onSceneReady);
-        sceneEl.removeEventListener('render-target-loaded', onSceneReady);
+        sceneEl.removeEventListener('render-target-loaded', onRenderTargetLoaded);
         sceneEl.removeEventListener('render-target-loaded', bindCanvasHandlers);
         const canvas = sceneEl.canvas;
         if (canvas?.__skybrushContextHandlersBound) {
@@ -289,7 +337,7 @@ const ThreeDTopLevelView = ({
         }
       };
     },
-    [scheduleSceneResize]
+    [onSceneReparented, scheduleSceneResize]
   );
 
   const setThreeDViewRef = useCallback(
@@ -300,20 +348,12 @@ const ThreeDTopLevelView = ({
     [bindSceneLifecycle]
   );
 
+  // Reparenting is detected on the scene itself (see `onRenderTargetLoaded`);
+  // the scene host's own parent is React-owned and never changes, so watching
+  // it here only ever produced a resize.
   const handleLayoutStateChanged = useCallback(() => {
     scheduleSceneResize();
-
-    const currentParent = hostNodeRef.current?.parentElement ?? null;
-    if (!currentParent) {
-      return;
-    }
-
-    if (hostParentRef.current && hostParentRef.current !== currentParent) {
-      onSceneReparented();
-    }
-
-    hostParentRef.current = currentParent;
-  }, [onSceneReparented, scheduleSceneResize]);
+  }, [scheduleSceneResize]);
 
   const debouncedLayoutStateChangedRef = useRef(
     debounce(() => handleLayoutStateChanged(), 150)
@@ -346,7 +386,6 @@ const ThreeDTopLevelView = ({
 
   const setHostRef = useCallback((node) => {
     hostNodeRef.current = node;
-    hostParentRef.current = node?.parentElement ?? null;
   }, []);
 
   const { ref: resizeObserverRef } = useResizeObserver({

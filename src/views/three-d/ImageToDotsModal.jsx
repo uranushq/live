@@ -1,14 +1,26 @@
 import PropTypes from 'prop-types';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import ReactDOM from 'react-dom';
 
 import {
-  assignDotsToDrones,
   extractDots,
   layoutDotsInVolume,
   layoutDotsOnPlane,
   sampleDepths,
   suggestPlaneWidth,
 } from './utils/imageToDots';
+import {
+  assignPlanePointsToDrones,
+  orientationOf,
+  PLANE_ORIENTATIONS,
+  verticalSeparationFor,
+} from './utils/imagePlane';
 import {
   kmeans3D,
   layoutModelDots,
@@ -18,6 +30,9 @@ import {
 
 // 처리용 다운스케일 상한 (긴 변 기준 px). 클수록 정확·느림.
 const PROCESS_MAX_DIM = 128;
+
+/** 그리드(21000)·FormationBuilder(22000) 등 다른 모달보다 위에 뜬다. */
+const MODAL_Z_INDEX = 23000;
 
 const MODE_OPTIONS = [
   { value: 'auto', label: '자동 (배경 감지)' },
@@ -57,7 +72,15 @@ export default function ImageToDotsModal({
   droneIds = [],
   minSeparation = 1.45,
   suggestedPlaneX = 0,
+  /**
+   * 'phase' — 확인하면 새 formation phase를 만든다 (기본).
+   * 'place' — 계산한 좌표만 `onPlacePoints`로 넘긴다. 그리드로 Phase 추가
+   *           화면에서 같은 기능을 그대로 쓰기 위한 모드로, phase를 새로
+   *           만들지 않고 지금 편집 중인 배치에 얹는다.
+   */
+  mode: usage = 'phase',
   onCreatePhase = () => {},
+  onPlacePoints = () => {},
   onClose = () => {},
 }) {
   // 입력 소스: 이미지 스티플링 vs 생성형 AI 등으로 만든 3D 모델 파일
@@ -70,14 +93,17 @@ export default function ImageToDotsModal({
   const [depthM, setDepthM] = useState('8');
   const [widthM, setWidthM] = useState('20');
   const [bottomZ, setBottomZ] = useState('5');
-  const [planeX, setPlaneX] = useState('0');
+  /** 평면 방향 — 어느 축을 법선으로 쓰는 벽/바닥에 그림을 걸지 */
+  const [orientationKey, setOrientationKey] = useState('x');
+  /** 법선 축 위의 평면 위치 (기존 "평면 x 위치"의 일반화) */
+  const [planeOffset, setPlaneOffset] = useState('0');
+  /** 평면 안에서 그림을 가로로 밀어 주는 양 */
+  const [planeShift, setPlaneShift] = useState('0');
   // 점 간 여유 계수: 최소 간격 × 이 배수만큼 넉넉하게 펼친다. 꽉 붙은
   // (1.0×) 배치는 진입 계획이 매우 어려워 교착되기 쉽다 — 1.3~1.6 권장.
   const [spacingFactor, setSpacingFactor] = useState('1.4');
   const [status, setStatus] = useState('');
   const [layout, setLayout] = useState(null); // {points, widthM, heightM, scaledUp}
-  const [dots, setDots] = useState([]);
-  const [depths, setDepths] = useState(null); // Float32Array | null (릴리프)
   const previewRef = useRef(null);
   const imgElRef = useRef(null);
 
@@ -89,9 +115,18 @@ export default function ImageToDotsModal({
   // 바깥에 세우는 것이 안전하다.
   useEffect(() => {
     if (open) {
-      setPlaneX(String(Math.round(suggestedPlaneX * 10) / 10));
+      setPlaneOffset(String(Math.round(suggestedPlaneX * 10) / 10));
+      setPlaneShift('0');
     }
   }, [open, suggestedPlaneX]);
+
+  const orientation = orientationOf(orientationKey);
+  const verticalSeparation = verticalSeparationFor(orientation);
+
+  // 바닥 평면에는 릴리프(깊이)가 의미 없다 — 벽으로 돌아오기 전까지는 평면 배치.
+  useEffect(() => {
+    if (!orientation.verticalIsAltitude) setPlacement('plane');
+  }, [orientation]);
 
   // 펼침 크기 자동 제안: 드론 수 × 축별 최소 간격이 이미지/모델의 내용
   // 점유율 안에 여유 있게 들어가는 폭을 역산해 채운다 (수동 수정 가능).
@@ -179,8 +214,6 @@ export default function ImageToDotsModal({
   // 추출 + 배치 (소스/옵션이 바뀔 때마다)
   useEffect(() => {
     if (!open || droneCount === 0) {
-      setDots([]);
-      setDepths(null);
       setLayout(null);
       return;
     }
@@ -188,8 +221,6 @@ export default function ImageToDotsModal({
     // ── 3D 모델 소스: 점군 → 3D k-means → 쇼 좌표 배치 ────────────────
     if (source === 'model') {
       if (!modelInfo) {
-        setDots([]);
-        setDepths(null);
         setLayout(null);
         return;
       }
@@ -197,15 +228,16 @@ export default function ImageToDotsModal({
       const timer = setTimeout(() => {
         try {
           const modelDots = kmeans3D(modelInfo.points, droneCount);
+          // planeX는 0으로 둔다 — 평면 위치·방향은 로컬 좌표를 월드로 돌릴
+          // 때(localToWorld) 한 번에 적용한다.
           const laidOut = layoutModelDots(modelDots, {
             widthM: Math.max(2, Number(widthM) || 20),
             bottomZ: Math.max(0, Number(bottomZ) || 0),
-            planeX: Number(planeX) || 0,
+            planeX: 0,
             minSeparation,
             spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
+            verticalSeparation,
           });
-          setDots([]);
-          setDepths(null);
           setLayout(laidOut);
           setStatus(
             `점 ${laidOut.points.length}개 · 실제 크기 약 ` +
@@ -224,8 +256,6 @@ export default function ImageToDotsModal({
 
     // ── 이미지 소스 ────────────────────────────────────────────────────
     if (!imageInfo) {
-      setDots([]);
-      setDepths(null);
       setLayout(null);
       return;
     }
@@ -234,8 +264,6 @@ export default function ImageToDotsModal({
       try {
         const extracted = extractDots(imageInfo.image, droneCount, { mode });
         if (!extracted.length) {
-          setDots([]);
-          setDepths(null);
           setLayout(null);
           setStatus(
             '이미지에서 피사체를 찾지 못했습니다. 모드를 바꿔보세요.'
@@ -256,9 +284,10 @@ export default function ImageToDotsModal({
             widthM: parsedWidth,
             depthM: parsedDepth,
             bottomZ: parsedBottom,
-            planeX: Number(planeX) || 0,
+            planeX: 0,
             minSeparation,
             spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
+            verticalSeparation,
           });
         } else {
           laidOut = layoutDotsOnPlane(extracted, {
@@ -267,10 +296,9 @@ export default function ImageToDotsModal({
             bottomZ: parsedBottom,
             minSeparation,
             spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
+            verticalSeparation,
           });
         }
-        setDots(extracted);
-        setDepths(dotDepths);
         setLayout(laidOut);
         const sizeText =
           placement === 'relief'
@@ -300,13 +328,18 @@ export default function ImageToDotsModal({
     depthM,
     widthM,
     bottomZ,
-    planeX,
+    verticalSeparation,
     minSeparation,
     spacingFactor,
   ]);
 
-  // 미리보기 렌더링: 원본 이미지(흐리게) + 추출 점 오버레이,
-  // 3D 모델 소스는 쇼 좌표 정면 투영(y-z) + 깊이(x) 색상 표시
+  /**
+   * 2D 평면 미리보기 — 그림이 실제로 걸릴 평면을 미터 격자 위에 그린다.
+   *
+   * 이미지·3D 모델 어느 쪽이든 배치 결과는 같은 로컬 평면 좌표(y = 가로,
+   * z = 세로, x = 법선 방향 깊이)로 나오므로 한 경로로 그린다. 화면은
+   * 그림이 바로 보이도록 +y를 왼쪽, +z를 위로 둔다.
+   */
   useEffect(() => {
     const canvas = previewRef.current;
     if (!canvas) return;
@@ -314,90 +347,131 @@ export default function ImageToDotsModal({
     ctx.fillStyle = '#101116';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (source === 'model') {
-      if (!layout || !layout.points.length) return;
-      const pts = layout.points;
-      let loY = Infinity, hiY = -Infinity;
-      let loZ = Infinity, hiZ = -Infinity;
-      let loX = Infinity, hiX = -Infinity;
-      for (const p of pts) {
-        if (p.y < loY) loY = p.y;
-        if (p.y > hiY) hiY = p.y;
-        if (p.z < loZ) loZ = p.z;
-        if (p.z > hiZ) hiZ = p.z;
-        if (p.x < loX) loX = p.x;
-        if (p.x > hiX) hiX = p.x;
-      }
-      const spanY = Math.max(1e-6, hiY - loY);
-      const spanZ = Math.max(1e-6, hiZ - loZ);
-      const spanX = Math.max(1e-6, hiX - loX);
-      const pad = 16;
-      const s = Math.min(
-        (canvas.width - pad * 2) / spanY,
-        (canvas.height - pad * 2) / spanZ
+    const pts = layout?.points;
+    if (!pts || !pts.length) return;
+
+    let loY = Infinity;
+    let hiY = -Infinity;
+    let loZ = Infinity;
+    let hiZ = -Infinity;
+    let loX = Infinity;
+    let hiX = -Infinity;
+    for (const p of pts) {
+      if (p.y < loY) loY = p.y;
+      if (p.y > hiY) hiY = p.y;
+      if (p.z < loZ) loZ = p.z;
+      if (p.z > hiZ) hiZ = p.z;
+      const d = Number.isFinite(p.x) ? p.x : 0;
+      if (d < loX) loX = d;
+      if (d > hiX) hiX = d;
+    }
+    const spanY = Math.max(1e-6, hiY - loY);
+    const spanZ = Math.max(1e-6, hiZ - loZ);
+    const spanX = Math.max(1e-6, hiX - loX);
+    const margin = Math.max(spanY, spanZ) * 0.08;
+    const padPx = 14;
+    const scale = Math.min(
+      (canvas.width - padPx * 2) / (spanY + margin * 2),
+      (canvas.height - padPx * 2) / (spanZ + margin * 2)
+    );
+    const drawW = (spanY + margin * 2) * scale;
+    const drawH = (spanZ + margin * 2) * scale;
+    const ox = (canvas.width - drawW) / 2;
+    const oy = (canvas.height - drawH) / 2;
+    // +y는 왼쪽, +z는 위 — 그림이 뒤집히지 않게.
+    const sxOf = (y) => ox + (hiY + margin - y) * scale;
+    const syOf = (z) => oy + (hiZ + margin - z) * scale;
+
+    // 그림이 놓이는 영역(= 점들의 바운딩 박스)에 원본 이미지를 옅게 깐다.
+    if (source === 'image' && imgElRef.current) {
+      ctx.globalAlpha = 0.22;
+      ctx.drawImage(
+        imgElRef.current,
+        sxOf(hiY),
+        syOf(hiZ),
+        spanY * scale,
+        spanZ * scale
       );
-      const ox = (canvas.width - spanY * s) / 2;
-      const oy = (canvas.height - spanZ * s) / 2;
-      for (const p of pts) {
-        // 관객 시점: -y(동쪽)가 오른쪽, z가 위. 가까움(-x) = 노란색·큼.
-        const cxPos = ox + (hiY - p.y) * s;
-        const cyPos = oy + (hiZ - p.z) * s;
-        const t = (hiX - p.x) / spanX; // 1 = 관객에 가까움
-        const r = Math.round(90 + t * 165);
-        const g = Math.round(180 + t * 35);
-        const b = Math.round(255 - t * 165);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.beginPath();
-        ctx.arc(cxPos, cyPos, 2.2 + t * 2.3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      return;
+      ctx.globalAlpha = 1;
     }
 
-    if (!imageInfo || !imgElRef.current) return;
+    // 미터 격자 — 눈금 간격은 1·2·5·10… 중 화면에 6~12줄이 되는 값
+    const rawStep = Math.max(spanY, spanZ) / 8;
+    const pow = 10 ** Math.floor(Math.log10(Math.max(rawStep, 1e-6)));
+    const step = [1, 2, 5, 10].map((m) => m * pow).find((v) => v >= rawStep) ?? pow * 10;
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1;
+    for (let g = Math.ceil((loY - margin) / step) * step; g <= hiY + margin; g += step) {
+      ctx.beginPath();
+      ctx.moveTo(sxOf(g), oy);
+      ctx.lineTo(sxOf(g), oy + drawH);
+      ctx.stroke();
+    }
+    for (let g = Math.ceil((loZ - margin) / step) * step; g <= hiZ + margin; g += step) {
+      ctx.beginPath();
+      ctx.moveTo(ox, syOf(g));
+      ctx.lineTo(ox + drawW, syOf(g));
+      ctx.stroke();
+    }
 
-    const img = imgElRef.current;
-    const scale = Math.min(
-      canvas.width / img.width,
-      canvas.height / img.height
-    );
-    const dw = img.width * scale;
-    const dh = img.height * scale;
-    const ox = (canvas.width - dw) / 2;
-    const oy = (canvas.height - dh) / 2;
-    ctx.globalAlpha = 0.32;
-    ctx.drawImage(img, ox, oy, dw, dh);
-    ctx.globalAlpha = 1;
+    // 평면 테두리
+    ctx.strokeStyle = 'rgba(126, 200, 255, 0.3)';
+    ctx.strokeRect(sxOf(hiY), syOf(hiZ), spanY * scale, spanZ * scale);
 
-    // 릴리프 모드에서는 깊이를 색(멀다=파랑 → 가깝다=노랑)과 크기로 표현
-    for (let i = 0; i < dots.length; i++) {
-      const d = dots[i];
-      const x = ox + d.u * dw;
-      const y = oy + d.v * dh;
+    // 점 — 깊이가 있으면 멀다=파랑 → 가깝다=노랑, 없으면 이미지 색
+    const hasDepth = spanX > 1e-3;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
       let radius = 3;
-      if (depths) {
-        const t = depths[i] ?? 0.5; // 1 = 관객에 가까움
-        const r = Math.round(90 + t * 165);
-        const g = Math.round(180 + t * 35);
-        const b = Math.round(255 - t * 165);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+      if (hasDepth) {
+        const t = (hiX - (Number.isFinite(p.x) ? p.x : 0)) / spanX;
+        ctx.fillStyle = `rgb(${Math.round(90 + t * 165)},${Math.round(
+          180 + t * 35
+        )},${Math.round(255 - t * 165)})`;
         radius = 2.2 + t * 2.3;
       } else {
-        const c = dots[i]?.color;
+        const c = p.color;
         ctx.fillStyle = Array.isArray(c)
           ? `rgb(${c[0]},${c[1]},${c[2]})`
           : '#5ad1ff';
       }
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(sxOf(p.y), syOf(p.z), radius, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [source, layout, imageInfo, dots, depths]);
+  }, [source, layout]);
+
+  /** 미리보기 가장자리에 붙일 실제 좌표 범위 (m) */
+  const planeExtent = useMemo(() => {
+    const pts = layout?.points;
+    if (!pts || !pts.length) return null;
+    const shift = Number(planeShift) || 0;
+    let loY = Infinity;
+    let hiY = -Infinity;
+    let loZ = Infinity;
+    let hiZ = -Infinity;
+    for (const p of pts) {
+      if (p.y < loY) loY = p.y;
+      if (p.y > hiY) hiY = p.y;
+      if (p.z < loZ) loZ = p.z;
+      if (p.z > hiZ) hiZ = p.z;
+    }
+    return {
+      hAxis: orientation.hAxis.toUpperCase(),
+      vAxis: orientation.vAxis.toUpperCase(),
+      hLeft: hiY + shift,
+      hRight: loY + shift,
+      vTop: hiZ,
+      vBottom: loZ,
+    };
+  }, [layout, planeShift, orientation]);
+
 
   const handleCreate = useCallback(() => {
     if (!layout || !layout.points.length) return;
-    const points = assignDotsToDrones(layout.points, droneIds, {
-      planeX: Number(planeX) || 0,
+    const points = assignPlanePointsToDrones(layout.points, droneIds, orientation, {
+      offset: Number(planeOffset) || 0,
+      shift: Number(planeShift) || 0,
     });
     const sourceName = source === 'model' ? modelInfo?.name : imageInfo?.name;
     const baseName = sourceName
@@ -405,18 +479,38 @@ export default function ImageToDotsModal({
       : source === 'model'
         ? 'model'
         : 'image';
-    onCreatePhase(baseName, points);
+    // 'place' 모드에서는 phase를 새로 만들지 않고 좌표만 넘긴다 — 그리드로
+    // Phase 추가 화면이 지금 편집 중인 배치에 그대로 얹는다.
+    if (usage === 'place') onPlacePoints(points, baseName);
+    else onCreatePhase(baseName, points);
     onClose();
-  }, [layout, droneIds, planeX, source, modelInfo, imageInfo, onCreatePhase, onClose]);
+  }, [
+    layout,
+    droneIds,
+    orientation,
+    planeOffset,
+    planeShift,
+    source,
+    modelInfo,
+    imageInfo,
+    usage,
+    onPlacePoints,
+    onCreatePhase,
+    onClose,
+  ]);
 
   if (!open) return null;
 
-  return (
+  // 3D 뷰의 씬 호스트는 `position: relative; z-index: 0`으로 자체 쌓임 문맥을
+  // 만든다 — 그 안에서 렌더링하면 z-index를 얼마로 올려도 패널 상단 AppBar나
+  // body로 포털된 다른 모달(그리드 21000 등) 아래에 깔린다. body로 내보내
+  // 앱 최상위에서 겨루게 한다.
+  return ReactDOM.createPortal(
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 13000,
+        zIndex: MODAL_Z_INDEX,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -439,12 +533,16 @@ export default function ImageToDotsModal({
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
-          이미지/3D → 점 Formation
+          {usage === 'place' ? '이미지/3D → 평면 배치' : '이미지/3D → 점 Formation'}
         </div>
         <div style={{ fontSize: 11, color: '#8a8d95', marginBottom: 10 }}>
           {source === 'model'
-            ? `생성형 AI 등으로 만든 3D 모델(GLB/GLTF/OBJ)의 표면을 점 ${droneCount}개(드론 수)로 압축해 3D formation phase로 추가합니다.`
-            : `이미지의 내용·구조를 대표하는 점 ${droneCount}개(드론 수)를 추출해 정면(남쪽에서 북쪽을 바라보는 기준) phase로 추가합니다.`}
+            ? `생성형 AI 등으로 만든 3D 모델(GLB/GLTF/OBJ)의 표면을 점 ${droneCount}개(드론 수)로 압축합니다.`
+            : `이미지의 내용·구조를 대표하는 점 ${droneCount}개(드론 수)를 추출합니다.`}
+          {` ${orientation.label}(${orientation.hAxis.toUpperCase()}·${orientation.vAxis.toUpperCase()} 평면)에 걸고, `}
+          {usage === 'place'
+            ? '지금 편집 중인 배치에 그대로 얹습니다.'
+            : '새 formation phase로 추가합니다.'}
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           {[
@@ -474,10 +572,25 @@ export default function ImageToDotsModal({
 
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', minWidth: 240 }}>
+            <div
+              style={{
+                fontSize: 10.5,
+                color: '#8a8d95',
+                marginBottom: 4,
+                display: 'flex',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>2D 평면 · {orientation.label}</span>
+              <span>
+                {orientation.normal.toUpperCase()}{' '}
+                {(Number(planeOffset) || 0).toFixed(1)} m
+              </span>
+            </div>
             <canvas
               ref={previewRef}
-              width={340}
-              height={255}
+              width={420}
+              height={300}
               style={{
                 width: '100%',
                 borderRadius: 8,
@@ -485,6 +598,28 @@ export default function ImageToDotsModal({
                 background: '#101116',
               }}
             />
+            {planeExtent ? (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 10,
+                  color: '#7d818b',
+                  marginTop: 3,
+                }}
+              >
+                <span>
+                  {planeExtent.hAxis} {planeExtent.hLeft.toFixed(1)} m
+                </span>
+                <span>
+                  {planeExtent.vAxis} {planeExtent.vBottom.toFixed(1)} ~{' '}
+                  {planeExtent.vTop.toFixed(1)} m
+                </span>
+                <span>
+                  {planeExtent.hAxis} {planeExtent.hRight.toFixed(1)} m
+                </span>
+              </div>
+            ) : null}
             <label
               style={{
                 display: 'block',
@@ -530,6 +665,23 @@ export default function ImageToDotsModal({
               gap: 8,
             }}
           >
+            <div>
+              <div style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 3 }}>
+                평면 방향
+              </div>
+              <select
+                value={orientationKey}
+                onChange={(e) => setOrientationKey(e.target.value)}
+                title={orientation.hint}
+                style={fieldStyle}
+              >
+                {PLANE_ORIENTATIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label} · {o.hAxis.toUpperCase()}·{o.vAxis.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
             {source === 'image' ? (
               <div>
                 <div
@@ -550,7 +702,7 @@ export default function ImageToDotsModal({
                 </select>
               </div>
             ) : null}
-            {source === 'image' ? (
+            {source === 'image' && orientation.verticalIsAltitude ? (
               <div>
                 <div
                   style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 3 }}
@@ -619,28 +771,41 @@ export default function ImageToDotsModal({
             </div>
             <div>
               <div style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 3 }}>
-                하단 고도 z (m)
+                {orientation.baseLabel}
               </div>
               <input
                 value={bottomZ}
                 onChange={(e) => setBottomZ(e.target.value)}
                 inputMode='decimal'
+                title='그림의 아래쪽 변이 놓일 위치. 벽면에서는 최저 고도, 바닥 평면에서는 남쪽 끝이 됩니다.'
                 style={fieldStyle}
               />
             </div>
             <div>
               <div style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 3 }}>
-                평면 x 위치 (m)
+                {orientation.offsetLabel}
               </div>
               <input
-                value={planeX}
-                onChange={(e) => setPlaneX(e.target.value)}
+                value={planeOffset}
+                onChange={(e) => setPlaneOffset(e.target.value)}
                 inputMode='decimal'
                 title={
-                  '그림/모델이 놓일 x 위치. 기본값은 현재 대형의 북쪽(앞) — ' +
+                  '그림/모델이 놓일 평면의 위치. 기본값은 현재 대형의 북쪽(앞) — ' +
                   '평면이 이륙 지역을 관통하면 드론들이 차오르는 벽을 ' +
                   '가로질러야 해서 계획이 교착되기 쉽습니다.'
                 }
+                style={fieldStyle}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 3 }}>
+                {orientation.shiftLabel}
+              </div>
+              <input
+                value={planeShift}
+                onChange={(e) => setPlaneShift(e.target.value)}
+                inputMode='decimal'
+                title='평면 안에서 그림을 가로로 밀어 줍니다. 0이면 축 원점을 가운데로 놓습니다.'
                 style={fieldStyle}
               />
             </div>
@@ -714,11 +879,12 @@ export default function ImageToDotsModal({
               cursor: layout && layout.points.length ? 'pointer' : 'default',
             }}
           >
-            Phase로 추가
+            {usage === 'place' ? '이 평면에 배치' : 'Phase로 추가'}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -727,6 +893,8 @@ ImageToDotsModal.propTypes = {
   droneIds: PropTypes.arrayOf(PropTypes.string),
   minSeparation: PropTypes.number,
   suggestedPlaneX: PropTypes.number,
+  mode: PropTypes.oneOf(['phase', 'place']),
   onCreatePhase: PropTypes.func,
+  onPlacePoints: PropTypes.func,
   onClose: PropTypes.func,
 };

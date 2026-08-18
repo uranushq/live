@@ -4,15 +4,15 @@
   "description": "Ground control station of a Skybrush drone swarm",
   "main": "launcher.bundle.js",
   "scripts": {
-    "bundle": "rimraf build && cross-env NODE_ENV=production webpack --mode=production --progress --config webpack/dist.config.js",
+    "bundle": "rimraf build && cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 webpack --mode=production --progress --config webpack/dist.config.js",
     "lint": "eslint",
     "postinstall": "patch-package",
-    "start": "rimraf build && webpack serve --config webpack/browser.config.js --progress",
-    "start:electron": "webpack serve --server-type https --config webpack/electron.config.js --progress",
-    "start:electron:light": "cross-env SKYBRUSH_VARIANT=light webpack serve --server-type https --config webpack/electron.config.js --progress",
-    "start:https": "rimraf build && webpack serve --server-type https --config webpack/browser.config.js --progress",
-    "stats": "rimraf build && webpack --json --progress --config webpack/dist.config.js >stats.json",
-    "stats:prod": "rimraf build && cross-env NODE_ENV=production webpack --json --mode=production --progress --config webpack/dist.config.js >stats.prod.json",
+    "start": "rimraf build && cross-env NODE_OPTIONS=--max-old-space-size=8192 webpack serve --config webpack/browser.config.js --progress",
+    "start:electron": "cross-env NODE_OPTIONS=--max-old-space-size=8192 webpack serve --server-type https --config webpack/electron.config.js --progress",
+    "start:electron:light": "cross-env SKYBRUSH_VARIANT=light NODE_OPTIONS=--max-old-space-size=8192 webpack serve --server-type https --config webpack/electron.config.js --progress",
+    "start:https": "rimraf build && cross-env NODE_OPTIONS=--max-old-space-size=8192 webpack serve --server-type https --config webpack/browser.config.js --progress",
+    "stats": "rimraf build && cross-env NODE_OPTIONS=--max-old-space-size=8192 webpack --json --progress --config webpack/dist.config.js >stats.json",
+    "stats:prod": "rimraf build && cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 webpack --json --mode=production --progress --config webpack/dist.config.js >stats.prod.json",
     "test": "jest"
   },
   "repository": {

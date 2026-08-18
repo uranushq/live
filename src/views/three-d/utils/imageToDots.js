@@ -295,6 +295,9 @@ export function layoutDotsOnPlane(
     minSeparation = 1.45,
     spacingFactor = 1.4,
     relaxIterations = 120,
+    // 세로 간격 하한 (m). 벽면은 다운워시 회피를 위해 이 값을 지켜야 하지만,
+    // 바닥 평면처럼 "세로"가 고도가 아닌 경우에는 0을 넘겨 끈다.
+    verticalSeparation = DOWNWASH_SAFE_VERTICAL_SEP,
   }
 ) {
   if (!dots.length) {
@@ -309,7 +312,7 @@ export function layoutDotsOnPlane(
 
   const sep =
     Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
-  const sepZ = Math.max(sep, DOWNWASH_SAFE_VERTICAL_SEP);
+  const sepZ = Math.max(sep, verticalSeparation);
   const eps = 1e-6;
 
   // 반복 밀어내기: 체비셰프 간격이 모자란 쌍을 큰 축 방향으로 벌린다
@@ -488,6 +491,7 @@ export function layoutDotsInVolume(
     minSeparation = 1.45,
     spacingFactor = 1.4,
     relaxIterations = 120,
+    verticalSeparation = DOWNWASH_SAFE_VERTICAL_SEP,
   }
 ) {
   if (!dots.length) {
@@ -503,7 +507,7 @@ export function layoutDotsInVolume(
 
   const sep =
     Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
-  const sepZ = Math.max(sep, DOWNWASH_SAFE_VERTICAL_SEP);
+  const sepZ = Math.max(sep, verticalSeparation);
   const eps = 1e-6;
 
   for (let iter = 0; iter < relaxIterations; iter++) {

@@ -2648,6 +2648,32 @@ const ThreeDView = React.forwardRef((props, ref) => {
     );
   }, []);
 
+  /**
+   * 이 phase에 좌표가 있는 모든 드론에 같은 yaw를 한 번에 기입한다.
+   *
+   * 좌표가 없는 드론은 건드리지 않는다 — phase에 없던 드론을 yaw만으로
+   * 끌어들이면 이후 전환에서 엉뚱한 위치로 잡힌다.
+   */
+  const handleSetAllYawInPhase = useCallback((phaseId, yaw) => {
+    const pid = phaseId != null ? String(phaseId) : '';
+    const value = Number(yaw);
+    if (!pid || !Number.isFinite(value)) return;
+    setFormationPhases((prev) =>
+      prev.map((phase) => {
+        if (String(phase.id) !== pid) return phase;
+        const points = phase.points || {};
+        const nextPoints = {};
+        for (const [droneId, pos] of Object.entries(points)) {
+          nextPoints[droneId] =
+            pos && typeof pos === 'object' && !Array.isArray(pos)
+              ? { ...pos, yaw: value }
+              : pos;
+        }
+        return { ...phase, points: nextPoints };
+      })
+    );
+  }, []);
+
   const handleSetAllFixedStraight = useCallback(
     (phaseId, enable) => {
       const pid = phaseId != null ? String(phaseId) : '';
@@ -3316,6 +3342,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
         }
         previousDrones={formationGridPrevious.drones}
         previousLabel={formationGridPrevious.label}
+        minSeparation={
+          sanitizeFormationSettings(formationSettings).min_separation
+        }
         title={
           formationGridEditPhaseId
             ? `Formation · 수정${
@@ -3469,6 +3498,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onCaptureAllPositionsInPhase={handleCaptureAllPositionsInPhase}
         onToggleFixedStraight={handleToggleFixedStraight}
         onSetAllFixedStraight={handleSetAllFixedStraight}
+        onSetAllYawInPhase={handleSetAllYawInPhase}
         selectedPhaseId={selectedPhaseId}
         onTogglePhaseSelected={handleTogglePhaseSelected}
         multiSelectedDroneIds={multiSelectedDroneIds}
