@@ -7,6 +7,27 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-19 21:49:36 +0900 — `d6f8cff7` 1차적으로 led editor setting
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: LED 에디터 편집 기능을 대폭 확장하면서, 3D 뷰의 드론 배지 구조·카메라 이동 방식·JR ARM start-in 산출 로직까지 함께 손본 "1차 LED 에디터 세팅" 커밋이다.
+
+**주요 변경점**:
+- **LED 에디터 확장**: `slice.ts`(+208), `types.ts`(+36), `selectors.ts`(+28)와 `BoardGrid.tsx`(+299), `Timeline.tsx`(+305)를 대거 손봐 보드/타임라인 편집·설정 기능을 크게 보강 — 커밋 제목 그대로 편집기 세팅의 첫 단추.
+- **JR ARM start-in 로직 교체**: `actions.ts`에서 `ledStartDelaySec` 직접 참조를 걷어내고 신설 셀렉터 `getRecommendedArmStartInSec`로 대체 — 자동 모드가 쇼(비행 페이즈에 동기화된 보드는 ~0, 레거시 LED-only 쇼는 path 지연)를 따르도록 일원화. 근거 없으면 여전히 브로드캐스트 거부.
+- **3D 드론 배지 리팩터링**: 배지 캔버스 그리기·짧은 라벨 로직을 `views/three-d/utils/droneIdBadge.js`로 분리하고, `drone-flock.js`에 `_ensureBothVisuals` 도입 — 내비게이트 모드에서 OBJ 모델과 구(sphere) body를 항상 함께 렌더, 색상/hover도 `sphereBody` 기준으로 통일.
+- **카메라 이동 패치**(`aframe/index.js`): `advanced-camera-controls._getMovementVector`를 덮어써 WASD를 yaw-only 수평 이동으로 고정, 고도는 E/C로만 변경 — fly 모드에서 위/아래 보며 전진 시 고도가 바뀌던 문제 제거(이후 walk·fly 이동 방식 동일화).
+- **이미지→도트/3D 뷰**: `ImageToDotsModal.jsx`(+515), `ThreeDView.jsx`(+221), `DroneSphereMarkers.jsx`(+55) 대폭 수정, `PathControlPanel.jsx` 일부 정리.
+- **문서**: `DEV_LOG.md`에 직전 커밋(`2eb845a5` led judp) 이력 20줄 추가.
+
+**의미/영향**: 진행 현황의 "LED 에디터"와 "3D 시각화" 축을 동시에 밀어 올리는 커밋으로, LED 편집기가 단순 프레임 편집을 넘어 비행 페이즈에 동기화된 보드([[led-editor-path-phase-sync]] 흐름) 위에서 동작하도록 기반을 정비했다. ARM start-in을 셀렉터로 캡슐화해 LED-only 레거시 쇼와 페이즈 동기화 쇼를 하나의 규칙으로 처리하고, 3D 배지 유틸 분리와 `_ensureBothVisuals`로 생성/재빌드 경로를 통일해 반경 변경 시 일관성을 확보했다. 카메라 패치는 실사용 조작감(고도 오변경) 문제를 해결하는 실전 개선이다.
+
+**주의/리스크**: 제목이 "1차적으로 led editor setting"이지만 실제로는 카메라 조작·3D 렌더·JR ARM까지 관심사가 뒤섞인 대형 커밋(≈1,670줄 추가)이라 리뷰·롤백 추적성이 낮다. 카메라 이동이 WASD 수평 고정으로 바뀌어 기존 fly 모드 조작에 익숙한 사용자에게는 동작 변화로 체감될 수 있고, `getObject3D('mesh')` → `sphereBody` 폴백 전환은 배지/hover 색상이 특정 렌더 경로에서만 정상 동작하는지 하드웨어·브라우저 검증이 필요하다. "1차" 표현대로 LED 에디터 세팅은 미완 단계로 후속 커밋 의존성이 있다.
+
+---
+
+
 ## 2026-08-16 18:45:05 +0900 — `2eb845a5` led judp
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
