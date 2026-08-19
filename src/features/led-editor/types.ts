@@ -21,6 +21,15 @@ export type LedsPerDrone = 3 | 4;
 /** One drone's LED colours, row-major, length `k*k`. */
 export type DronePixels = RGB[];
 
+/**
+ * A drone's position on the audience-facing plane, in metres, frozen from the
+ * flight phase this board was created from. The audience stands south looking
+ * at +x, so `x` is world *-y* (their left is +y) and `y` is world *-z* (larger
+ * altitude draws higher). Same convention as `layoutDotsOnPlane`; flipping
+ * either sign renders every synced board mirrored.
+ */
+export type DroneLayoutPoint = { x: number; y: number };
+
 /** A still frame placed on the timeline, with its own formation. */
 export type Board = {
   id: string;
@@ -33,6 +42,19 @@ export type Board = {
   drones: DronePixels[];
   startSec: number;
   durationSec: number;
+  /**
+   * Id of the 3D view's formation phase this board is synced to, or undefined
+   * for a hand-made board (and for a board whose phase was later deleted — it
+   * is demoted, never removed). Purely a join key: the compiler never sees it.
+   */
+  sourcePhaseId?: string;
+  /**
+   * Where each drone sits in the phase's real formation, index-aligned with
+   * `drones` (length `droneCount`; null for drones the phase does not place).
+   * Present only on phase-synced boards; when set, the bulb grid lays the
+   * drones out in this shape instead of the dense `rows × cols` grid.
+   */
+  droneLayout?: Array<DroneLayoutPoint | null>;
 };
 
 /**
@@ -51,6 +73,13 @@ export type FormationRegion = {
    * return-to-start) so consumers can style or skip them.
    */
   kind?: 'transit';
+  /**
+   * Stable id of the 3D view's formation phase this region mirrors, used to
+   * join a phase to its LED board. Absent on `'transit'` regions (they have no
+   * authored phase). Phase *names* are not usable as a key — unnamed phases are
+   * all sent to the planner as the literal string `phase`.
+   */
+  phaseId?: string;
 };
 
 /** A rectangular block of pixels held on the editor clipboard. */
@@ -120,6 +149,13 @@ export type LedEditorState = {
    * or there are no formations.
    */
   formationTimeline: FormationRegion[];
+  /**
+   * Each phase's real formation shape, keyed by phase id and mirrored from the
+   * 3D view alongside `formationTimeline`. Read only when the user presses
+   * "path와 동기화", which freezes a copy onto the boards it creates. Empty
+   * when no path is loaded.
+   */
+  phaseLayouts: Record<string, Array<DroneLayoutPoint | null>>;
   /**
    * Recommended delay (seconds) from drone-dance start until the first
    * formation is formed — used as the JR-Control ARM "start in" default. Null

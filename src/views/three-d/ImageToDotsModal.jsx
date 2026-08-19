@@ -34,6 +34,57 @@ const PROCESS_MAX_DIM = 128;
 /** 그리드(21000)·FormationBuilder(22000) 등 다른 모달보다 위에 뜬다. */
 const MODAL_Z_INDEX = 23000;
 
+let imageEntrySeq = 0;
+const generateImageEntryId = () => `img-${Date.now().toString(36)}-${imageEntrySeq++}`;
+
+/** 업로드된 이미지 한 장의 축소 미리보기 — 이미 다운스케일된 ImageData를 그대로 그린다. */
+function ImageThumbnail({ image, aspect, height = 34 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !image) return;
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    ctx.putImageData(
+      new ImageData(
+        new Uint8ClampedArray(image.data),
+        image.width,
+        image.height
+      ),
+      0,
+      0
+    );
+  }, [image]);
+
+  const width = Math.max(20, Math.round(height * (aspect || 1)));
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        width,
+        height,
+        flexShrink: 0,
+        borderRadius: 4,
+        border: '1px solid #2c2e36',
+        background: '#101116',
+      }}
+    />
+  );
+}
+
+ImageThumbnail.propTypes = {
+  image: PropTypes.shape({
+    data: PropTypes.object,
+    width: PropTypes.number,
+    height: PropTypes.number,
+  }),
+  aspect: PropTypes.number,
+  height: PropTypes.number,
+};
+
 const MODE_OPTIONS = [
   { value: 'auto', label: '자동 (배경 감지)' },
   { value: 'dark', label: '어두운 부분이 피사체' },
@@ -92,7 +143,15 @@ export default function ImageToDotsModal({
   // 입력 소스: 이미지 스티플링 vs 생성형 AI 등으로 만든 3D 모델 파일
   const [source, setSource] = useState('image'); // 'image' | 'model'
   const [modelInfo, setModelInfo] = useState(null); // {points: Float32Array, name}
-  const [imageInfo, setImageInfo] = useState(null); // {image, aspect, name}
+  /**
+   * 업로드한 이미지들 — 여러 장을 올리면 순서대로 phase를 하나씩 만든다
+   * (한 번에 여러 phase를 넣는 용도). 각 항목: {id, name, image, aspect, imgEl}.
+   * 'place' 모드(그리드에 좌표만 얹기)에서는 항상 activeImage 한 장만 쓴다.
+   */
+  const [images, setImages] = useState([]);
+  const [activeImageId, setActiveImageId] = useState(null);
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
   const [mode, setMode] = useState('auto');
   const [placement, setPlacement] = useState('plane');
   const [depthSource, setDepthSource] = useState('bright');
@@ -111,9 +170,22 @@ export default function ImageToDotsModal({
   const [status, setStatus] = useState('');
   const [layout, setLayout] = useState(null); // {points, widthM, heightM, scaledUp}
   const previewRef = useRef(null);
-  const imgElRef = useRef(null);
 
   const droneCount = droneIds.length;
+
+  const activeImage = useMemo(
+    () => images.find((entry) => entry.id === activeImageId) ?? null,
+    [images, activeImageId]
+  );
+
+  // 활성 이미지가 없어지면(제거되거나 모달을 처음 열었을 때) 목록의 첫 장을
+  // 자동으로 활성화한다 — 매번 수동으로 고르게 하지 않기 위함.
+  useEffect(() => {
+    if (activeImageId && images.some((entry) => entry.id === activeImageId)) {
+      return;
+    }
+    setActiveImageId(images.length ? images[0].id : null);
+  }, [images, activeImageId]);
 
   // 모달을 열 때마다 평면 x를 "대형 앞쪽" 제안값으로 초기화한다. 그림
   // 평면이 이륙 지역을 관통하면 절반의 드론이 차오르는 벽을 가로질러야
@@ -142,9 +214,9 @@ export default function ImageToDotsModal({
     if (!open || droneCount === 0) return;
     const factor = Math.max(1, Number(spacingFactor) || 1.4);
     let w = null;
-    if (source === 'image' && imageInfo) {
-      w = suggestPlaneWidth(imageInfo.image, droneCount, {
-        imageAspect: imageInfo.aspect,
+    if (source === 'image' && activeImage) {
+      w = suggestPlaneWidth(activeImage.image, droneCount, {
+        imageAspect: activeImage.aspect,
         minSeparation,
         spacingFactor: factor,
         mode,
@@ -161,7 +233,7 @@ export default function ImageToDotsModal({
   }, [
     open,
     source,
-    imageInfo,
+    activeImage,
     modelInfo,
     droneCount,
     mode,
@@ -169,10 +241,8 @@ export default function ImageToDotsModal({
     spacingFactor,
   ]);
 
-  const handleFile = useCallback((event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  /** 파일 하나를 로드해 다운스케일 + ImageData로 만들고 목록에 덧붙인다. */
+  const loadImageFile = useCallback((file) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -188,19 +258,54 @@ export default function ImageToDotsModal({
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
       const data = ctx.getImageData(0, 0, w, h);
-      imgElRef.current = img;
-      setImageInfo({
+      const entry = {
+        id: generateImageEntryId(),
+        name: file.name,
         image: { data: data.data, width: w, height: h },
         aspect: img.width / img.height,
-        name: file.name,
-      });
+        imgEl: img,
+      };
+      setImages((prev) => [...prev, entry]);
       URL.revokeObjectURL(url);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      setStatus('이미지를 읽을 수 없습니다.');
+      setStatus(`이미지를 읽을 수 없습니다: ${file.name}`);
     };
     img.src = url;
+  }, []);
+
+  /** 다중 선택 지원 — 고르는 순서대로 목록 끝에 덧붙는다. */
+  const handleFiles = useCallback(
+    (event) => {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      files.forEach(loadImageFile);
+    },
+    [loadImageFile]
+  );
+
+  const removeImage = useCallback((id) => {
+    setImages((prev) => prev.filter((entry) => entry.id !== id));
+  }, []);
+
+  const moveImage = useCallback((fromIndex, toIndex) => {
+    setImages((prev) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex >= prev.length
+      ) {
+        return prev;
+      }
+
+      const next = prev.slice();
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
   }, []);
 
   const handleModelFile = useCallback(async (event) => {
@@ -216,6 +321,59 @@ export default function ImageToDotsModal({
       setStatus(`모델을 읽을 수 없습니다: ${error?.message || error}`);
     }
   }, []);
+
+  /**
+   * 이미지 한 장 → 추출된 점 + 실제 배치(평면 또는 릴리프). 실패/피사체
+   * 없음이면 null. 미리보기(활성 이미지 1장)와 확인 시 일괄 생성(전체
+   * 이미지 순회) 양쪽에서 같은 계산을 쓰기 위해 분리했다.
+   */
+  const computeImageLayout = useCallback(
+    (image, aspect) => {
+      const extracted = extractDots(image, droneCount, { mode });
+      if (!extracted.length) return null;
+
+      const parsedWidth = Math.max(2, Number(widthM) || 20);
+      const parsedBottom = Math.max(0, Number(bottomZ) || 0);
+
+      if (placement === 'relief') {
+        const parsedDepth = Math.max(0, Number(depthM) || 0);
+        const dotDepths = sampleDepths(image, extracted, {
+          source: depthSource,
+        });
+        return layoutDotsInVolume(extracted, dotDepths, {
+          imageAspect: aspect,
+          widthM: parsedWidth,
+          depthM: parsedDepth,
+          bottomZ: parsedBottom,
+          planeX: 0,
+          minSeparation,
+          spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
+          verticalSeparation,
+        });
+      }
+
+      return layoutDotsOnPlane(extracted, {
+        imageAspect: aspect,
+        widthM: parsedWidth,
+        bottomZ: parsedBottom,
+        minSeparation,
+        spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
+        verticalSeparation,
+      });
+    },
+    [
+      droneCount,
+      mode,
+      widthM,
+      bottomZ,
+      placement,
+      depthSource,
+      depthM,
+      minSeparation,
+      spacingFactor,
+      verticalSeparation,
+    ]
+  );
 
   // 추출 + 배치 (소스/옵션이 바뀔 때마다)
   useEffect(() => {
@@ -260,50 +418,24 @@ export default function ImageToDotsModal({
       return () => clearTimeout(timer);
     }
 
-    // ── 이미지 소스 ────────────────────────────────────────────────────
-    if (!imageInfo) {
+    // ── 이미지 소스: 활성 이미지 1장만 미리보기로 계산 ─────────────────
+    if (!activeImage) {
       setLayout(null);
       return;
     }
     setStatus('점 추출 중...');
     const timer = setTimeout(() => {
       try {
-        const extracted = extractDots(imageInfo.image, droneCount, { mode });
-        if (!extracted.length) {
+        const laidOut = computeImageLayout(
+          activeImage.image,
+          activeImage.aspect
+        );
+        if (!laidOut) {
           setLayout(null);
           setStatus(
             '이미지에서 피사체를 찾지 못했습니다. 모드를 바꿔보세요.'
           );
           return;
-        }
-        const parsedWidth = Math.max(2, Number(widthM) || 20);
-        const parsedBottom = Math.max(0, Number(bottomZ) || 0);
-        let laidOut;
-        let dotDepths = null;
-        if (placement === 'relief') {
-          const parsedDepth = Math.max(0, Number(depthM) || 0);
-          dotDepths = sampleDepths(imageInfo.image, extracted, {
-            source: depthSource,
-          });
-          laidOut = layoutDotsInVolume(extracted, dotDepths, {
-            imageAspect: imageInfo.aspect,
-            widthM: parsedWidth,
-            depthM: parsedDepth,
-            bottomZ: parsedBottom,
-            planeX: 0,
-            minSeparation,
-            spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
-            verticalSeparation,
-          });
-        } else {
-          laidOut = layoutDotsOnPlane(extracted, {
-            imageAspect: imageInfo.aspect,
-            widthM: parsedWidth,
-            bottomZ: parsedBottom,
-            minSeparation,
-            spacingFactor: Math.max(1, Number(spacingFactor) || 1.4),
-            verticalSeparation,
-          });
         }
         setLayout(laidOut);
         const sizeText =
@@ -312,9 +444,12 @@ export default function ImageToDotsModal({
               ` · 깊이 ${laidOut.depthSpanM.toFixed(1)} m`
             : `${laidOut.widthM.toFixed(1)} × ${laidOut.heightM.toFixed(1)} m`;
         setStatus(
-          `점 ${extracted.length}개 · 실제 크기 약 ${sizeText}` +
+          `점 ${laidOut.points.length}개 · 실제 크기 약 ${sizeText}` +
             (laidOut.scaledUp
               ? ' · 최소 간격 확보를 위해 자동 확대됨'
+              : '') +
+            (images.length > 1
+              ? ` · 목록 ${images.length}장 → 확인 시 phase ${images.length}개 순서대로 추가`
               : '')
         );
       } catch (error) {
@@ -322,22 +457,7 @@ export default function ImageToDotsModal({
       }
     }, 30);
     return () => clearTimeout(timer);
-  }, [
-    open,
-    source,
-    modelInfo,
-    imageInfo,
-    droneCount,
-    mode,
-    placement,
-    depthSource,
-    depthM,
-    widthM,
-    bottomZ,
-    verticalSeparation,
-    minSeparation,
-    spacingFactor,
-  ]);
+  }, [open, source, modelInfo, activeImage, images.length, computeImageLayout, placement]);
 
   /**
    * 2D 평면 미리보기 — 그림이 실제로 걸릴 평면을 미터 격자 위에 그린다.
@@ -389,10 +509,10 @@ export default function ImageToDotsModal({
     const syOf = (z) => oy + (hiZ + margin - z) * scale;
 
     // 그림이 놓이는 영역(= 점들의 바운딩 박스)에 원본 이미지를 옅게 깐다.
-    if (source === 'image' && imgElRef.current) {
+    if (source === 'image' && activeImage?.imgEl) {
       ctx.globalAlpha = 0.22;
       ctx.drawImage(
-        imgElRef.current,
+        activeImage.imgEl,
         sxOf(hiY),
         syOf(hiZ),
         spanY * scale,
@@ -445,7 +565,7 @@ export default function ImageToDotsModal({
       ctx.arc(sxOf(p.y), syOf(p.z), radius, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [source, layout]);
+  }, [source, layout, activeImage]);
 
   /** 미리보기 가장자리에 붙일 실제 좌표 범위 (m) */
   const planeExtent = useMemo(() => {
@@ -473,39 +593,109 @@ export default function ImageToDotsModal({
   }, [layout, planeShift, orientation]);
 
 
+  /** points map(드론id → {x,y,z,...}) → droneIds 순서의 origins 배열. */
+  const originsFromPoints = useCallback(
+    (points, fallback) =>
+      droneIds.map((id, i) => {
+        const p = points[String(id)];
+        return p ? { x: p.x, y: p.y, z: p.z } : fallback?.[i] ?? null;
+      }),
+    [droneIds]
+  );
+
+  const assign = useCallback(
+    (points, origins) =>
+      assignPlanePointsToDrones(points, droneIds, orientation, {
+        offset: Number(planeOffset) || 0,
+        shift: Number(planeShift) || 0,
+        origins,
+      }),
+    [droneIds, orientation, planeOffset, planeShift]
+  );
+
   const handleCreate = useCallback(() => {
-    if (!layout || !layout.points.length) return;
-    const points = assignPlanePointsToDrones(layout.points, droneIds, orientation, {
-      offset: Number(planeOffset) || 0,
-      shift: Number(planeShift) || 0,
-      origins: droneOrigins,
-    });
-    const sourceName = source === 'model' ? modelInfo?.name : imageInfo?.name;
-    const baseName = sourceName
-      ? sourceName.replace(/\.[^.]+$/, '')
-      : source === 'model'
-        ? 'model'
+    // 3D 모델 소스는 지금도 한 장(=현재 로드된 모델)만 다룬다.
+    if (source === 'model') {
+      if (!layout || !layout.points.length) return;
+      const points = assign(layout.points, droneOrigins);
+      const baseName = modelInfo?.name
+        ? modelInfo.name.replace(/\.[^.]+$/, '')
+        : 'model';
+      if (usage === 'place') onPlacePoints(points, baseName);
+      else onCreatePhase(baseName, points);
+      onClose();
+      return;
+    }
+
+    // 'place' 모드는 지금 편집 중인 배치 하나에 좌표만 얹는 용도라 활성
+    // 이미지 한 장만 쓴다 — 목록/일괄 생성은 'phase' 모드에서만 의미가 있다.
+    if (usage === 'place') {
+      if (!layout || !layout.points.length) return;
+      const points = assign(layout.points, droneOrigins);
+      const baseName = activeImage?.name
+        ? activeImage.name.replace(/\.[^.]+$/, '')
         : 'image';
-    // 'place' 모드에서는 phase를 새로 만들지 않고 좌표만 넘긴다 — 그리드로
-    // Phase 추가 화면이 지금 편집 중인 배치에 그대로 얹는다.
-    if (usage === 'place') onPlacePoints(points, baseName);
-    else onCreatePhase(baseName, points);
-    onClose();
+      onPlacePoints(points, baseName);
+      onClose();
+      return;
+    }
+
+    // 'phase' 모드 + 이미지 소스: 목록 순서대로 이미지마다 phase를 하나씩
+    // 만든다. 각 phase의 배정 기준(origins)은 항상 "바로 앞 phase가 드론을
+    // 내려놓은 자리" — 매번 기존 마지막 phase만 기준으로 하면 두 번째
+    // 이미지부터 경로가 서로 겹쳐 계획이 교착되기 쉽다.
+    if (!images.length) return;
+    let chainedOrigins = droneOrigins;
+    let created = 0;
+    let skipped = 0;
+    for (const entry of images) {
+      const entryLayout = computeImageLayout(entry.image, entry.aspect);
+      if (!entryLayout || !entryLayout.points.length) {
+        skipped += 1;
+        continue;
+      }
+
+      const points = assign(entryLayout.points, chainedOrigins);
+      const baseName = entry.name.replace(/\.[^.]+$/, '');
+      onCreatePhase(baseName, points);
+      created += 1;
+      chainedOrigins = originsFromPoints(points, chainedOrigins);
+    }
+
+    if (created > 0) {
+      onClose();
+    } else {
+      setStatus('이미지에서 피사체를 찾지 못해 phase를 추가하지 못했습니다.');
+    }
+
+    if (skipped > 0 && created > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[ImageToDotsModal] ${skipped}장은 피사체를 찾지 못해 phase로 추가되지 않았습니다.`
+      );
+    }
   }, [
-    layout,
-    droneIds,
-    droneOrigins,
-    orientation,
-    planeOffset,
-    planeShift,
     source,
+    layout,
+    images,
+    activeImage,
+    computeImageLayout,
+    assign,
+    originsFromPoints,
+    droneOrigins,
     modelInfo,
-    imageInfo,
     usage,
     onPlacePoints,
     onCreatePhase,
     onClose,
   ]);
+
+  // 이미지 소스 + 'phase' 모드는 목록에 이미지가 있으면 확인 가능 — 활성
+  // 이미지의 미리보기 실패 여부와는 무관 (일괄 생성 시 그 한 장만 건너뜀).
+  const canConfirm =
+    source === 'model' || usage === 'place'
+      ? Boolean(layout && layout.points.length)
+      : images.length > 0;
 
   if (!open) return null;
 
@@ -645,7 +835,9 @@ export default function ImageToDotsModal({
             >
               {source === 'model'
                 ? `3D 모델 선택 ${modelInfo ? `(${modelInfo.name})` : ''}`
-                : `이미지 선택 ${imageInfo ? `(${imageInfo.name})` : ''}`}
+                : usage === 'place'
+                  ? `이미지 선택 ${activeImage ? `(${activeImage.name})` : ''}`
+                  : `이미지 추가 ${images.length ? `(${images.length}장 업로드됨)` : ''}`}
               {source === 'model' ? (
                 <input
                   hidden
@@ -658,10 +850,134 @@ export default function ImageToDotsModal({
                   hidden
                   type='file'
                   accept='image/*'
-                  onChange={handleFile}
+                  multiple={usage !== 'place'}
+                  onChange={handleFiles}
                 />
               )}
             </label>
+
+            {source === 'image' && usage !== 'place' && images.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div
+                  style={{ fontSize: 10.5, color: '#8a8d95', marginBottom: 4 }}
+                >
+                  업로드한 이미지 순서 · {images.length}장 — 확인 시 이
+                  순서대로 phase가 하나씩 추가됩니다 (드래그로 순서 변경)
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    maxHeight: 168,
+                    overflowY: 'auto',
+                    paddingRight: 2,
+                  }}
+                >
+                  {images.map((entry, idx) => {
+                    const isActive = entry.id === activeImageId;
+                    const isDragging = dragIndex === idx;
+                    const isDropTarget =
+                      dragOverIndex === idx && dragIndex !== idx;
+                    return (
+                      <div
+                        key={entry.id}
+                        onDragOver={(e) => {
+                          if (dragIndex == null) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverIndex !== idx) setDragOverIndex(idx);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (dragIndex != null) moveImage(dragIndex, idx);
+                          setDragIndex(null);
+                          setDragOverIndex(null);
+                        }}
+                        onClick={() => setActiveImageId(entry.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '4px 8px',
+                          borderRadius: 8,
+                          border: `1px solid ${
+                            isActive
+                              ? '#4c8dff'
+                              : isDropTarget
+                                ? '#7ec8ff'
+                                : '#2c2e36'
+                          }`,
+                          background: isActive ? '#1c2636' : '#1c1e24',
+                          opacity: isDragging ? 0.4 : 1,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', String(idx));
+                            setDragIndex(idx);
+                          }}
+                          onDragEnd={() => {
+                            setDragIndex(null);
+                            setDragOverIndex(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          title='드래그해 순서 변경'
+                          style={{
+                            cursor: 'grab',
+                            color: '#6f727b',
+                            fontSize: 13,
+                            flexShrink: 0,
+                          }}
+                        >
+                          ⠿
+                        </span>
+                        <ImageThumbnail
+                          image={entry.image}
+                          aspect={entry.aspect}
+                        />
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: '#c9cbd1',
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={entry.name}
+                        >
+                          {idx + 1}. {entry.name}
+                        </span>
+                        <button
+                          type='button'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeImage(entry.id);
+                          }}
+                          title='목록에서 제거'
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#8a8d95',
+                            cursor: 'pointer',
+                            fontSize: 15,
+                            lineHeight: 1,
+                            padding: '2px 6px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div
@@ -874,20 +1190,23 @@ export default function ImageToDotsModal({
           <button
             type='button'
             onClick={handleCreate}
-            disabled={!layout || !layout.points.length}
+            disabled={!canConfirm}
             style={{
               padding: '8px 14px',
               borderRadius: 8,
               border: '1px solid #2c2e36',
-              background:
-                layout && layout.points.length ? '#2c66d9' : '#1c1e24',
-              color: layout && layout.points.length ? '#fff' : '#6f727b',
+              background: canConfirm ? '#2c66d9' : '#1c1e24',
+              color: canConfirm ? '#fff' : '#6f727b',
               fontSize: 12.5,
               fontWeight: 700,
-              cursor: layout && layout.points.length ? 'pointer' : 'default',
+              cursor: canConfirm ? 'pointer' : 'default',
             }}
           >
-            {usage === 'place' ? '이 평면에 배치' : 'Phase로 추가'}
+            {usage === 'place'
+              ? '이 평면에 배치'
+              : source === 'image' && images.length > 1
+                ? `Phase ${images.length}개로 추가`
+                : 'Phase로 추가'}
           </button>
         </div>
       </div>

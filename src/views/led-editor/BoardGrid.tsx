@@ -2,6 +2,13 @@
  * @file The bulb-board editor: round LED "bulbs" grouped into per-drone blocks
  * laid out in the *active board's* formation (rows × cols).
  *
+ * A board synced to a flight phase instead carries a frozen `droneLayout`, and
+ * is drawn in that phase's real formation shape — each drone block sits at its
+ * own projected position rather than flowing into the dense grid. Only the
+ * *placement* changes: a drone still owns exactly the same canvas indices, so
+ * painting, copy/paste and the rubber band (which hit-tests real screen rects)
+ * work identically in both modes.
+ *
  * Clicking a bulb selects it (it does not paint) and activates the colour panel
  * on the right. Selection:
  *   - press anywhere (a bulb *or* the empty space around them) and drag to
@@ -11,12 +18,13 @@
  */
 
 import Box from '@mui/material/Box';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import {
   getActiveArrangement,
   getActiveBoard,
+  getActiveDroneLayout,
   getActiveGridDimensions,
   getDroneCount,
   getLedsPerDrone,
@@ -27,11 +35,21 @@ import {
   pasteClipboard,
   setSelectedPixels,
 } from '~/features/led-editor/slice';
+import { type DroneLayoutPoint } from '~/features/led-editor/types';
 import { BLACK, droneIndexForPixel, rgbToCss } from '~/features/led-editor/utils';
 
 const BULB_SIZE = 16;
 const BULB_GAP = 3;
 const DRONE_GAP = 10;
+
+/** Roughly how wide the formation should be drawn before spacing kicks in. */
+const SPATIAL_TARGET_SPAN_PX = 640;
+/**
+ * How far past the "fit the view" scale we may zoom to keep two very close
+ * drones from overlapping. Without a cap, a single near-coincident pair would
+ * blow the canvas up to an unusable size.
+ */
+const SPATIAL_MAX_SPACING_ZOOM = 8;
 
 type BulbRect = {
   index: number;
@@ -46,6 +64,114 @@ type SelectionBox = { left: number; top: number; width: number; height: number }
 const isLit = (pixel: [number, number, number]): boolean =>
   pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0;
 
+/** Where each drone block goes when the board is drawn in a phase's shape. */
+type SpatialLayout = {
+  width: number;
+  height: number;
+  /** Index-aligned with the drones; `left`/`top` in container pixels. */
+  slots: Array<{ left: number; top: number; placed: boolean }>;
+};
+
+/**
+ * Turn a phase's frozen metre coordinates into pixel positions: preserve the
+ * formation's proportions, scale it to a comfortable size, and zoom in (rather
+ * than shrinking the bulbs) if that is what it takes to keep neighbouring drone
+ * blocks from overlapping. Drones the phase never placed are parked in rows
+ * underneath the formation.
+ */
+const computeSpatialLayout = (
+  layout: Array<DroneLayoutPoint | null>,
+  droneCount: number,
+  blockSize: number
+): SpatialLayout => {
+  const step = blockSize + DRONE_GAP;
+  const placed: Array<{ index: number; point: DroneLayoutPoint }> = [];
+  for (let i = 0; i < droneCount; i++) {
+    const point = layout[i];
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      placed.push({ index: i, point });
+    }
+  }
+
+  const slots: SpatialLayout['slots'] = Array.from(
+    { length: droneCount },
+    () => ({ left: 0, top: 0, placed: false })
+  );
+
+  let formationWidth = 0;
+  let formationHeight = 0;
+
+  if (placed.length > 0) {
+    const xs = placed.map((p) => p.point.x);
+    const ys = placed.map((p) => p.point.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const spanX = Math.max(...xs) - minX;
+    const spanY = Math.max(...ys) - minY;
+
+    // Closest pair decides how far we must zoom in to avoid overlap.
+    let minDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const dx = placed[i]!.point.x - placed[j]!.point.x;
+        const dy = placed[i]!.point.y - placed[j]!.point.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1e-6 && dist < minDist) {
+          minDist = dist;
+        }
+      }
+    }
+
+    const largestSpan = Math.max(spanX, spanY);
+    const fitScale =
+      largestSpan > 1e-6 ? SPATIAL_TARGET_SPAN_PX / largestSpan : 1;
+    const spacingScale = Number.isFinite(minDist) ? step / minDist : fitScale;
+    const scale = Math.min(
+      Math.max(fitScale, spacingScale),
+      fitScale * SPATIAL_MAX_SPACING_ZOOM
+    );
+
+    for (const { index, point } of placed) {
+      slots[index] = {
+        left: (point.x - minX) * scale,
+        top: (point.y - minY) * scale,
+        placed: true,
+      };
+    }
+    formationWidth = spanX * scale + blockSize;
+    formationHeight = spanY * scale + blockSize;
+  }
+
+  // Park the drones without a position on their own rows below.
+  const unplaced = slots.reduce<number[]>((acc, slot, i) => {
+    if (!slot.placed) {
+      acc.push(i);
+    }
+    return acc;
+  }, []);
+  let parkedWidth = 0;
+  let parkedHeight = 0;
+  if (unplaced.length > 0) {
+    const perRow = Math.max(1, Math.floor(Math.max(formationWidth, step) / step));
+    unplaced.forEach((droneIndex, n) => {
+      slots[droneIndex] = {
+        left: (n % perRow) * step,
+        top: formationHeight + DRONE_GAP * 3 + Math.floor(n / perRow) * step,
+        placed: false,
+      };
+    });
+    parkedWidth = Math.min(unplaced.length, perRow) * step - DRONE_GAP;
+    parkedHeight =
+      DRONE_GAP * 3 + Math.ceil(unplaced.length / perRow) * step - DRONE_GAP;
+  }
+
+  return {
+    width: Math.max(formationWidth, parkedWidth, blockSize),
+    height: Math.max(formationHeight + parkedHeight, blockSize),
+    slots,
+  };
+};
+
 const BoardGrid = (): JSX.Element => {
   const dispatch = useDispatch();
   const board = useSelector(getActiveBoard);
@@ -54,6 +180,18 @@ const BoardGrid = (): JSX.Element => {
   const { rows, cols } = useSelector(getActiveArrangement);
   const droneCount = useSelector(getDroneCount);
   const committedSelection = useSelector(getSelectedPixels);
+  const droneLayout = useSelector(getActiveDroneLayout);
+
+  // Outer size of one drone's k×k block, including its own 4px padding.
+  const blockSize =
+    ledsPerDrone * BULB_SIZE + (ledsPerDrone - 1) * BULB_GAP + 8;
+  const spatial = useMemo(
+    () =>
+      droneLayout
+        ? computeSpatialLayout(droneLayout, droneCount, blockSize)
+        : undefined,
+    [droneLayout, droneCount, blockSize]
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
@@ -261,70 +399,103 @@ const BoardGrid = (): JSX.Element => {
     >
       <Box
         ref={innerRef}
-        sx={{
-          position: 'relative',
-          display: 'grid',
-          gridTemplateColumns: `repeat(${cols}, max-content)`,
-          gap: `${DRONE_GAP}px`,
-          width: 'max-content',
-        }}
-      >
-        {Array.from({ length: rows * cols }, (_unused, drone) => {
-          const droneRow = Math.floor(drone / cols);
-          const droneCol = drone % cols;
-          const present = drone < droneCount;
-          const dronePixels = board.drones[drone];
-          return (
-            <Box
-              key={drone}
-              title={present ? `Drone #${drone + 1}` : 'No drone'}
-              sx={{
+        sx={
+          spatial
+            ? {
+                position: 'relative',
+                width: spatial.width,
+                height: spatial.height,
+              }
+            : {
+                position: 'relative',
                 display: 'grid',
-                gridTemplateColumns: `repeat(${ledsPerDrone}, ${BULB_SIZE}px)`,
-                gap: `${BULB_GAP}px`,
-                p: 0.5,
-                borderRadius: 1,
-                opacity: present ? 1 : 0.18,
-                backgroundColor: present
-                  ? 'rgba(255,255,255,0.04)'
-                  : 'rgba(255,255,255,0.02)',
-              }}
-            >
-              {Array.from({ length: ledsPerDrone * ledsPerDrone }, (_u, cell) => {
-                const tx = cell % ledsPerDrone;
-                const ty = Math.floor(cell / ledsPerDrone);
-                const x = droneCol * ledsPerDrone + tx;
-                const y = droneRow * ledsPerDrone + ty;
-                const index = y * width + x;
-                const pixel = (dronePixels?.[cell] ?? BLACK) as [
-                  number,
-                  number,
-                  number,
-                ];
-                const lit = isLit(pixel);
-                const selected = marquee.has(index) || committedSet.has(index);
-                return (
-                  <Box
-                    key={cell}
-                    {...(present ? { 'data-bulb-index': index } : {})}
-                    sx={{
-                      width: BULB_SIZE,
-                      height: BULB_SIZE,
-                      borderRadius: '50%',
-                      cursor: present ? 'pointer' : 'default',
-                      background: lit ? rgbToCss(pixel) : '#2a2a2a',
-                      boxShadow: lit
-                        ? `0 0 6px 1px ${rgbToCss(pixel)}`
-                        : 'inset 0 0 0 1px rgba(255,255,255,0.12)',
-                      outline: selected ? '2px solid #fff' : 'none',
-                      outlineOffset: '1px',
-                    }}
-                  />
-                );
-              })}
-            </Box>
-          );
-        })}
+                gridTemplateColumns: `repeat(${cols}, max-content)`,
+                gap: `${DRONE_GAP}px`,
+                width: 'max-content',
+              }
+        }
+      >
+        {Array.from(
+          { length: spatial ? droneCount : rows * cols },
+          (_unused, drone) => {
+            // The canvas index a drone owns never depends on how it is drawn —
+            // it always comes from the board's own rows × cols — so every paint
+            // / copy / paste reducer works unchanged in both modes.
+            const droneRow = Math.floor(drone / cols);
+            const droneCol = drone % cols;
+            const present = drone < droneCount;
+            const dronePixels = board.drones[drone];
+            const slot = spatial?.slots[drone];
+            const unplaced = Boolean(spatial) && slot?.placed === false;
+            return (
+              <Box
+                key={drone}
+                title={
+                  !present
+                    ? 'No drone'
+                    : unplaced
+                      ? `Drone #${drone + 1} — 이 phase에 위치 정보 없음`
+                      : `Drone #${drone + 1}`
+                }
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${ledsPerDrone}, ${BULB_SIZE}px)`,
+                  gap: `${BULB_GAP}px`,
+                  p: 0.5,
+                  borderRadius: 1,
+                  opacity: present ? (unplaced ? 0.45 : 1) : 0.18,
+                  backgroundColor: present
+                    ? 'rgba(255,255,255,0.04)'
+                    : 'rgba(255,255,255,0.02)',
+                  ...(slot
+                    ? {
+                        position: 'absolute',
+                        left: slot.left,
+                        top: slot.top,
+                      }
+                    : {}),
+                }}
+              >
+                {Array.from(
+                  { length: ledsPerDrone * ledsPerDrone },
+                  (_u, cell) => {
+                    const tx = cell % ledsPerDrone;
+                    const ty = Math.floor(cell / ledsPerDrone);
+                    const x = droneCol * ledsPerDrone + tx;
+                    const y = droneRow * ledsPerDrone + ty;
+                    const index = y * width + x;
+                    const pixel = (dronePixels?.[cell] ?? BLACK) as [
+                      number,
+                      number,
+                      number,
+                    ];
+                    const lit = isLit(pixel);
+                    const selected =
+                      marquee.has(index) || committedSet.has(index);
+                    return (
+                      <Box
+                        key={cell}
+                        {...(present ? { 'data-bulb-index': index } : {})}
+                        sx={{
+                          width: BULB_SIZE,
+                          height: BULB_SIZE,
+                          borderRadius: '50%',
+                          cursor: present ? 'pointer' : 'default',
+                          background: lit ? rgbToCss(pixel) : '#2a2a2a',
+                          boxShadow: lit
+                            ? `0 0 6px 1px ${rgbToCss(pixel)}`
+                            : 'inset 0 0 0 1px rgba(255,255,255,0.12)',
+                          outline: selected ? '2px solid #fff' : 'none',
+                          outlineOffset: '1px',
+                        }}
+                      />
+                    );
+                  }
+                )}
+              </Box>
+            );
+          }
+        )}
 
         {box && (
           <Box

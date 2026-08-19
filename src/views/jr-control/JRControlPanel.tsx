@@ -44,6 +44,7 @@ import {
   getJRBoardRows,
   getJRBoardStatusCounts,
   getJRHealthCheckDisabledReason,
+  getRecommendedArmStartInSec,
   isJRHealthCheckEnabled,
   JR_IP_PREFIX,
 } from '~/features/jr-control/selectors';
@@ -61,8 +62,8 @@ import {
 } from '~/features/jr-control/status';
 import {
   getFps,
-  getLedStartDelaySec,
   getTimelineDuration,
+  hasPhaseSyncedBoards,
 } from '~/features/led-editor/selectors';
 import { type RootState } from '~/store/reducers';
 import { type AppDispatch } from '~/store/reducers';
@@ -109,7 +110,7 @@ const JRControlPanel = (): JSX.Element => {
   );
   const fps = useSelector(getFps);
   const showDuration = useSelector(getTimelineDuration);
-  const ledStartDelaySec = useSelector(getLedStartDelaySec);
+  const phaseSynced = useSelector(hasPhaseSyncedBoards);
   const derivedFrameCount = Math.max(1, Math.round(showDuration * fps));
   const [ipInput, setIpInput] = useState('');
   // 결선 확인용 LED 색. 행의 전구 버튼과 '전체 점등'이 같은 색을 쓴다.
@@ -117,13 +118,12 @@ const JRControlPanel = (): JSX.Element => {
   const ledColor =
     (JR_LED_PRESETS.find((p) => p.id === ledPresetId) ?? JR_LED_PRESETS[0]!).color;
 
-  // The 3D view reports how long the drones take to reach the first formation
-  // (the "path" value). In auto mode this drives the ARM start-in; in manual
-  // mode the user types it. We no longer auto-overwrite the manual field.
-  const recommendedStartIn =
-    ledStartDelaySec != null && Number.isFinite(ledStartDelaySec)
-      ? Math.round(ledStartDelaySec * 10) / 10
-      : null;
+  // What auto mode will actually send — the same selector `broadcastArm` uses,
+  // so the number on screen can never drift from the number broadcast. For a
+  // legacy LED-only show that is how long the drones take to reach the first
+  // formation; for a phase-synced show the LED timeline already starts at
+  // dispatch, so it is ~0. In manual mode the user types it instead.
+  const recommendedStartIn = useSelector(getRecommendedArmStartInSec);
   const startInMode = arm.startInMode ?? 'auto';
 
   const handleAdd = () => {
@@ -258,7 +258,32 @@ const JRControlPanel = (): JSX.Element => {
                   title={row.error ?? row.health?.state ?? ''}
                 />
               </TableCell>
-              <TableCell>{row.health?.pps?.state ?? '—'}</TableCell>
+              <TableCell>
+                {row.health?.pps ? (
+                  <Typography
+                    variant='caption'
+                    component='span'
+                    title={
+                      row.health.pps.ticks_per_sec
+                        ? `PPS 누적 ${row.health.pps.count ?? 0}회 · ticks/sec ${row.health.pps.ticks_per_sec}`
+                        : `PPS 누적 ${row.health.pps.count ?? 0}회`
+                    }
+                    sx={{ whiteSpace: 'nowrap' }}
+                  >
+                    {row.health.pps.state ?? '?'}
+                    {row.health.pps.count === undefined ? null : (
+                      <Box
+                        component='span'
+                        sx={{ ml: 0.5, color: 'text.secondary' }}
+                      >
+                        · {row.health.pps.count}회
+                      </Box>
+                    )}
+                  </Typography>
+                ) : (
+                  '—'
+                )}
+              </TableCell>
               <TableCell>
                 {row.health?.show?.loaded
                   ? `${row.health.show.frames ?? '?'}f`
@@ -373,7 +398,9 @@ const JRControlPanel = (): JSX.Element => {
           color='primary'
           sx={{ display: 'block', mb: 1 }}
         >
-          드론 dance 시작 후 {recommendedStartIn}초 후 LED 가동 추천
+          {phaseSynced
+            ? 'LED 타임라인이 path와 동기화됨 — 0초 = dance 시작이므로 지연 없이 가동'
+            : `드론 dance 시작 후 ${recommendedStartIn}초 후 LED 가동 추천`}
         </Typography>
       )}
       <FormControlLabel
@@ -413,7 +440,9 @@ const JRControlPanel = (): JSX.Element => {
             startInMode === 'auto'
               ? recommendedStartIn == null
                 ? 'path 없음'
-                : `path: ${recommendedStartIn}s`
+                : phaseSynced
+                  ? 'path 동기화'
+                  : `path: ${recommendedStartIn}s`
               : '직접 입력'
           }
           sx={{ width: 130 }}

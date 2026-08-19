@@ -706,6 +706,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 3D view's own independent playback even when the checkbox is on.
   const syncActive = threeDSync && ledTimelineDuration > 0;
 
+  // Mirroring the path *into* the LED editor is a different question from
+  // playback sync and must not require an LED show to already exist: pulling
+  // the phases in to create the very first boards is the whole point.
+  const pathMirrorActive = threeDSync;
+
   const isCreateMode =
     typeof isCreateModeProp === 'boolean'
       ? isCreateModeProp
@@ -786,12 +791,28 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const playbackActiveDroneIdsRef = useRef([]);
   const playbackFinishedDroneIdsRef = useRef(new Set());
 
-  // 시뮬레이션용 고속 구체 렌더: 켜면 드론 전체를 InstancedMesh 하나로
-  // 즉시 그려 100대 이상에서도 프레임을 유지한다 (LED 쇼 색 반영).
-  // 렌더링만 바뀐다 — 보이지 않는 프록시 엔티티가 OBJ 마커와 동일한
-  // 데이터/이벤트 계약을 유지하므로 클릭 선택·기즈모·phase 캡처 등
-  // 편집 기능은 그대로 동작한다.
-  const [sphereSimRender, setSphereSimRender] = useState(false);
+  // Edit 모드 렌더 조절: 드론(OBJ 모델)과 구체(InstancedMesh, LED 쇼 색 반영,
+  // 100대 이상에서도 프레임 유지)를 독립적으로 켜고 끈다. 렌더링만 바뀐다 —
+  // 보이지 않는 프록시 엔티티가 OBJ 마커와 동일한 데이터/이벤트 계약을
+  // 유지하므로 클릭 선택·기즈모·phase 캡처 등 편집 기능은 그대로 동작한다.
+  // 둘 다 꺼지는 조합은 허용하지 않는다 (아래 토글 핸들러에서 막음).
+  const [showDroneModel, setShowDroneModel] = useState(true);
+  const [showDroneSphere, setShowDroneSphere] = useState(false);
+  // 마지막 남은 하나는 끌 수 없다 — 아무것도 안 보이는 상태를 막는다.
+  const handleShowDroneModelChange = useCallback(
+    (checked) => {
+      if (!checked && !showDroneSphere) return;
+      setShowDroneModel(checked);
+    },
+    [showDroneSphere]
+  );
+  const handleShowDroneSphereChange = useCallback(
+    (checked) => {
+      if (!checked && !showDroneModel) return;
+      setShowDroneSphere(checked);
+    },
+    [showDroneModel]
+  );
 
   const [formationPhases, setFormationPhases] = useState([]);
   const [lastReversedPhaseIds, setLastReversedPhaseIds] = useState([]);
@@ -807,8 +828,13 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 백엔드 plan 응답의 실제 phase 타이밍(절대 초). phase/설정이 바뀌면
   // 무효화되고, 없으면 아래 formationTimeline 휴리스틱으로 폴백한다.
   const [plannedTimeline, setPlannedTimeline] = useState(null);
+  // plan 요청 세대. phase/설정이 바뀔 때마다 올라가므로, 그 사이에 늦게 도착한
+  // 옛 응답이 이미 무효화된 타임라인을 되살리는 것을 막는다 (이 타이밍이 이제
+  // LED 보드 자동 생성까지 좌우한다).
+  const planGenerationRef = useRef(0);
 
   useEffect(() => {
+    planGenerationRef.current += 1;
     setPlannedTimeline(null);
   }, [formationPhases, formationSettings]);
 
@@ -1170,6 +1196,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
           startSec: b.startSec,
           durationSec: b.durationSec,
           drones: b.drones,
+          // phase 동기화 정보 (없는 보드는 키 자체를 생략)
+          ...(b.sourcePhaseId ? { sourcePhaseId: b.sourcePhaseId } : {}),
+          ...(b.droneLayout ? { droneLayout: b.droneLayout } : {}),
         })),
       };
     }
@@ -1848,20 +1877,20 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const currentPositionMs =
     maxPathDurationMs * (Math.min(100, Math.max(0, Number(pathProgress) || 0)) / 100);
 
-  // 구체 렌더 활성 조건: 편집 모드에서 토글 ON이면 즉시 구체로 표시
-  // (재생 여부와 무관 — 체크하면 바로 바뀌어야 알아보기 쉽다).
-  // DroneShapeMarkers 부모 엔티티는 유지하고 OBJ/LED 시각만 떼며,
-  // 끄면 같은 엔티티에 모델을 다시 붙인다.
-  const sphereModeActive = isCreateMode && sphereSimRender;
-  const sphereModeActiveRef = useRef(false);
-  sphereModeActiveRef.current = sphereModeActive;
+  // Edit 모드 렌더 조절 활성 조건: 토글 ON이면 즉시 반영 (재생 여부와
+  // 무관 — 체크하면 바로 바뀌어야 알아보기 쉽다). DroneShapeMarkers 부모
+  // 엔티티는 항상 유지되고, 이 두 플래그가 OBJ/구체 시각만 떼거나 붙인다.
+  const showDroneModelActive = isCreateMode && showDroneModel;
+  const showDroneSphereActive = isCreateMode && showDroneSphere;
+  const showDroneSphereActiveRef = useRef(false);
+  showDroneSphereActiveRef.current = showDroneSphereActive;
 
-  // 선택된 드론을 3D 뷰에서 빨갛게 표시한다 (OBJ 마커). 구체 모드는
+  // 선택된 드론을 3D 뷰에서 빨갛게 표시한다 (OBJ 마커). 구체는
   // DroneSphereMarkers가 selectedIds로 인스턴스 색을 직접 칠한다.
   // 방금 추가된 드론은 fbx-model 컴포넌트 초기화가 한 프레임 늦을 수 있어
   // 다음 프레임에 한 번 더 적용한다.
   useEffect(() => {
-    if (!isCreateMode || sphereModeActive || typeof document === 'undefined') {
+    if (!showDroneModelActive || typeof document === 'undefined') {
       return undefined;
     }
 
@@ -1887,7 +1916,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
     return () => {
       cancelAnimationFrame(rafId);
     };
-  }, [effectiveConfig, isCreateMode, multiSelectedDroneIds, sphereModeActive]);
+  }, [effectiveConfig, multiSelectedDroneIds, showDroneModelActive]);
   const pathProgressLatestRef = useRef(0);
   pathProgressLatestRef.current = pathProgress;
 
@@ -1936,7 +1965,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       updates.forEach((detail) => {
         window.dispatchEvent(new CustomEvent('drone-move-request', { detail }));
       });
-      if (sphereModeActiveRef.current) {
+      if (showDroneSphereActiveRef.current) {
         window.dispatchEvent(
           new CustomEvent('drone-sphere-frame', {
             detail: { tSec: elapsedMs / 1000 },
@@ -1947,9 +1976,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
     [effectiveConfig, maxPathDurationMs]
   );
 
-  // 구체/OBJ 전환 시 새로 마운트된 마커(프록시 포함)는 초기 위치로
-  // 나타나므로, 잠시 뒤 현재 진행 위치를 재적용해 점프를 없앤다 (양방향
-  // 공통). 프록시 엔티티의 A-Frame 초기화가 끝나도록 두 프레임 기다린다.
+  // 구체/OBJ 표시가 바뀔 때 새로 마운트된 마커(프록시 포함)는 초기 위치로
+  // 나타나므로, 잠시 뒤 현재 진행 위치를 재적용해 점프를 없앤다 (양쪽 다).
+  // 프록시 엔티티의 A-Frame 초기화가 끝나도록 두 프레임 기다린다.
   useEffect(() => {
     let rafId = requestAnimationFrame(() => {
       rafId = requestAnimationFrame(() => {
@@ -1957,7 +1986,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       });
     });
     return () => cancelAnimationFrame(rafId);
-  }, [sphereModeActive, applyProgressToAll]);
+  }, [showDroneModelActive, showDroneSphereActive, applyProgressToAll]);
 
   const handlePathProgressChange = (nextValue) => {
     if (syncActive) {
@@ -2062,6 +2091,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       const endSec = startSec + holdSec;
       cursorSec = endSec; // hold here, then the next move begins
       return {
+        phaseId: phase.id,
         name: String(phase.name || '').trim() || `phase-${i + 1}`,
         startSec,
         endSec,
@@ -2069,6 +2099,38 @@ const ThreeDView = React.forwardRef((props, ref) => {
       };
     });
   }, [plannedTimeline, formationPhases, formationSettings]);
+
+  // Each phase's real formation shape, projected onto the audience-facing
+  // plane and ordered by *drone index* — the same order the LED boards and the
+  // 3D sphere renderer use, so layout[i] describes the same drone as
+  // board.drones[i]. The LED editor freezes this per board so a synced board
+  // can be painted in the phase's actual shape instead of a generic rectangle.
+  //
+  // Projection: the audience stands south looking at +x, so +y is on their
+  // LEFT and screen x runs with -y; +z is altitude, so screen y runs with -z.
+  // Same convention as layoutDotsOnPlane (`y: (0.5 - u) * widthM`, i.e. image
+  // left → +y) and the image-to-dots preview — get this sign wrong and every
+  // synced board is painted mirror-imaged.
+  const phaseLayouts = useMemo(() => {
+    const droneList = Array.isArray(effectiveConfig?.drones)
+      ? effectiveConfig.drones
+      : [];
+    if (!droneList.length || !Array.isArray(formationPhases)) return {};
+    const result = {};
+    for (const phase of formationPhases) {
+      if (!phase?.id) continue;
+      const points = phase.points || {};
+      result[String(phase.id)] = droneList.map((d) => {
+        const p = points[String(d?.id)];
+        const y = Number(p?.y);
+        const z = Number(p?.z);
+        return Number.isFinite(y) && Number.isFinite(z)
+          ? { x: -y, y: -z }
+          : null;
+      });
+    }
+    return result;
+  }, [formationPhases, effectiveConfig]);
 
   const ledStartDelaySec = useMemo(() => {
     if (!formationTimeline.length) return null;
@@ -2080,21 +2142,34 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
   // Mirror the formation windows + recommended delay into the LED editor store
   // (read by the LED timeline, simulator and JR-control) while sync is on.
+  // Make the path *available* to the LED editor — its timeline overlay, the
+  // JR-control start delay, and the "path와 동기화" button all read this. The
+  // boards themselves are never touched here: pulling the phases onto the
+  // timeline is an explicit user action in the LED editor.
   useEffect(() => {
-    if (syncActive) {
+    if (pathMirrorActive) {
       store.dispatch(
-        setFormationSync({ timeline: formationTimeline, delaySec: ledStartDelaySec })
+        setFormationSync({
+          timeline: formationTimeline,
+          delaySec: ledStartDelaySec,
+          layouts: phaseLayouts,
+        })
       );
     } else {
-      store.dispatch(setFormationSync({ timeline: [], delaySec: null }));
+      store.dispatch(
+        setFormationSync({ timeline: [], delaySec: null, layouts: {} })
+      );
     }
-  }, [syncActive, formationTimeline, ledStartDelaySec]);
+  }, [pathMirrorActive, formationTimeline, ledStartDelaySec, phaseLayouts]);
 
   // Clear the mirrored formation data when the 3D view unmounts so stale
-  // regions don't linger on the LED timeline.
+  // regions don't linger on the LED timeline. Already-synced boards keep their
+  // own frozen copy of the phase shape, so they survive untouched.
   useEffect(
     () => () => {
-      store.dispatch(setFormationSync({ timeline: [], delaySec: null }));
+      store.dispatch(
+        setFormationSync({ timeline: [], delaySec: null, layouts: {} })
+      );
     },
     []
   );
@@ -3125,6 +3200,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
       return;
     }
 
+    // 응답이 돌아왔을 때 phase가 그대로인지 확인하기 위한 세대 스냅샷.
+    const myGeneration = planGenerationRef.current;
     const usedUrl = DEFAULT_PATH_DELIVERY_URL;
     const requestBody = JSON.stringify(payload);
     const payloadPreview = requestBody.length > 600
@@ -3226,6 +3303,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
                 const color = isTransit
                   ? '#546e7a'
                   : FORMATION_COLORS[formationIndex % FORMATION_COLORS.length];
+                // 백엔드는 phase id를 돌려주지 않으므로(payload에도 안 보낸다)
+                // transit을 걸러낸 뒤의 순번으로 원본 phase와 짝지운다.
+                // formationIndex는 증가 전에 읽어야 현재 항목의 인덱스다.
+                const phaseId = isTransit
+                  ? undefined
+                  : formationPhases[formationIndex]?.id;
                 if (!isTransit) formationIndex += 1;
                 return {
                   name,
@@ -3233,11 +3316,15 @@ const ThreeDView = React.forwardRef((props, ref) => {
                   endSec: Number(p.endTimeAbsSec),
                   color,
                   ...(isTransit ? { kind: 'transit' } : {}),
+                  ...(phaseId ? { phaseId } : {}),
                 };
               });
-            if (planned.length) {
+            if (planned.length && myGeneration === planGenerationRef.current) {
               setPlannedTimeline(planned);
               summaryDetail += `\nLED 타임라인에 실제 phase 타이밍 반영 (${planned.length}개 구간)`;
+            } else if (planned.length) {
+              summaryDetail +=
+                '\n(요청 중 phase가 바뀌어 이 타이밍은 반영하지 않음)';
             }
           }
         }
@@ -3309,8 +3396,6 @@ const ThreeDView = React.forwardRef((props, ref) => {
         isPlaybackRunning={syncActive ? ledPlaying : isPlaybackRunning}
         ledSyncEnabled={threeDSync}
         onLedSyncToggle={handleLedSyncToggle}
-        sphereRender={sphereSimRender}
-        onSphereRenderChange={setSphereSimRender}
         droneCount={
           effectiveConfig && Array.isArray(effectiveConfig.drones)
             ? effectiveConfig.drones.length
@@ -3451,10 +3536,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
                   ? effectiveConfig.drones
                   : undefined
               }
-              showModels={!sphereModeActive}
+              showModels={showDroneModelActive}
             />
           )}
-          {isCreateMode && sphereModeActive && (
+          {showDroneSphereActive && (
             <DroneSphereMarkers
               drones={
                 effectiveConfig && Array.isArray(effectiveConfig.drones)
@@ -3657,6 +3742,78 @@ const ThreeDView = React.forwardRef((props, ref) => {
           }}
         >
           {`${gizmoDragState.axis.toUpperCase()} 축 드래그 중`}
+        </div>
+      )}
+      {isCreateMode && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: 12,
+            transform: 'translateX(-50%)',
+            zIndex: 12100,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: '8px 16px',
+            borderRadius: 14,
+            background:
+              'linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05))',
+            border: '1px solid rgba(255,255,255,0.35)',
+            backdropFilter: 'blur(22px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+            boxShadow:
+              '0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.25)',
+            color: 'rgba(255,255,255,0.95)',
+            fontSize: 12,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              opacity: 0.75,
+            }}
+          >
+            렌더 조절
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="드론 3D 모델(OBJ)을 표시합니다."
+            >
+              <input
+                type="checkbox"
+                checked={showDroneModel}
+                onChange={(e) => handleShowDroneModelChange(e.target.checked)}
+              />
+              <span>드론</span>
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="번호가 표시된 구체를 표시합니다 (InstancedMesh 1개 — 대량 드론에서도 프레임 유지)."
+            >
+              <input
+                type="checkbox"
+                checked={showDroneSphere}
+                onChange={(e) => handleShowDroneSphereChange(e.target.checked)}
+              />
+              <span>구체</span>
+            </label>
+          </div>
         </div>
       )}
     </div>

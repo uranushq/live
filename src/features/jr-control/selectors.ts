@@ -10,6 +10,10 @@
 import { createSelector } from '@reduxjs/toolkit';
 
 import {
+  getLedStartDelaySec,
+  hasPhaseSyncedBoards,
+} from '~/features/led-editor/selectors';
+import {
   getAllUAVIdList,
   getUAVIdToStateMapping,
 } from '~/features/uavs/selectors';
@@ -152,6 +156,36 @@ export const getJRBoardRows: AppSelector<JRBoardRow[]> = createSelector(
       };
     })
 );
+
+/**
+ * Lead time (seconds) the ARM 'auto' mode uses once the LED show is synced to
+ * the flight path. The boards already sit at their real times on a
+ * dispatch-relative clock, so frame 0 must fire at dispatch — raise this only
+ * if the hardware needs a head start.
+ */
+export const PHASE_SYNC_ARM_LEAD_SEC = 0;
+
+/**
+ * What ARM's 'auto' start-in resolves to, or null when it cannot be determined
+ * (which makes `broadcastArm` refuse rather than send a made-up value).
+ *
+ * A phase-synced show is checked first and *without* consulting
+ * `ledStartDelaySec`: that value is cleared when the 3D view unmounts, and a
+ * synced show must still arm correctly after the user closes the 3D view.
+ * Legacy LED-only shows keep the old behaviour exactly.
+ */
+export const getRecommendedArmStartInSec = (
+  state: RootState
+): number | null => {
+  if (hasPhaseSyncedBoards(state)) {
+    return PHASE_SYNC_ARM_LEAD_SEC;
+  }
+
+  const delaySec = getLedStartDelaySec(state);
+  return delaySec != null && Number.isFinite(delaySec)
+    ? Math.round(delaySec * 10) / 10
+    : null;
+};
 
 /** 상태별 대수 — 패널 요약용. */
 export const getJRBoardStatusCounts: AppSelector<

@@ -6,6 +6,12 @@ import { UR9_TARGET_SIZE_M } from '~/aframe/components/fbx-model';
 import { computePlaybackFrame } from '~/features/led-editor/utils';
 import store from '~/store';
 
+import {
+  DRONE_BADGE_CANVAS_SIZE,
+  paintDroneBadgeCanvas,
+  shortDroneLabel,
+} from './utils/droneIdBadge';
+
 const { THREE } = AFrame;
 
 // Simulation render: draw all drones as one InstancedMesh of coloured spheres
@@ -29,6 +35,11 @@ const DEFAULT_BODY_COLOR = 0xff8c00;
 // Selected drones are painted red, matching the OBJ marker's selection tint
 // (fbx-model `_select`), so the "드론 선택" panel and the 3D view agree.
 const SELECTED_BODY_COLOR = 0xff0000;
+// Orange-circle + number badge, sat just above the sphere's own centre (same
+// idea as the live-flock badge in Navigate mode) so a sphere alone still
+// tells you which drone it is.
+const BADGE_SCALE = SPHERE_RADIUS * 1.7;
+const BADGE_HEIGHT = SPHERE_CENTER_Z + SPHERE_RADIUS * 0.15;
 
 function normalizeDroneIds(drones) {
   if (!Array.isArray(drones) || !drones.length) return [];
@@ -80,6 +91,8 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
   const elRef = React.useRef(null);
   const meshRef = React.useRef(null);
   const entityByIdRef = React.useRef(new Map());
+  /** droneId -> THREE.Sprite (id badge), rebuilt alongside the InstancedMesh. */
+  const spritesRef = React.useRef(new Map());
 
   const selectedSet = React.useMemo(
     () => new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String)),
@@ -104,12 +117,21 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
     return () => cancelAnimationFrame(rafId);
   }, [ids]);
 
-  // Build (and rebuild on count change) the instanced sphere mesh.
+  // Build (and rebuild on count change) the instanced sphere mesh + id badges.
   React.useEffect(() => {
     const el = elRef.current;
     if (!el) return undefined;
 
     let disposed = false;
+
+    const disposeSprites = () => {
+      for (const sprite of spritesRef.current.values()) {
+        el.object3D?.remove(sprite);
+        sprite.material.map?.dispose();
+        sprite.material.dispose();
+      }
+      spritesRef.current = new Map();
+    };
 
     const build = () => {
       if (disposed || !el.object3D) return;
@@ -119,6 +141,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         meshRef.current.material.dispose();
         meshRef.current = null;
       }
+      disposeSprites();
       if (!ids.length) return;
 
       const geometry = new THREE.SphereGeometry(
@@ -132,6 +155,7 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
 
       const m = new THREE.Matrix4();
       const color = new THREE.Color(DEFAULT_BODY_COLOR);
+      const sprites = new Map();
       for (let i = 0; i < ids.length; i++) {
         let proxy = entityByIdRef.current.get(ids[i]);
         if (!proxy) {
@@ -145,7 +169,27 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         m.makeTranslation(x, y, z + SPHERE_CENTER_Z);
         mesh.setMatrixAt(i, m);
         mesh.setColorAt(i, color);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = DRONE_BADGE_CANVAS_SIZE;
+        canvas.height = DRONE_BADGE_CANVAS_SIZE;
+        paintDroneBadgeCanvas(canvas, shortDroneLabel(ids[i]));
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        const sprite = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+          })
+        );
+        sprite.scale.set(BADGE_SCALE, BADGE_SCALE, 1);
+        sprite.position.set(x, y, z + BADGE_HEIGHT);
+        el.object3D.add(sprite);
+        sprites.set(ids[i], sprite);
       }
+      spritesRef.current = sprites;
+
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.frustumCulled = false;
@@ -168,12 +212,14 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
         meshRef.current.material.dispose();
         meshRef.current = null;
       }
+      disposeSprites();
     };
   }, [ids]);
 
   // Per-frame sync: mirror each drone entity's (local) position into its
-  // instance matrix. The DroneShapeMarkers parents are the single source of
-  // truth and are moved by the exact same events as when OBJ is shown.
+  // instance matrix (and its id badge sprite). The DroneShapeMarkers parents
+  // are the single source of truth and are moved by the exact same events as
+  // when OBJ is shown.
   React.useEffect(() => {
     const matrix = new THREE.Matrix4();
     let rafId = null;
@@ -193,6 +239,9 @@ const DroneSphereMarkers = React.memo(({ drones, selectedIds }) => {
           matrix.makeTranslation(p.x, p.y, p.z + SPHERE_CENTER_Z);
           mesh.setMatrixAt(i, matrix);
           changed = true;
+
+          const sprite = spritesRef.current.get(ids[i]);
+          if (sprite) sprite.position.set(p.x, p.y, p.z + BADGE_HEIGHT);
         }
         if (changed) mesh.instanceMatrix.needsUpdate = true;
       }

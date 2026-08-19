@@ -11,6 +11,7 @@ import { createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit';
 import {
   type Board,
   type Clipboard,
+  type DroneLayoutPoint,
   type FormationRegion,
   type LedEditorState,
   type LedsPerDrone,
@@ -48,6 +49,7 @@ const initialState: LedEditorState = {
   playing: false,
   threeDSync: true,
   formationTimeline: [],
+  phaseLayouts: {},
   ledStartDelaySec: null,
   upload: { state: 'idle' },
 };
@@ -101,6 +103,26 @@ const writePixel = (
 const cloneBoardDrones = (board: Board): RGB[][] =>
   board.drones.map((drone) => drone.map((p) => [...p] as RGB));
 
+/**
+ * Fit a phase layout to `count` drones: extra entries are dropped and missing
+ * ones become null (a drone the phase does not place).
+ */
+const fitLayout = (
+  layout: Array<DroneLayoutPoint | null> | undefined,
+  count: number
+): Array<DroneLayoutPoint | null> | undefined => {
+  if (!layout) {
+    return undefined;
+  }
+  return Array.from({ length: count }, (_unused, i) => layout[i] ?? null);
+};
+
+/** Drop a board's phase link, keeping its name, timing and every pixel. */
+const demoteBoard = (board: Board): void => {
+  delete board.sourcePhaseId;
+  delete board.droneLayout;
+};
+
 const { actions, reducer } = createSlice({
   name: 'led-editor',
   initialState,
@@ -138,6 +160,10 @@ const { actions, reducer } = createSlice({
           const fit = defaultFormation(count);
           board.rows = fit.rows;
           board.cols = fit.cols;
+        }
+        // Keep a phase layout index-aligned with the drones it describes.
+        if (board.droneLayout) {
+          board.droneLayout = fitLayout(board.droneLayout, count);
         }
       }
       state.selectedPixels = [];
@@ -224,6 +250,9 @@ const { actions, reducer } = createSlice({
             const fit = defaultFormation(state.droneCount);
             board.rows = fit.rows;
             board.cols = fit.cols;
+          }
+          if (board.droneLayout) {
+            board.droneLayout = fitLayout(board.droneLayout, state.droneCount);
           }
         }
       }
@@ -317,13 +346,19 @@ const { actions, reducer } = createSlice({
       for (const board of clip) {
         const id = nanoid();
         newIds.push(id);
-        state.boards.push({
+        const copy: Board = {
           ...board,
           id,
           name: `${board.name} copy`,
           startSec: base + (board.startSec - clipStart),
           drones: board.drones.map((drone) => drone.map((p) => [...p] as RGB)),
-        });
+        };
+        // A phase owns exactly one board. The copy keeps the pixels and the
+        // spatial arrangement but not the link, otherwise two boards would
+        // claim one phase and the sync could neither retime nor unlink the
+        // second one.
+        delete copy.sourcePhaseId;
+        state.boards.push(copy);
       }
       state.selectedBoardIds = newIds;
       state.selectedPixels = [];
@@ -354,6 +389,147 @@ const { actions, reducer } = createSlice({
       if (action.payload.durationSec !== undefined) {
         board.durationSec = Math.max(0.1, action.payload.durationSec);
       }
+      // A synced board may be retimed freely — nothing pulls it back on its
+      // own. The timeline compares it against its phase and offers
+      // `resetBoardTimingToPhase` once the two disagree.
+    },
+
+    /**
+     * Pull a phase-synced board's timing back onto its phase's hold window.
+     * No-op for boards with no (or an unknown) phase.
+     */
+    resetBoardTimingToPhase(state, action: PayloadAction<string>) {
+      const board = state.boards.find((b) => b.id === action.payload);
+      if (!board?.sourcePhaseId) {
+        return;
+      }
+      const region = state.formationTimeline.find(
+        (r) => r.phaseId === board.sourcePhaseId
+      );
+      if (!region) {
+        return;
+      }
+      board.startSec = Math.max(0, region.startSec);
+      board.durationSec = Math.max(0.1, region.endSec - region.startSec);
+    },
+
+    /**
+     * Reconcile the boards against the path currently mirrored from the 3D view
+     * (`formationTimeline` + `phaseLayouts`): retime and reshape the board of
+     * every phase that already has one, create a blank board for every phase
+     * that does not, and demote — never delete — boards whose phase is gone.
+     *
+     * Driven by the LED editor's "path와 동기화" button, so it reads the phases
+     * straight out of the state rather than taking them as a payload. Pressing
+     * it is the user's consent to overwrite board timing; nothing here runs on
+     * its own, so hand-edited timing survives until the button is pressed again.
+     *
+     * Idempotent, and a no-op when no path is loaded (an empty timeline would
+     * otherwise demote every board just because the 3D view was closed).
+     */
+    syncPhaseBoards(state) {
+      const regions = state.formationTimeline
+        .filter((r) => r.kind !== 'transit' && r.phaseId)
+        .map((r) => ({
+          phaseId: r.phaseId!,
+          name: r.name,
+          startSec: r.startSec,
+          endSec: r.endSec,
+          layout: state.phaseLayouts[r.phaseId!],
+        }));
+      if (regions.length === 0) {
+        return;
+      }
+
+      // The phases decide how many drones the show has. Grow to fit (never
+      // shrink — that would throw away another board's pixels), same rule
+      // `upsertImageBoard` uses when a formation arrives from the 3D view.
+      const phaseDroneCount = regions.reduce(
+        (max, r) => Math.max(max, r?.layout?.length ?? 0),
+        0
+      );
+      if (phaseDroneCount > state.droneCount) {
+        state.droneCount = phaseDroneCount;
+        // Canvas indices are relative to a board's `cols`, so refitting the
+        // formation invalidates any live selection — every other reducer that
+        // changes droneCount/cols clears it for the same reason.
+        state.selectedPixels = [];
+        for (const board of state.boards) {
+          while (board.drones.length < state.droneCount) {
+            board.drones.push(makeBlackDrone(state.ledsPerDrone));
+          }
+          if (board.rows * board.cols < state.droneCount) {
+            const fit = defaultFormation(state.droneCount);
+            board.rows = fit.rows;
+            board.cols = fit.cols;
+          }
+          if (board.droneLayout) {
+            board.droneLayout = fitLayout(board.droneLayout, state.droneCount);
+          }
+        }
+      }
+
+      const byPhaseId = new Map<string, Board>();
+      for (const board of state.boards) {
+        if (board.sourcePhaseId && !byPhaseId.has(board.sourcePhaseId)) {
+          byPhaseId.set(board.sourcePhaseId, board);
+        }
+      }
+      const seen = new Set<string>();
+
+      for (const region of regions) {
+        if (!region?.phaseId) {
+          continue;
+        }
+        // Mark the phase as still alive *before* deciding whether it earns a
+        // board, so the demote pass below never confuses "exists but holds for
+        // 0s" (a fly-through waypoint) with "was deleted".
+        seen.add(region.phaseId);
+        // A zero-length hold gets no board — forcing one into existence at the
+        // 0.1s floor could overlap the next phase.
+        if (!(region.endSec > region.startSec)) {
+          continue;
+        }
+        const startSec = Math.max(0, region.startSec);
+        const durationSec = Math.max(0.1, region.endSec - region.startSec);
+        const layout = fitLayout(region.layout, state.droneCount);
+        const existing = byPhaseId.get(region.phaseId);
+
+        if (existing) {
+          // Timing and shape both follow the phase — the user asked for this by
+          // pressing the button. Pixels and the board's name are never touched.
+          existing.startSec = startSec;
+          existing.durationSec = durationSec;
+          if (layout) {
+            existing.droneLayout = layout;
+          } else {
+            delete existing.droneLayout;
+          }
+          continue;
+        }
+
+        const fit = defaultFormation(state.droneCount);
+        state.boards.push({
+          id: nanoid(),
+          name: region.name || `phase-${state.boards.length + 1}`,
+          rows: fit.rows,
+          cols: fit.cols,
+          drones: makeBlackDrones(state.droneCount, state.ledsPerDrone),
+          startSec,
+          durationSec,
+          sourcePhaseId: region.phaseId,
+          ...(layout ? { droneLayout: layout } : {}),
+        });
+      }
+
+      for (const board of state.boards) {
+        if (board.sourcePhaseId && !seen.has(board.sourcePhaseId)) {
+          demoteBoard(board);
+        }
+      }
+      // `selectedBoardIds` is deliberately left alone — unlike `addBoard`, this
+      // can touch many boards at once, so there is no single sensible board to
+      // jump the user to, and stealing their current one mid-paint is worse.
     },
 
     /** Paint canvas pixels of the active board with a colour. */
@@ -468,16 +644,22 @@ const { actions, reducer } = createSlice({
       state.threeDSync = action.payload;
     },
 
-    /** Mirror the 3D view's formation hold-windows + LED start delay. */
+    /**
+     * Mirror the 3D view's formation hold-windows, per-phase shapes and LED
+     * start delay. This only makes the path *available* — it never touches the
+     * boards; `syncPhaseBoards` does that, and only when the user asks.
+     */
     setFormationSync(
       state,
       action: PayloadAction<{
         timeline: FormationRegion[];
         delaySec: number | null;
+        layouts?: Record<string, Array<DroneLayoutPoint | null>>;
       }>
     ) {
       state.formationTimeline = action.payload.timeline;
       state.ledStartDelaySec = action.payload.delaySec;
+      state.phaseLayouts = action.payload.layouts ?? {};
     },
 
     setUploadStatus(state, action: PayloadAction<UploadStatus>) {
@@ -539,6 +721,22 @@ const { actions, reducer } = createSlice({
           }
           drones.push(drone);
         }
+        // Phase link: only meaningful together, so a file missing the id also
+        // drops the layout.
+        const rawPhaseId = b['sourcePhaseId'];
+        const sourcePhaseId =
+          typeof rawPhaseId === 'string' && rawPhaseId ? rawPhaseId : undefined;
+        let droneLayout: Array<DroneLayoutPoint | null> | undefined;
+        if (sourcePhaseId && Array.isArray(b['droneLayout'])) {
+          const rawLayout = b['droneLayout'] as unknown[];
+          droneLayout = Array.from({ length: droneCount }, (_u, i) => {
+            const point = rawLayout[i] as Record<string, unknown> | undefined;
+            const x = Number(point?.['x']);
+            const y = Number(point?.['y']);
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+          });
+        }
+
         boards.push({
           id: typeof rawId === 'string' && rawId ? rawId : nanoid(),
           name:
@@ -553,6 +751,8 @@ const { actions, reducer } = createSlice({
             0.1,
             Number(b['durationSec']) || DEFAULT_BOARD_DURATION_SEC
           ),
+          ...(sourcePhaseId ? { sourcePhaseId } : {}),
+          ...(droneLayout ? { droneLayout } : {}),
         });
       }
       state.boards = boards;
@@ -582,6 +782,8 @@ export const {
   pasteBoards,
   renameBoard,
   setBoardTiming,
+  resetBoardTimingToPhase,
+  syncPhaseBoards,
   paintPixels,
   setSelectedPixels,
   clearSelection,

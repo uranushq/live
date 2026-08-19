@@ -166,8 +166,6 @@ export default function PathControlPanel({
   isPlaybackRunning,
   ledSyncEnabled,
   onLedSyncToggle,
-  sphereRender = true,
-  onSphereRenderChange = () => {},
   droneCount,
   onPlayAll,
   onPausePlayback,
@@ -439,12 +437,6 @@ export default function PathControlPanel({
                 checked={ledSyncEnabled}
                 onChange={onLedSyncToggle}
                 title='LED 시뮬레이션과 동기화'
-              />
-              <ToggleRow
-                label='시뮬 구체 표시'
-                checked={sphereRender}
-                onChange={onSphereRenderChange}
-                title='켜면 드론 전체를 InstancedMesh 구체 하나로 그려 대량 드론에서도 프레임을 유지합니다.'
               />
               <ToggleRow
                 label='곡선 보간'
@@ -727,8 +719,6 @@ PathControlPanel.propTypes = {
   isPlaybackRunning: PropTypes.bool.isRequired,
   ledSyncEnabled: PropTypes.bool.isRequired,
   onLedSyncToggle: PropTypes.func.isRequired,
-  sphereRender: PropTypes.bool,
-  onSphereRenderChange: PropTypes.func,
   droneCount: PropTypes.number.isRequired,
   onPlayAll: PropTypes.func.isRequired,
   onPausePlayback: PropTypes.func.isRequired,

@@ -29,6 +29,11 @@ import {
   UR9_TARGET_SIZE_M,
 } from '~/aframe/components/fbx-model';
 import { resolveShowYawForUav } from '~/views/three-d/showYawUtils';
+import {
+  DRONE_BADGE_CANVAS_SIZE,
+  paintDroneBadgeCanvas,
+  shortDroneLabel,
+} from '~/views/three-d/utils/droneIdBadge';
 
 const { THREE } = AFrame;
 const DRONE_BODY_COLOR = 0xff8c00;
@@ -42,43 +47,14 @@ const DRONE_PICK_RADIUS_SCALE = 1.8;
 /** Model origin is at the feet; lift helpers to body mid-height. */
 const DRONE_BODY_CENTER_Z = UR9_TARGET_SIZE_M.z / 2;
 
-/** Navigate-mode ID badge: orange circle + drone number, always facing the camera. */
-const DRONE_BADGE_COLOR = '#ff8c00';
-const DRONE_BADGE_TEXT_COLOR = '#ffffff';
-const DRONE_BADGE_CANVAS_SIZE = 128;
-/** Sprite world size vs preferred drone radius — small, overlaid on the body
+/** Navigate-mode ID badge: orange circle + drone number, always facing the camera.
+ * Sprite world size vs preferred drone radius — small, overlaid on the body
  * itself rather than a large halo, so neighbouring drones' badges don't
  * overlap each other in screen space. */
 const DRONE_BADGE_SCALE = 0.85;
 /** Height above the body centre vs preferred drone radius — small on purpose
  * so the badge sits on/over the drone's own body instead of floating above it. */
 const DRONE_BADGE_HEIGHT_SCALE = 0.15;
-
-/** Short label for the badge: trailing digits of the id, else the raw id. */
-const shortDroneLabel = (id) => {
-  const raw = String(id ?? '');
-  const match = raw.match(/(\d+)\s*$/);
-  return match ? match[1] : raw;
-};
-
-/** Draws an orange circle with a centred label onto a canvas for a sprite texture. */
-const paintBadgeCanvas = (canvas, label) => {
-  const size = canvas.width;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2, size / 2 - 6, 0, Math.PI * 2);
-  ctx.fillStyle = DRONE_BADGE_COLOR;
-  ctx.fill();
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = DRONE_BADGE_TEXT_COLOR;
-  ctx.stroke();
-  ctx.fillStyle = DRONE_BADGE_TEXT_COLOR;
-  ctx.font = `bold ${Math.round(size * 0.42)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, size / 2, size / 2 + size * 0.02);
-};
 
 const getDroneBodyColorFromUAV = (uav) =>
   uav.errors.includes(UAVErrorCode.MOTORS_RUNNING_WHILE_ON_GROUND)
@@ -201,15 +177,43 @@ AFrame.registerSystem('drone-flock', {
     const element = document.createElement('a-entity');
     element.setAttribute('position', '0 0 0');
 
-    const visual = document.createElement('a-entity');
-    visual.setAttribute('mixin', 'drone-marker');
-    visual.classList.add('three-d-clickable');
-    element.appendChild(visual);
-
+    // updateEntityGeometry() creates the body (OBJ model + sphere, both
+    // unconditionally) as well as the selection/pick geometry, so a
+    // freshly-created entity and a later rebuild (radius change) go through
+    // the exact same code path.
     this.updateEntityGeometry(element);
     this._attachIdBadge(element, id);
 
     return element;
+  },
+
+  /** Navigate mode always shows both the full OBJ model and a plain sphere. */
+  _ensureBothVisuals(entity) {
+    if (!entity.visualEl) {
+      const visual = document.createElement('a-entity');
+      visual.setAttribute('mixin', 'drone-marker');
+      visual.classList.add('three-d-clickable');
+      entity.appendChild(visual);
+      entity.visualEl = visual;
+    }
+
+    if (entity.sphereBody) {
+      // Already there, but the preferred radius may have changed.
+      entity.sphereBody.geometry.dispose();
+      entity.sphereBody.geometry = new THREE.SphereGeometry(
+        this._droneRadius,
+        12,
+        9
+      );
+    } else {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(this._droneRadius, 12, 9),
+        new THREE.MeshBasicMaterial({ color: DRONE_BODY_COLOR })
+      );
+      mesh.position.z = DRONE_BODY_CENTER_Z;
+      entity.object3D.add(mesh);
+      entity.sphereBody = mesh;
+    }
   },
 
   /** Orange circle + drone number, sprite-billboarded so it always faces the camera. */
@@ -217,7 +221,7 @@ AFrame.registerSystem('drone-flock', {
     const canvas = document.createElement('canvas');
     canvas.width = DRONE_BADGE_CANVAS_SIZE;
     canvas.height = DRONE_BADGE_CANVAS_SIZE;
-    paintBadgeCanvas(canvas, shortDroneLabel(id));
+    paintDroneBadgeCanvas(canvas, shortDroneLabel(id));
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
@@ -333,7 +337,7 @@ AFrame.registerSystem('drone-flock', {
 
     const bodyColor = getDroneBodyColorFromUAV(uav);
     entity.originalColor = bodyColor;
-    const mesh = entity.getObject3D('mesh');
+    const mesh = entity.sphereBody || entity.getObject3D('mesh');
     if (mesh?.material?.color) {
       mesh.material.color.setHex(bodyColor);
     }
@@ -354,6 +358,8 @@ AFrame.registerSystem('drone-flock', {
   updateEntityGeometry(entity) {
     entity.removeAttribute('geometry');
     entity.removeAttribute('material');
+
+    this._ensureBothVisuals(entity);
 
     // Update selection box
     if (entity.selectionBox) {
@@ -613,7 +619,7 @@ AFrame.registerComponent('drone-flock', {
         entity.setAttribute('data-drone-source', 'uav');
         entity.addEventListener('mouseenter', () => {
           store.dispatch(setFeatureIdForTooltip(uavIdToGlobalId(id)));
-          const mesh = entity.getObject3D('mesh');
+          const mesh = entity.sphereBody || entity.getObject3D('mesh');
           if (mesh) {
             entity.originalColor = entity.originalColor || mesh.material.color.getHex();
             mesh.material.color.setHex(DRONE_HOVER_COLOR);
@@ -622,7 +628,7 @@ AFrame.registerComponent('drone-flock', {
         });
         entity.addEventListener('mouseleave', () => {
           store.dispatch(setFeatureIdForTooltip(null));
-          const mesh = entity.getObject3D('mesh');
+          const mesh = entity.sphereBody || entity.getObject3D('mesh');
           if (mesh && entity.originalColor) {
             mesh.material.color.setHex(entity.originalColor);
           }

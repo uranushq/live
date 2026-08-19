@@ -149,6 +149,43 @@ const patchAdvancedCameraControlsSafety = (aframe) => {
   }
 };
 
+/**
+ * `advanced-camera-controls`의 `_getMovementVector`는 WASD(수평)와 E/C(수직)
+ * 속도를 한 벡터에 담아 카메라 회전(pitch 포함) 하나로 함께 돌린다 — fly
+ * 모드에서는 그 pitch가 그대로 들어가, 위/아래를 보면서 전진(W)하거나
+ * 우측이동(D)하면 고도까지 바뀌어 버린다. WASD는 항상 수평(yaw만)으로,
+ * 고도는 오직 E/C로만 바뀌도록 pitch·roll을 아예 무시하게 덮어쓴다 — E/C는
+ * 원래도 이 회전과 같은 Y축이라 yaw-only 회전에는 영향받지 않는다.
+ *
+ * walk 모드는 원래도 대략 이렇게 동작했지만(pitch를 0/180으로 스냅), fly
+ * 모드와의 유일한 차이가 이 pitch 반영 여부였으므로 이 패치 이후 두 모드의
+ * 이동 방식은 동일해진다.
+ */
+const patchAdvancedCameraControlsHorizontalMovement = (aframe) => {
+  const component = aframe?.components?.['advanced-camera-controls'];
+  const proto = component?.Component?.prototype;
+  if (!proto || proto.__horizontalMovementPatched) return;
+
+  const directionVector = new THREE.Vector3();
+  const rotationEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+  proto._getMovementVector = function _getMovementVectorHorizontalOnly(delta) {
+    const { rotation } = this.el.object3D;
+
+    directionVector.copy(this.velocity);
+    directionVector.multiplyScalar(delta);
+
+    if (rotation) {
+      rotationEuler.set(0, rotation.y, 0);
+      directionVector.applyEuler(rotationEuler);
+    }
+
+    return directionVector;
+  };
+
+  proto.__horizontalMovementPatched = true;
+};
+
 patchThreeSafety(THREE);
 patchThreeSafety(AFrame?.THREE);
 patchRemoveChildSafety();
@@ -176,6 +213,7 @@ import './primitives/drone-flock';
 import './components/drone-move-bridge';
 import './components/click-select-on-cursor';
 patchAdvancedCameraControlsSafety(AFrame);
+patchAdvancedCameraControlsHorizontalMovement(AFrame);
 
 // eslint-disable-next-line unicorn/prefer-export-from
 export default AFrame;

@@ -9,7 +9,10 @@ import { showError, showSuccess } from '~/features/snackbar/actions';
 import { timelineDurationSec } from '~/features/led-editor/utils';
 import { type AppThunk, type RootState } from '~/store/reducers';
 
-import { getJRMonitorTargetIps } from './selectors';
+import {
+  getJRMonitorTargetIps,
+  getRecommendedArmStartInSec,
+} from './selectors';
 import {
   setBoardHealth,
   setBoardHealthBatch,
@@ -232,23 +235,26 @@ export const broadcastArm =
     const state: RootState = getState();
     // FPS and frame count are properties of the authored LED show, so derive
     // them from it rather than asking the user to keep them in sync by hand.
-    const { fps, boards: ledBoards, ledStartDelaySec } = state.ledEditor;
+    const { fps, boards: ledBoards } = state.ledEditor;
     const frameCount = Math.max(1, Math.round(timelineDurationSec(ledBoards) * fps));
 
-    // Resolve start delay: 'auto' follows the show's LED start delay (path),
-    // 'manual' uses the hand-entered value. In auto mode with no path available,
-    // refuse to broadcast rather than silently sending a wrong (default) value.
+    // Resolve start delay: 'auto' follows the show (see
+    // `getRecommendedArmStartInSec` — the path delay for a legacy LED-only
+    // show, ~0 once the boards are synced to the flight phases), 'manual' uses
+    // the hand-entered value. In auto mode with nothing to go on, refuse to
+    // broadcast rather than silently sending a wrong (default) value.
     const { startInMode, startIn: manualStartIn } = state.jrControl.arm;
     let startIn = manualStartIn;
     if (startInMode === 'auto') {
-      if (ledStartDelaySec == null || !Number.isFinite(ledStartDelaySec)) {
+      const recommended = getRecommendedArmStartInSec(state);
+      if (recommended == null) {
         dispatch(
           showError('자동(start-in) 모드인데 path 값이 없습니다. 매뉴얼로 전환해 직접 입력하세요.')
         );
         dispatch(setLastArmSummary('ARM 취소: path 없음 (자동 모드)'));
         return;
       }
-      startIn = Math.round(ledStartDelaySec * 10) / 10;
+      startIn = recommended;
     }
 
     const arm: ArmParams = {

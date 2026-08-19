@@ -15,6 +15,9 @@ import CloudUpload from '@mui/icons-material/CloudUpload';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import ContentPaste from '@mui/icons-material/ContentPaste';
 import Delete from '@mui/icons-material/Delete';
+import LinkIcon from '@mui/icons-material/Link';
+import LinkOff from '@mui/icons-material/LinkOff';
+import Restore from '@mui/icons-material/Restore';
 import ZoomIn from '@mui/icons-material/ZoomIn';
 import ZoomOut from '@mui/icons-material/ZoomOut';
 import Box from '@mui/material/Box';
@@ -23,7 +26,14 @@ import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import React, { useCallback, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import { exportAndUpload } from '~/features/led-editor/actions';
@@ -35,6 +45,7 @@ import {
   getFormationTimeline,
   getPlayheadSec,
   getSelectedBoardIds,
+  getSyncablePhaseCount,
   getTimelineDuration,
   getUploadStatus,
   hasTimelineOverlap,
@@ -45,13 +56,15 @@ import {
   pasteBoards,
   removeSelectedBoards,
   renameBoard,
+  resetBoardTimingToPhase,
   selectBoard,
   setBoardArrangement,
   setBoardTiming,
   setPlayhead,
+  syncPhaseBoards,
   toggleBoardSelection,
 } from '~/features/led-editor/slice';
-import { type Board } from '~/features/led-editor/types';
+import { type Board, type FormationRegion } from '~/features/led-editor/types';
 import { rgbToCss } from '~/features/led-editor/utils';
 import { type AppDispatch } from '~/store/reducers';
 
@@ -67,6 +80,9 @@ const MIN_VIEW_SECONDS = 12;
 const MIN_DURATION = 0.1;
 const DRAG_THRESHOLD_PX = 3;
 const HANDLE_WIDTH = 7;
+/** How far a synced board may sit from its phase before we call it drifted. */
+const TIMING_EPSILON = 0.05;
+const DRIFT_COLOR = '#ffa726';
 
 type DragMode = 'move' | 'left' | 'right';
 
@@ -108,6 +124,7 @@ const Timeline = (): JSX.Element => {
   const clipboard = useSelector(getBoardClipboard);
 
   const trackRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const drag = useRef<DragState | undefined>(undefined);
 
   // Horizontal zoom: pixels per second. A ref mirrors it so the drag/scrub math
@@ -120,6 +137,151 @@ const Timeline = (): JSX.Element => {
       Math.max(MIN_PX_PER_SEC, Math.min(MAX_PX_PER_SEC, p * factor))
     );
   }, []);
+
+  // Wheel zoom, anchored on the cursor: the instant under the mouse stays put.
+  // The scroll correction can only run once the track has been re-laid out at
+  // the new scale, so the anchor is parked here and applied in a layout effect.
+  const pendingAnchor = useRef<
+    { sec: number; offsetPx: number } | undefined
+  >(undefined);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    // A native listener (not the React prop) so `preventDefault` is allowed —
+    // same approach as the 3D view's grid/preview canvases.
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        // Plain wheel zooms, so Shift+wheel keeps a way to pan.
+        el.scrollLeft += event.deltaY;
+        return;
+      }
+      const current = pxPerSecRef.current;
+      const next = Math.max(
+        MIN_PX_PER_SEC,
+        Math.min(
+          MAX_PX_PER_SEC,
+          current * (event.deltaY > 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR)
+        )
+      );
+      if (next === current) {
+        return;
+      }
+      const offsetPx = event.clientX - el.getBoundingClientRect().left;
+      pendingAnchor.current = {
+        sec: (el.scrollLeft + offsetPx) / current,
+        offsetPx,
+      };
+      setPxPerSec(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    const anchor = pendingAnchor.current;
+    const el = scrollRef.current;
+    if (!anchor || !el) {
+      return;
+    }
+    pendingAnchor.current = undefined;
+    el.scrollLeft = Math.max(0, anchor.sec * pxPerSec - anchor.offsetPx);
+  }, [pxPerSec]);
+
+  // Phase regions keyed by phase, so a synced board can find the window it is
+  // supposed to occupy (for its colour, and to spot manual drift).
+  const regionByPhaseId = useMemo(() => {
+    const map = new Map<string, FormationRegion>();
+    for (const region of formationTimeline) {
+      if (region.phaseId) {
+        map.set(region.phaseId, region);
+      }
+    }
+    return map;
+  }, [formationTimeline]);
+
+  const isDrifted = useCallback(
+    (board: Board): boolean => {
+      const region = board.sourcePhaseId
+        ? regionByPhaseId.get(board.sourcePhaseId)
+        : undefined;
+      if (!region) {
+        return false;
+      }
+      return (
+        Math.abs(board.startSec - region.startSec) > TIMING_EPSILON ||
+        Math.abs(board.durationSec - (region.endSec - region.startSec)) >
+          TIMING_EPSILON
+      );
+    },
+    [regionByPhaseId]
+  );
+
+  const syncedCount = boards.filter((b) => b.sourcePhaseId).length;
+  const driftedCount = boards.filter((b) => isDrifted(b)).length;
+  const activeSynced = Boolean(activeBoard?.sourcePhaseId);
+
+  // Pull the 3D view's phases onto the timeline. Only enabled while a path is
+  // actually mirrored in — with none, there is nothing to read.
+  const syncablePhases = useSelector(getSyncablePhaseCount);
+  const [syncMessage, setSyncMessage] = useState<string | undefined>(undefined);
+
+  const handleSyncWithPath = useCallback(() => {
+    if (syncablePhases === 0) {
+      setSyncMessage('path가 없습니다. 3D 뷰에서 formation phase를 먼저 만드세요.');
+      return;
+    }
+    // Predict per phase id, exactly the way the reducer decides, so the report
+    // stays true when phases are added and removed in the same edit (a plain
+    // count subtraction would net out to zero and claim nothing happened).
+    const livePhaseIds = new Set(
+      formationTimeline
+        .filter((r) => r.kind !== 'transit' && r.phaseId)
+        .map((r) => r.phaseId!)
+    );
+    const boardPhaseIds = new Set(
+      boards.filter((b) => b.sourcePhaseId).map((b) => b.sourcePhaseId!)
+    );
+    const created = formationTimeline.filter(
+      (r) =>
+        r.kind !== 'transit' &&
+        r.phaseId &&
+        r.endSec > r.startSec &&
+        !boardPhaseIds.has(r.phaseId)
+    ).length;
+    const unlinked = boards.filter(
+      (b) => b.sourcePhaseId && !livePhaseIds.has(b.sourcePhaseId)
+    ).length;
+
+    dispatch(syncPhaseBoards());
+
+    const parts = [`path 동기화: phase ${syncablePhases}개`];
+    if (created > 0) {
+      parts.push(`보드 ${created}개 생성`);
+    }
+    if (unlinked > 0) {
+      parts.push(`${unlinked}개 연결 해제 (내용은 유지)`);
+    }
+    if (created === 0 && unlinked === 0) {
+      parts.push('타이밍/모양 갱신');
+    }
+    setSyncMessage(parts.join(' · '));
+  }, [dispatch, syncablePhases, boards, formationTimeline]);
+
+  // The sync result is a transient confirmation, not persistent state.
+  useEffect(() => {
+    if (!syncMessage) {
+      return;
+    }
+    const timer = setTimeout(() => setSyncMessage(undefined), 6000);
+    return () => clearTimeout(timer);
+  }, [syncMessage]);
 
   // Inline board-name editing (double-click the label on a block).
   const [editing, setEditing] = useState<
@@ -292,6 +454,21 @@ const Timeline = (): JSX.Element => {
         >
           <ContentPaste fontSize='small' />
         </IconButton>
+        <Button
+          size='small'
+          variant={syncablePhases > 0 && syncedCount === 0 ? 'contained' : 'outlined'}
+          color='success'
+          startIcon={<LinkIcon />}
+          disabled={syncablePhases === 0}
+          title={
+            syncablePhases === 0
+              ? 'path가 없습니다 — 3D 뷰에서 formation phase를 만들면 활성화됩니다'
+              : `3D 뷰의 phase ${syncablePhases}개를 읽어와 보드의 시작/길이와 포메이션 모양을 맞춥니다. LED 색은 건드리지 않습니다.`
+          }
+          onClick={handleSyncWithPath}
+        >
+          path와 동기화
+        </Button>
 
         {activeBoard && (
           <>
@@ -327,26 +504,46 @@ const Timeline = (): JSX.Element => {
                 )
               }
             />
-            <NumberField
-              label='Rows'
-              value={activeBoard.rows}
-              width={80}
-              onCommit={(value) =>
-                dispatch(
-                  setBoardArrangement({ id: activeBoard.id, rows: value })
-                )
-              }
-            />
-            <NumberField
-              label='Cols'
-              value={activeBoard.cols}
-              width={80}
-              onCommit={(value) =>
-                dispatch(
-                  setBoardArrangement({ id: activeBoard.id, cols: value })
-                )
-              }
-            />
+            {/* A phase-synced board is drawn in its phase's real shape, so the
+                rows × cols rectangle no longer describes anything on screen. */}
+            {!activeSynced && (
+              <>
+                <NumberField
+                  label='Rows'
+                  value={activeBoard.rows}
+                  width={80}
+                  onCommit={(value) =>
+                    dispatch(
+                      setBoardArrangement({ id: activeBoard.id, rows: value })
+                    )
+                  }
+                />
+                <NumberField
+                  label='Cols'
+                  value={activeBoard.cols}
+                  width={80}
+                  onCommit={(value) =>
+                    dispatch(
+                      setBoardArrangement({ id: activeBoard.id, cols: value })
+                    )
+                  }
+                />
+              </>
+            )}
+            {activeSynced && isDrifted(activeBoard) && (
+              <Button
+                size='small'
+                variant='outlined'
+                color='warning'
+                startIcon={<Restore />}
+                title='이 보드의 시작/길이를 phase 값으로 되돌립니다'
+                onClick={() =>
+                  dispatch(resetBoardTimingToPhase(activeBoard.id))
+                }
+              >
+                path 타이밍으로 복원
+              </Button>
+            )}
             <IconButton
               size='small'
               color='error'
@@ -379,13 +576,38 @@ const Timeline = (): JSX.Element => {
         <Typography
           variant='caption'
           color='text.secondary'
-          title='Reset zoom'
+          title='휠로 확대/축소, Shift+휠로 좌우 이동 · 클릭하면 배율 초기화'
           onClick={() => setPxPerSec(DEFAULT_PX_PER_SEC)}
           sx={{ cursor: 'pointer', minWidth: 56, textAlign: 'center' }}
         >
           {Math.round(pxPerSec)} px/s
         </Typography>
 
+        {syncMessage && (
+          <Typography variant='caption' color='success.main'>
+            {syncMessage}
+          </Typography>
+        )}
+        {!syncMessage && syncedCount > 0 && (
+          <Typography
+            variant='caption'
+            color='success.main'
+            title='이 보드들은 3D 뷰의 formation phase에서 읽어온 것입니다. path가 바뀌면 다시 동기화하세요.'
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}
+          >
+            <LinkIcon sx={{ fontSize: 14 }} />
+            path 동기화됨 · phase {syncedCount}개
+          </Typography>
+        )}
+        {driftedCount > 0 && (
+          <Typography
+            variant='caption'
+            sx={{ color: DRIFT_COLOR }}
+            title='보드를 직접 옮겨서 phase 타이밍과 어긋났습니다. 보드를 선택하면 복원 버튼이 나옵니다.'
+          >
+            path 타이밍 어긋남 {driftedCount}개
+          </Typography>
+        )}
         {overlap && (
           <Typography variant='caption' color='error'>
             Boards overlap
@@ -412,7 +634,7 @@ const Timeline = (): JSX.Element => {
         </Button>
       </Stack>
 
-      <Box sx={{ overflowX: 'auto' }}>
+      <Box ref={scrollRef} sx={{ overflowX: 'auto' }}>
         <Box sx={{ width: trackWidth, position: 'relative' }}>
           <Box
             ref={trackRef}
@@ -503,6 +725,22 @@ const Timeline = (): JSX.Element => {
               const left = board.startSec * pxPerSec;
               const width = Math.max(8, board.durationSec * pxPerSec);
               const selected = selectedSet.has(board.id);
+              const region = board.sourcePhaseId
+                ? regionByPhaseId.get(board.sourcePhaseId)
+                : undefined;
+              const drifted = isDrifted(board);
+              const borderColor = selected
+                ? '#ffca28'
+                : drifted
+                  ? DRIFT_COLOR
+                  : '#555';
+              const syncTitle = !board.sourcePhaseId
+                ? undefined
+                : region
+                  ? drifted
+                    ? `phase 타이밍과 어긋남 — path: ${region.startSec.toFixed(1)}s / ${(region.endSec - region.startSec).toFixed(1)}s`
+                    : `3D 뷰 phase와 동기화됨 (${region.name})`
+                  : 'phase가 사라져 연결이 끊겼습니다';
               return (
                 <Box
                   key={board.id}
@@ -522,7 +760,7 @@ const Timeline = (): JSX.Element => {
                     width,
                     height: TRACK_HEIGHT - 12,
                     borderRadius: 1,
-                    border: selected ? '2px solid #ffca28' : '1px solid #555',
+                    border: `${selected || drifted ? 2 : 1}px solid ${borderColor}`,
                     background: '#37474f',
                     color: '#fff',
                     cursor: 'grab',
@@ -533,7 +771,8 @@ const Timeline = (): JSX.Element => {
                     px: `${HANDLE_WIDTH}px`,
                   }}
                 >
-                  {/* Left trim handle */}
+                  {/* Left trim handle — doubles as the phase colour stripe on a
+                      synced board, matching its region in the lane above. */}
                   <Box
                     onMouseDown={(event) =>
                       startDrag(
@@ -551,9 +790,21 @@ const Timeline = (): JSX.Element => {
                       width: HANDLE_WIDTH,
                       height: '100%',
                       cursor: 'ew-resize',
-                      background: 'rgba(255,255,255,0.18)',
+                      background: region?.color ?? 'rgba(255,255,255,0.18)',
                     }}
                   />
+                  {board.sourcePhaseId &&
+                    (drifted || !region ? (
+                      <LinkOff
+                        titleAccess={syncTitle}
+                        sx={{ fontSize: 13, flex: '0 0 auto', color: DRIFT_COLOR }}
+                      />
+                    ) : (
+                      <LinkIcon
+                        titleAccess={syncTitle}
+                        sx={{ fontSize: 13, flex: '0 0 auto', opacity: 0.75 }}
+                      />
+                    ))}
                   <Box
                     sx={{
                       width: 12,
