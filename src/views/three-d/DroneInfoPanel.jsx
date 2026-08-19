@@ -46,6 +46,7 @@ import {
   subscribeSmoothingKnobs,
 } from './utils/pathSmoothing';
 import { RAMP_SHAPES, RAMP_SHAPE_LABELS } from './utils/velocityProfile';
+import PlanFailureReport from './PlanFailureReport';
 import VelocityProfileChart from './VelocityProfileChart';
 
 // 첫 번째 항목 ''은 "백엔드 기본값(.skyc 다운로드) 사용". payload에서 output 키를 생략.
@@ -558,6 +559,8 @@ export default function DroneInfoPanel({
   isSendingFormation = false,
   formationSendStartedAt = null,
   formationDeliveryStatus = '',
+  formationFailure = null,
+  onDismissFormationFailure = () => {},
   onAddFormationPhase = () => {},
   onOpenFormationGrid = () => {},
   onEditFormationPhaseGrid = () => {},
@@ -2672,6 +2675,11 @@ export default function DroneInfoPanel({
             {formationDeliveryStatus}
           </div>
         )}
+
+        <PlanFailureReport
+          failure={formationFailure}
+          onDismiss={onDismissFormationFailure}
+        />
       </>
     );
   };
@@ -2975,6 +2983,8 @@ DroneInfoPanel.propTypes = {
   isSendingFormation: PropTypes.bool,
   formationSendStartedAt: PropTypes.number,
   formationDeliveryStatus: PropTypes.string,
+  formationFailure: PropTypes.object,
+  onDismissFormationFailure: PropTypes.func,
   onAddFormationPhase: PropTypes.func,
   onOpenFormationGrid: PropTypes.func,
   onEditFormationPhaseGrid: PropTypes.func,

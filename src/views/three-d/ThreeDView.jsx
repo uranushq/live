@@ -21,6 +21,12 @@ import SelectedTrajectories from './SelectedTrajectories';
 import DroneInfoPanel from './DroneInfoPanel';
 import DroneSelectPanel from './DroneSelectPanel';
 import ImageToDotsModal from './ImageToDotsModal';
+import PlanFailureReport from './PlanFailureReport';
+import {
+  describeNetworkFailure,
+  describePlanFailure,
+  readPlanResponseBody,
+} from './utils/planErrors';
 import PathControlPanel from './PathControlPanel';
 import AddDroneModal from './AddDroneModal';
 import FormationGridModal, { MAX_GRID_COUNT } from './FormationGridModal';
@@ -790,6 +796,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
   const [formationPhases, setFormationPhases] = useState([]);
   const [lastReversedPhaseIds, setLastReversedPhaseIds] = useState([]);
   const [formationSettings, setFormationSettings] = useState(DEFAULT_FORMATION_SETTINGS);
+  /**
+   * 구조화된 계획 실패 진단. 진행/성공 문자열과 상태를 공유하면 셋을 구분할 수
+   * 없어서 따로 둔다 — 이쪽만 빨간 진단 패널로 렌더링된다.
+   */
+  const [formationFailure, setFormationFailure] = useState(null);
   const [isSendingFormation, setIsSendingFormation] = useState(false);
   const [formationSendStartedAt, setFormationSendStartedAt] = useState(null);
   const [formationDeliveryStatus, setFormationDeliveryStatus] = useState('');
@@ -3164,6 +3175,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
       }
     }, 1000);
 
+    setFormationFailure(null);
     try {
       const response = await fetch(usedUrl, {
         method: 'POST',
@@ -3172,8 +3184,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
       });
 
       if (!response.ok) {
-        const msg = await getPathDeliveryErrorMessage(response);
-        throw new Error(msg || `요청 실패: ${response.status}`);
+        // 본문을 문자열로 뭉개지 않고 구조를 그대로 catch로 넘긴다.
+        const body = await readPlanResponseBody(response);
+        const failure = describePlanFailure(response.status, body);
+        const error = new Error(failure.summary || `요청 실패: ${response.status}`);
+        error.planFailure = failure;
+        throw error;
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
@@ -3254,13 +3270,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
         `포메이션 전달 완료 (총 ${totalElapsedText()}): ${payload.initial.length}대 · phase ${payload.phases.length}개${summaryDetail}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}`
       );
     } catch (error) {
-      const baseMsg = error instanceof Error ? error.message : '알 수 없는 오류';
-      const looksLikeOldBackend = /must be arrays of \[x,y,z\]/i.test(baseMsg);
-      const hint = looksLikeOldBackend
-        ? '\n\n[힌트] 백엔드가 phase-based 포맷(initial+phases)을 인식하지 못합니다.\n→ localhost:5001 path-planner 서버를 새 버전으로 업데이트/재시작해주세요.'
-        : '';
+      // 성공/진행 문자열과 달리 실패는 구조를 보존해 진단 패널로 넘긴다.
+      const failure = error?.planFailure ?? describeNetworkFailure(error);
+      setFormationFailure({ ...failure, elapsedText: totalElapsedText() });
       setFormationDeliveryStatus(
-        `포메이션 전달 실패 (총 ${totalElapsedText()}): ${baseMsg}${hint}\nURL: ${usedUrl}\nProxy target: ${PATH_DELIVERY_PROXY_TARGET}\n\n[보낸 페이로드]\n${payloadPreview}`
+        `포메이션 전달 실패 (총 ${totalElapsedText()})`
       );
     } finally {
       clearInterval(progressTimer);
@@ -3482,6 +3496,8 @@ const ThreeDView = React.forwardRef((props, ref) => {
         isSendingFormation={isSendingFormation}
         formationSendStartedAt={formationSendStartedAt}
         formationDeliveryStatus={formationDeliveryStatus}
+        formationFailure={formationFailure}
+        onDismissFormationFailure={() => setFormationFailure(null)}
         onAddFormationPhase={handleAddFormationPhase}
         onOpenFormationGrid={openFormationGridCreate}
         onEditFormationPhaseGrid={openFormationGridEdit}
@@ -3560,6 +3576,36 @@ const ThreeDView = React.forwardRef((props, ref) => {
           )
             .filter((d) => d?.id != null)
             .map((d) => String(d.id))}
+          droneOrigins={(() => {
+            // 이 phase는 마지막에 붙으므로, 드론들이 출발하는 자리는 직전
+            // phase의 좌표(없으면 초기 위치)다. 이 값이 있어야 배정이
+            // 경로 교차를 피할 수 있다.
+            const drones = Array.isArray(effectiveConfig?.drones)
+              ? effectiveConfig.drones
+              : [];
+            const previous = formationPhases[formationPhases.length - 1];
+            return drones
+              .filter((d) => d?.id != null)
+              .map((d) => {
+                const point = previous?.points?.[String(d.id)];
+                if (point && Number.isFinite(Number(point.x))) {
+                  return {
+                    x: Number(point.x),
+                    y: Number(point.y),
+                    z: Number(point.z),
+                  };
+                }
+                const start = Array.isArray(d?.initialPos)
+                  ? d.initialPos
+                  : d?.pos;
+                if (!Array.isArray(start)) return null;
+                return {
+                  x: Number(start[0]) || 0,
+                  y: Number(start[1]) || 0,
+                  z: Number(start[2]) || 0,
+                };
+              });
+          })()}
           minSeparation={
             sanitizeFormationSettings(formationSettings).min_separation
           }

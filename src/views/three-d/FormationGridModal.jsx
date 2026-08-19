@@ -2614,6 +2614,7 @@ export default function FormationGridModal({
           open={imagePlaneOpen}
           mode="place"
           droneIds={drones.map((d) => d.id)}
+          droneOrigins={drones.map((d) => ({ x: d.x, y: d.y, z: d.z }))}
           minSeparation={minSeparation}
           suggestedPlaneX={suggestedPlaneX}
           onPlacePoints={handlePlaceImagePoints}

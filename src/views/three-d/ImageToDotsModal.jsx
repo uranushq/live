@@ -70,6 +70,12 @@ const fieldStyle = {
 export default function ImageToDotsModal({
   open,
   droneIds = [],
+  /**
+   * droneIds와 같은 순서의 {x, y, z} 배열 — 각 드론이 이 phase를 시작할 때
+   * 있는 위치. 주면 제곱 거리 최소 배정으로 짝지어 경로 교차를 없앤다
+   * (경로 계획기 교착의 주원인). 없으면 기존 번호순 배정으로 떨어진다.
+   */
+  droneOrigins = null,
   minSeparation = 1.45,
   suggestedPlaneX = 0,
   /**
@@ -472,6 +478,7 @@ export default function ImageToDotsModal({
     const points = assignPlanePointsToDrones(layout.points, droneIds, orientation, {
       offset: Number(planeOffset) || 0,
       shift: Number(planeShift) || 0,
+      origins: droneOrigins,
     });
     const sourceName = source === 'model' ? modelInfo?.name : imageInfo?.name;
     const baseName = sourceName
@@ -487,6 +494,7 @@ export default function ImageToDotsModal({
   }, [
     layout,
     droneIds,
+    droneOrigins,
     orientation,
     planeOffset,
     planeShift,
@@ -891,6 +899,9 @@ export default function ImageToDotsModal({
 ImageToDotsModal.propTypes = {
   open: PropTypes.bool,
   droneIds: PropTypes.arrayOf(PropTypes.string),
+  droneOrigins: PropTypes.arrayOf(
+    PropTypes.shape({ x: PropTypes.number, y: PropTypes.number, z: PropTypes.number })
+  ),
   minSeparation: PropTypes.number,
   suggestedPlaneX: PropTypes.number,
   mode: PropTypes.oneOf(['phase', 'place']),
