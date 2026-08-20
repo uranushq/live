@@ -12,7 +12,6 @@
 
 import Add from '@mui/icons-material/Add';
 import CloudUpload from '@mui/icons-material/CloudUpload';
-import Download from '@mui/icons-material/Download';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import ContentPaste from '@mui/icons-material/ContentPaste';
 import Delete from '@mui/icons-material/Delete';
@@ -37,10 +36,7 @@ import React, {
 } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
-import {
-  downloadCompiledBinaries,
-  exportAndUpload,
-} from '~/features/led-editor/actions';
+import { exportAndUpload } from '~/features/led-editor/actions';
 import {
   canExport,
   getActiveBoard,
@@ -49,8 +45,6 @@ import {
   getFormationTimeline,
   getPlayheadSec,
   getSelectedBoardIds,
-  getEstimatedTimingBoards,
-  getPhaseSyncDronePlan,
   getSyncablePhaseCount,
   getTimelineDuration,
   getUploadStatus,
@@ -236,8 +230,6 @@ const Timeline = (): JSX.Element => {
   // Pull the 3D view's phases onto the timeline. Only enabled while a path is
   // actually mirrored in — with none, there is nothing to read.
   const syncablePhases = useSelector(getSyncablePhaseCount);
-  const syncDronePlan = useSelector(getPhaseSyncDronePlan);
-  const estimatedTimingBoards = useSelector(getEstimatedTimingBoards);
   const [syncMessage, setSyncMessage] = useState<string | undefined>(undefined);
 
   const handleSyncWithPath = useCallback(() => {
@@ -279,51 +271,8 @@ const Timeline = (): JSX.Element => {
     if (created === 0 && unlinked === 0) {
       parts.push('타이밍/모양 갱신');
     }
-
-    // Shape and drone count both come from the phase layouts. Without them the
-    // sync can only move timing, which looks like nothing happening — so say
-    // which of the two it was, rather than reporting a bare success.
-    if (syncDronePlan.withLayout === 0) {
-      parts.push(
-        '위치 정보 없음 — 타이밍만 반영 (3D 뷰의 드론 구성을 확인하세요)'
-      );
-    } else {
-      if (syncDronePlan.withLayout < syncDronePlan.regions) {
-        parts.push(
-          `위치 정보 ${syncDronePlan.withLayout}/${syncDronePlan.regions} phase`
-        );
-      }
-
-      parts.push(
-        syncDronePlan.droneCount === syncDronePlan.currentDroneCount
-          ? `드론 ${syncDronePlan.droneCount}대 (변동 없음)`
-          : `드론 ${syncDronePlan.currentDroneCount} → ${syncDronePlan.droneCount}대`
-      );
-      // Grouping needs 3D coordinates, and a layout can arrive with only the
-      // flat projection. Report it here so the failure is visible at the
-      // moment of syncing rather than after opening a board.
-      // Spell out which of the two failures it is. "no 3D coordinates" alone
-      // sent us chasing a re-send that could never have helped, because a
-      // drone-id mismatch produces empty slots, not old-format ones.
-      if (estimatedTimingBoards.length > 0) {
-        parts.push(`추정 시각 ${estimatedTimingBoards.length}개 (업로드 불가)`);
-      }
-
-      parts.push(
-        syncDronePlan.withWorld > 0
-          ? `3D 좌표 ${syncDronePlan.withWorld}대`
-          : `3D 좌표 0대 (평면만 ${syncDronePlan.flatOnly}대 · 좌표 없음 ${syncDronePlan.missing}대) — 그룹 표시 불가`
-      );
-    }
     setSyncMessage(parts.join(' · '));
-  }, [
-    dispatch,
-    syncablePhases,
-    boards,
-    formationTimeline,
-    syncDronePlan,
-    estimatedTimingBoards,
-  ]);
+  }, [dispatch, syncablePhases, boards, formationTimeline]);
 
   // The sync result is a transient confirmation, not persistent state.
   useEffect(() => {
@@ -450,23 +399,6 @@ const Timeline = (): JSX.Element => {
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      // Name / start / duration are text fields inside this same element, and
-      // Delete means "erase a character" while one has focus.
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.isContentEditable === true;
-
-      if (!typing && (event.key === 'Delete' || event.key === 'Backspace')) {
-        if (selectedIds.length > 0) {
-          dispatch(removeSelectedBoards());
-          event.preventDefault();
-        }
-
-        return;
-      }
-
       if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
@@ -479,44 +411,8 @@ const Timeline = (): JSX.Element => {
         event.preventDefault();
       }
     },
-    [dispatch, selectedIds]
+    [dispatch]
   );
-
-  // Scroll the active board into view when the *selection* moves — the 3D view
-  // can drive it now, and a board selected off-screen would look like nothing
-  // happened.
-  //
-  // Strictly once per selection change. Reacting to the board's geometry
-  // instead made dragging one along the timeline fight the user: every frame
-  // of the drag re-ran this, and the moment the board's edge crossed the
-  // viewport the scroll snapped away under the cursor. Dragging a board past
-  // the edge is a deliberate act, not something to correct.
-  const activeBoardId = selectedIds.at(-1);
-  const scrolledForBoardRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (scrolledForBoardRef.current === activeBoardId) {
-      return;
-    }
-
-    scrolledForBoardRef.current = activeBoardId;
-    const el = scrollRef.current;
-    if (!el || !activeBoardId || drag.current) {
-      return;
-    }
-
-    const board = boards.find((candidate) => candidate.id === activeBoardId);
-    if (!board) {
-      return;
-    }
-
-    const left = board.startSec * pxPerSec;
-    const right = (board.startSec + board.durationSec) * pxPerSec;
-    if (left >= el.scrollLeft && right <= el.scrollLeft + el.clientWidth) {
-      return;
-    }
-
-    el.scrollLeft = Math.max(0, left - el.clientWidth / 3);
-  }, [activeBoardId, boards, pxPerSec]);
 
   const viewSeconds = Math.max(MIN_VIEW_SECONDS, Math.ceil(duration) + 4);
   const trackWidth = viewSeconds * pxPerSec;
@@ -567,7 +463,7 @@ const Timeline = (): JSX.Element => {
           title={
             syncablePhases === 0
               ? 'path가 없습니다 — 3D 뷰에서 formation phase를 만들면 활성화됩니다'
-              : `3D 뷰의 phase ${syncablePhases}개를 읽어와 보드의 시작/길이·포메이션 모양·드론 수를 path 에 맞춥니다. LED 색은 건드리지 않습니다.`
+              : `3D 뷰의 phase ${syncablePhases}개를 읽어와 보드의 시작/길이와 포메이션 모양을 맞춥니다. LED 색은 건드리지 않습니다.`
           }
           onClick={handleSyncWithPath}
         >
@@ -703,21 +599,6 @@ const Timeline = (): JSX.Element => {
             path 동기화됨 · phase {syncedCount}개
           </Typography>
         )}
-        {estimatedTimingBoards.length > 0 && (
-          <Typography
-            variant='caption'
-            color='error.main'
-            title={
-              '이 보드들의 시작·길이는 서버가 계산한 실제 경로가 아니라 클라이언트 추정치입니다 ' +
-              '(직선거리 ÷ 순항속도). 실기에서 LED가 어긋납니다. ' +
-              '3D 뷰에서 path 를 다시 전송한 뒤 "path와 동기화"를 누르면 실측 시각으로 바뀝니다. ' +
-              '이 상태에서는 업로드가 막힙니다.'
-            }
-            sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}
-          >
-            ⚠ 추정 시각 {estimatedTimingBoards.length}개 — 업로드 불가
-          </Typography>
-        )}
         {driftedCount > 0 && (
           <Typography
             variant='caption'
@@ -742,15 +623,6 @@ const Timeline = (): JSX.Element => {
             {upload.message}
           </Typography>
         )}
-        <Button
-          size='small'
-          startIcon={<Download />}
-          disabled={!exportable}
-          title='컴파일해서 .bin 파일들을 zip 으로 내려받습니다. 다운로드 서버에는 올리지 않습니다.'
-          onClick={() => dispatch(downloadCompiledBinaries())}
-        >
-          .bin 저장
-        </Button>
         <Button
           variant='contained'
           size='small'

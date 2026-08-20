@@ -66,6 +66,16 @@ import {
 
 import { setCommandsAreBroadcast } from '~/features/mission/slice';
 
+import { armForShowStart } from '~/features/jr-control/actions';
+
+import {
+
+  getJRMonitorTargets,
+
+  shouldArmLedBoardsOnShowStart,
+
+} from '~/features/jr-control/selectors';
+
 import { scheduleShowStartWithDelay } from '~/features/show/actions';
 
 import { isShowAuthorizedToStartLocally } from '~/features/show/selectors';
@@ -790,9 +800,13 @@ BottomBarCommandButton.propTypes = {
 
 const LargeControlButtonGroup = ({
 
+  armLedBoardsForShowStart,
+
   broadcast,
 
   isShowAuthorized,
+
+  ledBoardCount,
 
   onChangeBroadcastMode,
 
@@ -877,9 +891,19 @@ const LargeControlButtonGroup = ({
   }, []);
 
   const handleShowStartDelayConfirm = useCallback((delaySeconds) => {
+    // Scheduling only *queues* the SHOW-SETCFG push, so the drone show is not
+    // yet committed when this returns — `armForShowStart` waits for that
+    // acknowledgement itself before it broadcasts anything, and reads the start
+    // time back out of the store so both halves land on one instant. Arming is
+    // still a separate, unawaited dispatch so the drone show never waits on the
+    // LED boards nor fails with them.
     scheduleShowStartWithDelay(delaySeconds);
+    if (ledBoardCount > 0) {
+      void armLedBoardsForShowStart();
+    }
+
     setShowStartDelayOpen(false);
-  }, [scheduleShowStartWithDelay]);
+  }, [armLedBoardsForShowStart, ledBoardCount, scheduleShowStartWithDelay]);
 
   const handleConfirmClose = useCallback(() => {
     setConfirmOpen(false);
@@ -968,6 +992,7 @@ const LargeControlButtonGroup = ({
         />
 
         <ShowStartDelayDialog
+          ledBoardCount={ledBoardCount}
           open={showStartDelayOpen}
           onCancel={handleShowStartDelayClose}
           onConfirm={handleShowStartDelayConfirm}
@@ -1118,6 +1143,7 @@ const LargeControlButtonGroup = ({
       />
 
       <ShowStartDelayDialog
+        ledBoardCount={ledBoardCount}
         open={showStartDelayOpen}
         onCancel={handleShowStartDelayClose}
         onConfirm={handleShowStartDelayConfirm}
@@ -1165,6 +1191,10 @@ LargeControlButtonGroup.propTypes = {
 
   variant: PropTypes.oneOf(['deck', 'bottomBar']),
 
+  armLedBoardsForShowStart: PropTypes.func,
+
+  ledBoardCount: PropTypes.number,
+
 };
 
 
@@ -1177,6 +1207,12 @@ export default connect(
     broadcast: areFlightCommandsBroadcast(state),
     channel: getPreferredCommunicationChannelIndex(state),
     isShowAuthorized: isShowAuthorizedToStartLocally(state),
+    // Zero doubles as "do not arm": it hides the dialog's notice and skips
+    // the ARM dispatch, so the two can never disagree about whether this start
+    // reaches the LED boards.
+    ledBoardCount: shouldArmLedBoardsOnShowStart(state)
+      ? getJRMonitorTargets(state).length
+      : 0,
     reverseMissionMapping: getReverseMissionMapping(state),
     selectedUAVIds: getSelectedUAVIds(state),
     showStageFlightControlStatus: getShowStageFlightControlStatus(state),
@@ -1192,6 +1228,7 @@ export default connect(
         }
       },
 
+      armLedBoardsForShowStart: () => dispatch(armForShowStart()),
       scheduleShowStartWithDelay: (delaySeconds) => {
         dispatch(scheduleShowStartWithDelay(delaySeconds));
       },

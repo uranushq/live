@@ -50,7 +50,9 @@ const initialState: LedEditorState = {
   threeDSync: true,
   formationTimeline: [],
   phaseLayouts: {},
+  phaseGroups: {},
   ledStartDelaySec: null,
+  droneMapping: {},
   upload: { state: 'idle' },
 };
 
@@ -121,6 +123,49 @@ const fitLayout = (
 const demoteBoard = (board: Board): void => {
   delete board.sourcePhaseId;
   delete board.droneLayout;
+  delete board.droneGroups;
+  delete board.timingEstimated;
+};
+
+/**
+ * Clamp path-declared groups to the show's drone list.
+ *
+ * A drone may appear in at most one group: the editor draws each group as its
+ * own panel, so a drone in two of them would be drawn twice and the two copies
+ * would fight over the same pixels. First claim wins, matching how the 3D view
+ * treats overlapping clusters.
+ */
+const fitGroups = (
+  groups: number[][] | undefined,
+  count: number
+): number[][] | undefined => {
+  if (!groups?.length) {
+    return undefined;
+  }
+
+  const claimed = new Set<number>();
+  const fitted: number[][] = [];
+  for (const group of groups) {
+    if (!Array.isArray(group)) {
+      continue;
+    }
+
+    const members = group.filter(
+      (index) =>
+        Number.isInteger(index) &&
+        index >= 0 &&
+        index < count &&
+        !claimed.has(index)
+    );
+    if (members.length === 0) {
+      continue;
+    }
+
+    members.forEach((index) => claimed.add(index));
+    fitted.push(members);
+  }
+
+  return fitted.length > 0 ? fitted : undefined;
 };
 
 const { actions, reducer } = createSlice({
@@ -311,6 +356,34 @@ const { actions, reducer } = createSlice({
       state.selectedPixels = [];
     },
 
+    /**
+     * Make the board synced to `phaseId` the active one.
+     *
+     * Lets the 3D view drive the editor's selection so the two panels can sit
+     * side by side and stay on the same formation. A no-op when no board is
+     * synced to that phase — silently clearing the selection would yank the
+     * canvas out from under someone painting.
+     */
+    selectBoardByPhaseId(state, action: PayloadAction<string | undefined>) {
+      const phaseId = action.payload;
+      if (!phaseId) {
+        return;
+      }
+
+      const board = state.boards.find((b) => b.sourcePhaseId === phaseId);
+      if (!board || state.selectedBoardIds.at(-1) === board.id) {
+        return;
+      }
+
+      state.selectedBoardIds = [board.id];
+      state.selectedPixels = [];
+      // Move the clock to the phase as well, not just the selection. Picking a
+      // phase in the 3D view means "show me this moment", and with 3D sync on
+      // the aircraft follow this playhead — so both panels land on the same
+      // formation instead of the editor showing one and the scene another.
+      state.playheadSec = board.startSec;
+    },
+
     toggleBoardSelection(state, action: PayloadAction<string>) {
       const id = action.payload;
       if (state.selectedBoardIds.includes(id)) {
@@ -435,20 +508,25 @@ const { actions, reducer } = createSlice({
           name: r.name,
           startSec: r.startSec,
           endSec: r.endSec,
+          estimated: Boolean(r.estimated),
           layout: state.phaseLayouts[r.phaseId!],
+          groups: state.phaseGroups?.[r.phaseId!],
         }));
       if (regions.length === 0) {
         return;
       }
 
-      // The phases decide how many drones the show has. Grow to fit (never
-      // shrink — that would throw away another board's pixels), same rule
-      // `upsertImageBoard` uses when a formation arrives from the 3D view.
+      // The path decides how many drones the show has, in both directions.
+      // Growing alone was not enough: a 100-drone editor synced against a
+      // 21-drone path kept 79 phantom drones that no aircraft would ever play.
+      // Shrinking does drop those drones' pixels, which is why it happens only
+      // here — pressing "path와 동기화" is the operator saying the path, not
+      // the editor, is the source of truth.
       const phaseDroneCount = regions.reduce(
         (max, r) => Math.max(max, r?.layout?.length ?? 0),
         0
       );
-      if (phaseDroneCount > state.droneCount) {
+      if (phaseDroneCount > 0 && phaseDroneCount !== state.droneCount) {
         state.droneCount = phaseDroneCount;
         // Canvas indices are relative to a board's `cols`, so refitting the
         // formation invalidates any live selection — every other reducer that
@@ -458,11 +536,14 @@ const { actions, reducer } = createSlice({
           while (board.drones.length < state.droneCount) {
             board.drones.push(makeBlackDrone(state.ledsPerDrone));
           }
+
+          board.drones.splice(state.droneCount);
           if (board.rows * board.cols < state.droneCount) {
             const fit = defaultFormation(state.droneCount);
             board.rows = fit.rows;
             board.cols = fit.cols;
           }
+
           if (board.droneLayout) {
             board.droneLayout = fitLayout(board.droneLayout, state.droneCount);
           }
@@ -493,18 +574,38 @@ const { actions, reducer } = createSlice({
         const startSec = Math.max(0, region.startSec);
         const durationSec = Math.max(0.1, region.endSec - region.startSec);
         const layout = fitLayout(region.layout, state.droneCount);
+        const groups = fitGroups(region.groups, state.droneCount);
         const existing = byPhaseId.get(region.phaseId);
 
         if (existing) {
           // Timing and shape both follow the phase — the user asked for this by
           // pressing the button. Pixels and the board's name are never touched.
-          existing.startSec = startSec;
-          existing.durationSec = durationSec;
+          //
+          // The one exception: a board that already holds the planner's answer
+          // is never rewritten with the client estimate. The planned timing is
+          // discarded the moment any phase is edited, so without this a
+          // re-sync after an edit silently replaced good times with guesses,
+          // and the boards then played at the wrong instant on the aircraft
+          // with nothing anywhere saying why.
+          const wouldDowngrade =
+            region.estimated && existing.timingEstimated === false;
+          if (!wouldDowngrade) {
+            existing.startSec = startSec;
+            existing.durationSec = durationSec;
+            existing.timingEstimated = Boolean(region.estimated);
+          }
           if (layout) {
             existing.droneLayout = layout;
           } else {
             delete existing.droneLayout;
           }
+
+          if (groups) {
+            existing.droneGroups = groups;
+          } else {
+            delete existing.droneGroups;
+          }
+
           continue;
         }
 
@@ -518,7 +619,9 @@ const { actions, reducer } = createSlice({
           startSec,
           durationSec,
           sourcePhaseId: region.phaseId,
+          timingEstimated: Boolean(region.estimated),
           ...(layout ? { droneLayout: layout } : {}),
+          ...(groups ? { droneGroups: groups } : {}),
         });
       }
 
@@ -655,11 +758,13 @@ const { actions, reducer } = createSlice({
         timeline: FormationRegion[];
         delaySec: number | null;
         layouts?: Record<string, Array<DroneLayoutPoint | null>>;
+        groups?: Record<string, number[][]>;
       }>
     ) {
       state.formationTimeline = action.payload.timeline;
       state.ledStartDelaySec = action.payload.delaySec;
       state.phaseLayouts = action.payload.layouts ?? {};
+      state.phaseGroups = action.payload.groups ?? {};
     },
 
     setUploadStatus(state, action: PayloadAction<UploadStatus>) {
@@ -672,6 +777,47 @@ const { actions, reducer } = createSlice({
      * hand-edited or partially corrupted file cannot produce an invalid
      * editor state; missing pixels are filled with black.
      */
+    /**
+     * Point one LED show drone at a different airframe, or clear the override.
+     *
+     * `targetDroneNumber` is 1-based, matching what the operator reads off the
+     * aircraft; passing the row's own number (or `undefined`) removes the entry
+     * so the row falls back to the identity mapping rather than storing a
+     * redundant one.
+     */
+    setDroneMappingEntry(
+      state,
+      action: PayloadAction<{
+        droneIndex: number;
+        targetDroneNumber: number | undefined;
+      }>
+    ) {
+      const { droneIndex, targetDroneNumber } = action.payload;
+      if (
+        !Number.isInteger(droneIndex) ||
+        droneIndex < 0 ||
+        droneIndex >= state.droneCount
+      ) {
+        return;
+      }
+
+      const target = Math.round(Number(targetDroneNumber));
+      if (!Number.isFinite(target) || target < 1 || target === droneIndex + 1) {
+        // Drop the row rather than storing the identity mapping, so the saved
+        // project only ever records genuine substitutions.
+        state.droneMapping = Object.fromEntries(
+          Object.entries(state.droneMapping).filter(
+            ([key]) => Number(key) !== droneIndex
+          )
+        );
+        return;
+      }
+
+      state.droneMapping[droneIndex] = target;
+    },
+    clearDroneMapping(state) {
+      state.droneMapping = {};
+    },
     importShow(
       state,
       action: PayloadAction<{
@@ -679,6 +825,7 @@ const { actions, reducer } = createSlice({
         droneCount?: unknown;
         fps?: unknown;
         boards?: unknown;
+        droneMapping?: unknown;
       }>
     ) {
       const payload = action.payload ?? {};
@@ -733,8 +880,33 @@ const { actions, reducer } = createSlice({
             const point = rawLayout[i] as Record<string, unknown> | undefined;
             const x = Number(point?.['x']);
             const y = Number(point?.['y']);
-            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) {
+              return null;
+            }
+
+            // World coordinates are optional: files written before grouping
+            // existed have none, and a board without them just draws as one
+            // flat panel instead of per-plane groups.
+            const rawWorld = point?.['world'] as
+              | Record<string, unknown>
+              | undefined;
+            const wx = Number(rawWorld?.['x']);
+            const wy = Number(rawWorld?.['y']);
+            const wz = Number(rawWorld?.['z']);
+            return Number.isFinite(wx) && Number.isFinite(wy) && Number.isFinite(wz)
+              ? { x, y, world: { x: wx, y: wy, z: wz } }
+              : { x, y };
           });
+        }
+
+        let droneGroups: number[][] | undefined;
+        if (sourcePhaseId && Array.isArray(b['droneGroups'])) {
+          droneGroups = fitGroups(
+            (b['droneGroups'] as unknown[])
+              .filter((group): group is unknown[] => Array.isArray(group))
+              .map((group) => group.map((index) => Math.round(Number(index)))),
+            droneCount
+          );
         }
 
         boards.push({
@@ -752,10 +924,40 @@ const { actions, reducer } = createSlice({
             Number(b['durationSec']) || DEFAULT_BOARD_DURATION_SEC
           ),
           ...(sourcePhaseId ? { sourcePhaseId } : {}),
+          ...(sourcePhaseId
+            ? { timingEstimated: b['timingEstimated'] !== false }
+            : {}),
           ...(droneLayout ? { droneLayout } : {}),
+          ...(droneGroups ? { droneGroups } : {}),
         });
       }
       state.boards = boards;
+
+      // Airframe substitutions are per-show setup, so they travel in the
+      // project file. Entries outside the show's drone range, or ones that just
+      // restate the identity mapping, are dropped rather than kept as noise.
+      const droneMapping: Record<number, number> = {};
+      const rawMapping = payload.droneMapping;
+      if (rawMapping && typeof rawMapping === 'object') {
+        for (const [key, value] of Object.entries(
+          rawMapping as Record<string, unknown>
+        )) {
+          const index = Number(key);
+          const target = Math.round(Number(value));
+          if (
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < droneCount &&
+            Number.isFinite(target) &&
+            target >= 1 &&
+            target !== index + 1
+          ) {
+            droneMapping[index] = target;
+          }
+        }
+      }
+
+      state.droneMapping = droneMapping;
       state.selectedBoardIds = [];
       state.selectedPixels = [];
       state.playheadSec = 0;
@@ -776,6 +978,7 @@ export const {
   removeBoard,
   removeSelectedBoards,
   selectBoard,
+  selectBoardByPhaseId,
   toggleBoardSelection,
   setSelectedBoards,
   copyBoards,
@@ -794,6 +997,8 @@ export const {
   setThreeDSync,
   setFormationSync,
   setUploadStatus,
+  setDroneMappingEntry,
+  clearDroneMapping,
   importShow,
 } = actions;
 

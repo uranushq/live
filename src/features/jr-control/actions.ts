@@ -5,11 +5,21 @@
 
 import ky, { HTTPError } from 'ky';
 
-import { showError, showSuccess } from '~/features/snackbar/actions';
-import { timelineDurationSec } from '~/features/led-editor/utils';
+import {
+  showError,
+  showNotification,
+  showSuccess,
+} from '~/features/snackbar/actions';
+import { MessageSemantics } from '~/features/snackbar/types';
+import {
+  areStartConditionsSyncedWithServer,
+  didStartConditionSyncFail,
+  getShowStartTime,
+} from '~/features/show/selectors';
 import { type AppThunk, type RootState } from '~/store/reducers';
 
 import {
+  getJRArmReadiness,
   getJRMonitorTargetIps,
   getRecommendedArmStartInSec,
 } from './selectors';
@@ -18,7 +28,6 @@ import {
   setBoardHealthBatch,
   setHealthCheckEnabled,
   setLastArmSummary,
-  type ArmParams,
   type JRHealth,
 } from './slice';
 
@@ -229,50 +238,102 @@ export const setAllBoardsLed =
     );
   };
 
-/** Broadcast an ARM sync packet to all boards over UDP. */
-export const broadcastArm =
-  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-    const state: RootState = getState();
-    // FPS and frame count are properties of the authored LED show, so derive
-    // them from it rather than asking the user to keep them in sync by hand.
-    const { fps, boards: ledBoards } = state.ledEditor;
-    const frameCount = Math.max(1, Math.round(timelineDurationSec(ledBoards) * fps));
+/**
+ * Body of `POST /api/v1/jr/arm`, narrowed to what actually reaches the boards.
+ *
+ * `fpsNum`/`fpsDen`/`frameCount` are deliberately absent: the server replaces
+ * them with what the boards report in their own health pushes
+ * (`derive_show_params`), so sending them only made it look as though the
+ * controller had chosen the show length. Spreading the whole `ArmParams` also
+ * leaked `startInMode`, which is a panel concept the server knows nothing
+ * about.
+ *
+ * Timing rides on exactly one of two fields:
+ *
+ * - `startIn` — a delay the server resolves against *its own* clock.
+ * - `startAtUnixSec` — an absolute instant; see {@link armForShowStart}.
+ */
+type ArmRequest = {
+  showId: number;
+  fileId: number;
+  repeat: number;
+  startIn?: number;
+  startAtUnixSec?: number;
+};
 
-    // Resolve start delay: 'auto' follows the show (see
-    // `getRecommendedArmStartInSec` — the path delay for a legacy LED-only
-    // show, ~0 once the boards are synced to the flight phases), 'manual' uses
-    // the hand-entered value. In auto mode with nothing to go on, refuse to
-    // broadcast rather than silently sending a wrong (default) value.
-    const { startInMode, startIn: manualStartIn } = state.jrControl.arm;
-    let startIn = manualStartIn;
-    if (startInMode === 'auto') {
-      const recommended = getRecommendedArmStartInSec(state);
-      if (recommended == null) {
-        dispatch(
-          showError('자동(start-in) 모드인데 path 값이 없습니다. 매뉴얼로 전환해 직접 입력하세요.')
-        );
-        dispatch(setLastArmSummary('ARM 취소: path 없음 (자동 모드)'));
-        return;
+/**
+ * Broadcast an ARM sync packet to all boards over UDP.
+ *
+ * Pass `startAtUnixSec` to pin playback to an absolute instant; omit it to let
+ * the panel's auto/manual start-in setting decide, which is what the standalone
+ * ARM button does.
+ */
+export const broadcastArm =
+  ({ startAtUnixSec }: { startAtUnixSec?: number } = {}): AppThunk<
+    Promise<void>
+  > =>
+  async (dispatch, getState) => {
+    const state: RootState = getState();
+    const { showId, fileId, repeat } = state.jrControl.arm;
+    const request: ArmRequest = { showId, fileId, repeat };
+
+    if (startAtUnixSec === undefined) {
+      // Resolve start delay: 'auto' follows the show (see
+      // `getRecommendedArmStartInSec` — the path delay for a legacy LED-only
+      // show, ~0 once the boards are synced to the flight phases), 'manual' uses
+      // the hand-entered value. In auto mode with nothing to go on, refuse to
+      // broadcast rather than silently sending a wrong (default) value.
+      const { startInMode, startIn: manualStartIn } = state.jrControl.arm;
+      let startIn = manualStartIn;
+      if (startInMode === 'auto') {
+        const recommended = getRecommendedArmStartInSec(state);
+        if (recommended == null) {
+          dispatch(
+            showError('자동(start-in) 모드인데 path 값이 없습니다. 매뉴얼로 전환해 직접 입력하세요.')
+          );
+          dispatch(setLastArmSummary('ARM 취소: path 없음 (자동 모드)'));
+          return;
+        }
+
+        startIn = recommended;
       }
-      startIn = recommended;
+
+      request.startIn = startIn;
+    } else {
+      request.startAtUnixSec = startAtUnixSec;
     }
 
-    const arm: ArmParams = {
-      ...state.jrControl.arm,
-      startIn,
-      fpsNum: fps,
-      fpsDen: 1,
-      frameCount,
-    };
     try {
       const summary = await ky
-        .post(`${JR_BASE}/arm`, { json: arm, timeout: 15_000 })
-        .json<{ sent: number; startTimeUs: number }>();
+        .post(`${JR_BASE}/arm`, { json: request, timeout: 15_000 })
+        .json<{
+          sent: number;
+          startTimeUs: number;
+          startTimeSource?: 'absolute' | 'relative';
+        }>();
       dispatch(
         setLastArmSummary(
           `ARM sent ×${summary.sent}, start_time=${summary.startTimeUs} µs`
         )
       );
+      // A server predating `startAtUnixSec` accepts the request anyway and
+      // quietly resolves it against its own clock, which slides the LEDs off
+      // the aircraft by however far that clock has drifted. The two repos
+      // deploy separately, so say it out loud instead of reporting a clean
+      // success.
+      if (
+        startAtUnixSec !== undefined &&
+        summary.startTimeSource !== 'absolute'
+      ) {
+        dispatch(
+          showNotification({
+            message:
+              '서버가 절대 시각 ARM 을 지원하지 않아 상대 지연으로 처리됐습니다 — ' +
+              'LED 가 드론과 최대 0.5초 어긋날 수 있습니다. 서버를 업데이트하세요.',
+            semantics: MessageSemantics.WARNING,
+          })
+        );
+      }
       // ARM 이후 보드는 PLAYING 으로 넘어가 프레임 타이밍이 중요해진다 —
       // 폴링이 HTTP 서버를 계속 두드리지 않도록 헬스체크를 끈다. 다시 보려면
       // JR control 패널의 토글로 켠다.
@@ -288,4 +349,106 @@ export const broadcastArm =
       dispatch(setLastArmSummary(`ARM failed: ${message}`));
       dispatch(showError(`ARM broadcast failed: ${message}`));
     }
+  };
+
+/**
+ * Arm the LED boards for the show start that has just been scheduled.
+ *
+ * Handing the boards the show's own absolute start instant — rather than a
+ * delay — is what puts LED frame 0 on the same second the GPS-synced drones
+ * reach their first formation. A board labels its PPS edges with the absolute
+ * time the controller sends and snaps that label to the nearest whole second
+ * (`show_clock.c`), so once locked its clock *is* true GPS UTC and whatever
+ * error the server's clock carried has been rounded away. A relative
+ * `startIn` would instead fold that error into the absolute start time and
+ * slide the LEDs off the drones by up to the half second the snap tolerates.
+ *
+ * Reads the scheduled start time out of the store rather than recomputing one,
+ * so the LEDs and the drones can never be told two different instants — which
+ * means this must run *after* the start time has been dispatched.
+ */
+/** How long to wait for the drone show's start time to reach the server. */
+const SHOW_SYNC_TIMEOUT_MS = 8000;
+const SHOW_SYNC_POLL_MS = 50;
+
+/**
+ * Resolve once the server has acknowledged the show's start conditions, or
+ * `false` if that push failed or never landed.
+ *
+ * Polls rather than subscribing: this runs once per show start, and a store
+ * subscription would have to be torn down on every exit path of the caller.
+ */
+const waitForStartConditionsSynced = async (
+  getState: () => RootState
+): Promise<boolean> => {
+  const deadline = Date.now() + SHOW_SYNC_TIMEOUT_MS;
+  for (;;) {
+    const state = getState();
+    if (areStartConditionsSyncedWithServer(state)) {
+      return true;
+    }
+
+    if (didStartConditionSyncFail(state) || Date.now() >= deadline) {
+      return false;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, SHOW_SYNC_POLL_MS);
+    });
+  }
+};
+
+export const armForShowStart =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    // Wait for the drone show to be committed before arming, because arming is
+    // the half that cannot be taken back. `scheduleShowStartWithDelay` ends by
+    // dispatching `synchronizeShowSettings('toServer')`, which merely *queues*
+    // a saga that then performs the SHOW-SETCFG round trip — so broadcasting
+    // straight away races that call, and a UDP broadcast normally wins.
+    //
+    // Losing that race is unrecoverable: the firmware ignores every command
+    // except ARM (`on_sync_pkt`: "ABORT 는 받지 않음") and latches only the
+    // first ARM of a cycle (`s_arm_consumed`), so once the boards hold a start
+    // instant it can be neither cancelled nor moved. Arming ahead of the drones
+    // would risk a full LED show playing over a fleet that never took off.
+    if (!(await waitForStartConditionsSynced(getState))) {
+      dispatch(setLastArmSummary('ARM 취소: 쇼 시작 시각이 서버에 반영되지 않음'));
+      dispatch(
+        showError(
+          '쇼 시작 시각이 서버에 반영되지 않아 LED 보드를 ARM 하지 않았습니다. 드론 쇼 예약 상태를 먼저 확인하세요.'
+        )
+      );
+      return;
+    }
+
+    // Read the schedule only now, so the boards are armed to whatever the
+    // server actually holds rather than to a value that may have moved while
+    // the push was in flight.
+    const state: RootState = getState();
+    const startAtUnixSec = getShowStartTime(state);
+    if (startAtUnixSec == null) {
+      dispatch(setLastArmSummary('ARM 건너뜀: 쇼 시작 시각 없음'));
+      dispatch(showError('쇼 시작 시각이 없어 LED 보드를 ARM 하지 못했습니다.'));
+      return;
+    }
+
+    // A board only latches an ARM while it waits in ARM_WAIT; one that is
+    // mid-download misses the burst and stays dark for the entire show. Say so
+    // now, while the operator can still act on it, rather than leaving it to be
+    // discovered in the air.
+    const { notReady } = getJRArmReadiness(state);
+    if (notReady.length > 0) {
+      const sample = notReady.slice(0, 3).join(', ');
+      const more = notReady.length > 3 ? ` 외 ${notReady.length - 3}대` : '';
+      dispatch(
+        showNotification({
+          message:
+            `LED 보드 ${notReady.length}대가 ARM_WAIT 이 아닙니다 (${sample}${more}) — ` +
+            '이 기체는 이번 쇼에서 LED 가 나오지 않습니다.',
+          semantics: MessageSemantics.WARNING,
+        })
+      );
+    }
+
+    await dispatch(broadcastArm({ startAtUnixSec }));
   };

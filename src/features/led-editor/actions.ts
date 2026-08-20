@@ -4,6 +4,7 @@
  * external download server).
  */
 
+import JSZip from 'jszip';
 import ky from 'ky';
 
 import { showError, showSuccess } from '~/features/snackbar/actions';
@@ -12,8 +13,11 @@ import { type AppThunk, type RootState } from '~/store/reducers';
 import {
   getBoards,
   getDroneCount,
+  getEstimatedTimingBoards,
   getFps,
+  getLedMappingConflicts,
   getLedsPerDrone,
+  getLedTileIds,
   hasTimelineOverlap,
 } from './selectors';
 import { setUploadStatus } from './slice';
@@ -44,6 +48,10 @@ const buildShowModel = (state: RootState) => ({
   ledsPerDrone: getLedsPerDrone(state),
   droneCount: getDroneCount(state),
   fps: getFps(state),
+  // Which download slot each drone's file must occupy. Boards fetch by slot
+  // (`GET /download/<client_id>`) and never see a filename, so this is what
+  // makes an airframe substitution take effect.
+  tileIds: getLedTileIds(state),
   boards: getBoards(state).map((board) => ({
     id: board.id,
     name: board.name,
@@ -70,6 +78,36 @@ export const exportAndUpload =
     if (hasTimelineOverlap(state)) {
       dispatch(
         showError('Boards overlap on the timeline; fix this before exporting.')
+      );
+      return;
+    }
+
+    // Two drones pointed at one airframe would upload to the same download
+    // slot and overwrite each other, leaving one drone dark with nothing in
+    // any log to explain it. The server refuses this too; catching it here
+    // names the offending drone instead of failing the whole compile.
+    const conflicts = getLedMappingConflicts(state);
+    if (conflicts.length > 0) {
+      dispatch(
+        showError(
+          `기체 매핑 충돌: ${conflicts.join(', ')}번 기체에 두 개 이상의 LED 내용이 배정됐습니다.`
+        )
+      );
+      return;
+    }
+
+    // Refuse to publish estimated times to the boards. This is the last point
+    // where it can be caught: once the .bin files are on the aircraft the show
+    // plays at the wrong instant and nothing on the ground says why. Saving a
+    // local copy stays allowed — that harms nothing.
+    const estimated = getEstimatedTimingBoards(state);
+    if (estimated.length > 0) {
+      dispatch(
+        showError(
+          `보드 ${estimated.length}개가 추정 시각을 쓰고 있어 업로드를 막았습니다 ` +
+            `(${estimated.slice(0, 3).join(', ')}${estimated.length > 3 ? ' 외' : ''}). ` +
+            '3D 뷰에서 path 를 다시 전송한 뒤 "path와 동기화"를 누르세요.'
+        )
       );
       return;
     }
@@ -112,5 +150,98 @@ export const exportAndUpload =
       const message = error instanceof Error ? error.message : String(error);
       dispatch(setUploadStatus({ state: 'error', message }));
       dispatch(showError(`Could not compile LED show: ${message}`));
+    }
+  };
+
+/**
+ * Compile the show and save the per-drone `.bin` files locally instead of
+ * publishing them.
+ *
+ * Compiling normally POSTs the binaries straight to the download server and
+ * drops the originals, so there was no way to keep, inspect or hand-flash one.
+ * This asks for the bytes back (`includeData`) with `upload: false`, so nothing
+ * the boards fetch is touched — it is purely a copy for the operator.
+ *
+ * Files are named by their download slot, matching what a board asks for, so
+ * a hand-placed file lands where the firmware will look for it.
+ */
+export const downloadCompiledBinaries =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    const state = getState();
+    if (getBoards(state).length === 0) {
+      dispatch(showError('Add at least one board before exporting.'));
+      return;
+    }
+
+    if (hasTimelineOverlap(state)) {
+      dispatch(
+        showError('Boards overlap on the timeline; fix this before exporting.')
+      );
+      return;
+    }
+
+    const conflicts = getLedMappingConflicts(state);
+    if (conflicts.length > 0) {
+      dispatch(
+        showError(
+          `기체 매핑 충돌: ${conflicts.join(', ')}번 기체에 두 개 이상의 LED 내용이 배정됐습니다.`
+        )
+      );
+      return;
+    }
+
+    dispatch(setUploadStatus({ state: 'running' }));
+    try {
+      const response = await ky
+        .post(COMPILE_ENDPOINT, {
+          json: { ...buildShowModel(state), upload: false, includeData: true },
+          timeout: 120_000,
+        })
+        .json<CompileResponse>();
+
+      const tiles = (response.tiles ?? []).filter((tile) => tile.data);
+      if (tiles.length === 0) {
+        dispatch(
+          showError(
+            'LED 바이너리를 돌려받지 못했습니다 — 서버가 includeData 를 지원하지 않는 버전입니다.'
+          )
+        );
+        dispatch(setUploadStatus({ state: 'idle' }));
+        return;
+      }
+
+      const zip = new JSZip();
+      for (const tile of tiles) {
+        const slot = tile.tileId ?? tile.droneIndex;
+        zip.file(`file${slot}.bin`, tile.data!, { base64: true });
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'led-binaries.zip';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      dispatch(
+        setUploadStatus({
+          state: 'done',
+          totalFrames: response.totalFrames,
+          tiles: response.tiles,
+          message: `${tiles.length}개 .bin 을 led-binaries.zip 으로 저장했습니다.`,
+        })
+      );
+      dispatch(
+        showSuccess(
+          `LED 바이너리 ${tiles.length}개 저장 (${response.totalFrames} 프레임).`
+        )
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch(setUploadStatus({ state: 'error', message }));
+      dispatch(showError(`LED 바이너리 저장 실패: ${message}`));
     }
   };

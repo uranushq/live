@@ -28,7 +28,20 @@ export type DronePixels = RGB[];
  * altitude draws higher). Same convention as `layoutDotsOnPlane`; flipping
  * either sign renders every synced board mirrored.
  */
-export type DroneLayoutPoint = { x: number; y: number };
+export type DroneLayoutPoint = {
+  x: number;
+  y: number;
+  /**
+   * The same drone's position in world metres.
+   *
+   * Carried alongside the projection because the projection cannot answer
+   * which drones share a plane: the audience view discards world x entirely,
+   * so a wall standing on one YZ plane and a scatter spread across the field
+   * flatten to the same picture. Optional — layouts frozen before grouping
+   * existed have none, and those boards fall back to a single flat panel.
+   */
+  world?: { x: number; y: number; z: number };
+};
 
 /** A still frame placed on the timeline, with its own formation. */
 export type Board = {
@@ -55,6 +68,20 @@ export type Board = {
    * drones out in this shape instead of the dense `rows × cols` grid.
    */
   droneLayout?: Array<DroneLayoutPoint | null>;
+  /**
+   * Drone-index groups the flight path itself declared for this phase (its
+   * clusters and grid selections), frozen at sync time. They take precedence
+   * over planes detected from the geometry, because they are what the
+   * operator actually drew rather than what the numbers suggest.
+   */
+  droneGroups?: number[][];
+  /**
+   * True when this board's start/duration came from the client estimate rather
+   * than the planner. Frozen at sync time so the board carries the answer with
+   * it — the mirror it was built from is gone by the time the show is
+   * compiled, and that is the moment it matters.
+   */
+  timingEstimated?: boolean;
 };
 
 /**
@@ -63,6 +90,16 @@ export type Board = {
  * timeline / simulator.
  */
 export type FormationRegion = {
+  /**
+   * True when these seconds are the client's own estimate rather than the
+   * planner's answer.
+   *
+   * The estimate is a straight-line distance divided by cruise speed; the real
+   * path accelerates, avoids collisions and holds. Boards cut from an estimate
+   * play at the wrong moment on the aircraft, and that used to happen silently
+   * whenever the planned timing was dropped — which any phase edit does.
+   */
+  estimated?: boolean;
   name: string;
   startSec: number;
   endSec: number;
@@ -92,7 +129,15 @@ export type Clipboard = {
 /** Per-drone result of a compile + upload request. */
 export type UploadTileResult = {
   droneIndex: number;
+  /** Download slot the file occupies — the firmware's `client_id`. */
+  tileId?: number;
   bytes: number;
+  /**
+   * The compiled `.bin`, base64-encoded. Only present when the caller asked
+   * for it (`includeData`); the normal compile publishes the bytes to the
+   * download server and never sends them back.
+   */
+  data?: string;
   filename?: string;
   url?: string;
   message?: string;
@@ -156,11 +201,26 @@ export type LedEditorState = {
    * when no path is loaded.
    */
   phaseLayouts: Record<string, Array<DroneLayoutPoint | null>>;
+  /** Explicit drone groups per phase, mirrored from the 3D view alongside
+   * `phaseLayouts`. Empty when the path declares none. */
+  phaseGroups: Record<string, number[][]>;
   /**
    * Recommended delay (seconds) from drone-dance start until the first
    * formation is formed — used as the JR-Control ARM "start in" default. Null
    * when unknown (no formations / sync off).
    */
   ledStartDelaySec: number | null;
+  /**
+   * Airframe substitution: LED show drone index (0-based) -> the drone number
+   * (1-based) whose board should actually play that content. Sparse — an
+   * absent entry means the identity mapping, so drone index `i` plays on drone
+   * number `i + 1`, which is the default wiring.
+   *
+   * This exists because a board is addressed by *position*, not by name: the
+   * firmware fetches `GET /download/<client_id>` with
+   * `client_id = (its IP's last octet) - 1`, so swapping in a spare airframe
+   * means re-pointing a slot rather than renaming anything.
+   */
+  droneMapping: Record<number, number>;
   upload: UploadStatus;
 };

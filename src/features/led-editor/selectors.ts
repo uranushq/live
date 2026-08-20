@@ -88,7 +88,13 @@ export const getLedStartDelaySec = (state: RootState) =>
  */
 export const getSyncablePhaseCount = (state: RootState): number =>
   (state.ledEditor.formationTimeline ?? []).filter(
-    (region) => region.kind !== 'transit' && region.phaseId
+    // Same test `syncPhaseBoards` applies, so the button is enabled exactly
+    // when pressing it would produce something. A zero-length hold is a
+    // fly-through, not a formation, and gets no board.
+    (region) =>
+      region.kind !== 'transit' &&
+      region.phaseId &&
+      region.endSec > region.startSec
   ).length;
 
 export const getUploadStatus = (state: RootState) => state.ledEditor.upload;
@@ -108,8 +114,150 @@ export const hasTimelineOverlap = (state: RootState) =>
 export const hasPhaseSyncedBoards = (state: RootState): boolean =>
   state.ledEditor.boards.some((b) => Boolean(b.sourcePhaseId));
 
+/**
+ * Whether the operator has authored any LED content at all.
+ *
+ * Used to decide whether a show start should reach the LED boards: the JR
+ * board list is derived from the connected drones and is therefore non-empty
+ * for every show, so it cannot answer that question on its own.
+ */
+export const hasAuthoredLedShow = (state: RootState): boolean =>
+  state.ledEditor.boards.length > 0;
+
 /** Whether the show is ready to be compiled and uploaded. */
 export const canExport = (state: RootState) =>
   state.ledEditor.boards.length > 0 &&
   !hasOverlappingBoards(state.ledEditor.boards) &&
   state.ledEditor.upload.state !== 'running';
+
+export const getDroneMapping = (state: RootState): Record<number, number> =>
+  state.ledEditor.droneMapping ?? {};
+
+/**
+ * The download slot each drone's compiled `.bin` must occupy, in drone order.
+ *
+ * A JR board asks for `GET /download/<client_id>` and works out `client_id`
+ * from its own address as *last octet - 1*; it never learns a filename. The
+ * slot is therefore the only thing that decides which board plays which
+ * drone's LEDs, and drone number `n` maps to slot `n - 1`.
+ */
+export const getLedTileIds = (state: RootState): number[] => {
+  const mapping = getDroneMapping(state);
+  return Array.from(
+    { length: state.ledEditor.droneCount },
+    (_unused, index) => (mapping[index] ?? index + 1) - 1
+  );
+};
+
+/**
+ * Drone numbers that more than one LED show slot has been pointed at.
+ *
+ * Such a mapping cannot be uploaded: the two files would land on the same
+ * download slot and silently overwrite each other, leaving one airframe dark
+ * with nothing to indicate why.
+ */
+export const getLedMappingConflicts = (state: RootState): number[] => {
+  const seen = new Set<number>();
+  const clashes = new Set<number>();
+  for (const tileId of getLedTileIds(state)) {
+    if (seen.has(tileId)) {
+      clashes.add(tileId);
+    }
+
+    seen.add(tileId);
+  }
+
+  return [...clashes].map((tileId) => tileId + 1).sort((a, b) => a - b);
+};
+
+/** The active board's path-declared drone groups, if it has any. */
+export const getActiveDroneGroups = (
+  state: RootState
+): number[][] | undefined => getActiveBoard(state)?.droneGroups;
+
+/**
+ * What a path sync would actually be able to do, and why.
+ *
+ * The shape and the drone count both come from `phaseLayouts`, so a mirror
+ * that has regions but no layouts silently syncs timing only — boards appear,
+ * nothing is reshaped, and the drone count never moves. Reporting the split
+ * turns that into something the operator can read instead of guess at.
+ */
+export const getPhaseSyncDronePlan = (
+  state: RootState
+): {
+  regions: number;
+  withLayout: number;
+  droneCount: number;
+  currentDroneCount: number;
+  /** Layout points that carry 3D world coordinates — what grouping needs. */
+  withWorld: number;
+  /** Points with a flat projection but no world coordinates (old format). */
+  flatOnly: number;
+  /** Slots the phase had no position for at all (drone-id mismatch). */
+  missing: number;
+} => {
+  const layouts = state.ledEditor.phaseLayouts ?? {};
+  const regions = (state.ledEditor.formationTimeline ?? []).filter(
+    (region) =>
+      region.kind !== 'transit' &&
+      region.phaseId &&
+      region.endSec > region.startSec
+  );
+  let withLayout = 0;
+  let droneCount = 0;
+  let withWorld = 0;
+  let flatOnly = 0;
+  let missing = 0;
+  for (const region of regions) {
+    const layout = layouts[region.phaseId!];
+    const length = layout?.length ?? 0;
+    if (length === 0) {
+      continue;
+    }
+
+    withLayout += 1;
+    droneCount = Math.max(droneCount, length);
+    // Report the best phase, not a sum: one phase missing a drone should not
+    // read the same as every phase missing every drone.
+    withWorld = Math.max(
+      withWorld,
+      layout!.filter((point) => point?.world).length
+    );
+    flatOnly = Math.max(
+      flatOnly,
+      layout!.filter((point) => point && !point.world).length
+    );
+    missing = Math.max(missing, layout!.filter((point) => !point).length);
+  }
+
+  return {
+    regions: regions.length,
+    withLayout,
+    droneCount,
+    currentDroneCount: state.ledEditor.droneCount,
+    withWorld,
+    flatOnly,
+    missing,
+  };
+};
+
+/**
+ * The flight phase the editor is currently showing, if the active board is
+ * synced to one. Read by the 3D view so selecting a board there follows.
+ */
+export const getActiveBoardPhaseId = (state: RootState): string | undefined =>
+  getActiveBoard(state)?.sourcePhaseId;
+
+/**
+ * Phase-synced boards whose times are the client estimate, not the planner's.
+ *
+ * These are the boards that will play at the wrong instant on the aircraft.
+ * The estimate is a straight line over cruise speed and knows nothing about
+ * acceleration, avoidance or holds, so it drifts further the longer the show
+ * runs — and it looks exactly like a correct timeline.
+ */
+export const getEstimatedTimingBoards = (state: RootState): string[] =>
+  state.ledEditor.boards
+    .filter((board) => board.sourcePhaseId && board.timingEstimated !== false)
+    .map((board) => board.name);

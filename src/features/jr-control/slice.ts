@@ -27,6 +27,15 @@ export type JRBoardHealthEntry = {
   lastCheckedAt?: number;
 };
 
+/**
+ * Operator-owned ARM settings.
+ *
+ * Not every field here reaches the boards, and the ones that do not are
+ * deliberately absent: the server replaces the show's length and frame rate
+ * with what the boards report in their own health pushes
+ * (`derive_show_params`), so a controller-side guess was only ever misleading.
+ * See `ArmRequest` in `actions.ts` for what is actually put on the wire.
+ */
 export type ArmParams = {
   /**
    * 'auto'  -> startIn follows the authored show's LED start delay (path);
@@ -34,9 +43,6 @@ export type ArmParams = {
    */
   startInMode: 'auto' | 'manual';
   startIn: number;
-  fpsNum: number;
-  fpsDen: number;
-  frameCount: number;
   fileId: number;
   showId: number;
   repeat: number;
@@ -67,9 +73,6 @@ const initialState: JRControlSliceState = {
   arm: {
     startInMode: 'auto',
     startIn: 5,
-    fpsNum: 30,
-    fpsDen: 1,
-    frameCount: 300,
     fileId: 99,
     showId: 1,
     repeat: 5,

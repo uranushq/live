@@ -44,10 +44,16 @@ import {
   getJRBoardRows,
   getJRBoardStatusCounts,
   getJRHealthCheckDisabledReason,
+  getLedDroneMappingRows,
   getRecommendedArmStartInSec,
   isJRHealthCheckEnabled,
   JR_IP_PREFIX,
 } from '~/features/jr-control/selectors';
+import { getLedMappingConflicts } from '~/features/led-editor/selectors';
+import {
+  clearDroneMapping,
+  setDroneMappingEntry,
+} from '~/features/led-editor/slice';
 import {
   addBoard,
   removeBoard,
@@ -87,9 +93,10 @@ const formatCheckedAt = (timestamp?: number): string => {
   return seconds < 1 ? '방금' : `${seconds}s 전`;
 };
 
-// Only the fields a user must set are shown. FPS and frame count are derived
-// from the authored LED show at broadcast time (see broadcastArm), so they are
-// not editable here. "Start in" has its own control (auto/manual) below.
+// Only the fields a user must set are shown. FPS and frame count are absent
+// because they are never sent at all — the server fills them in from what the
+// boards themselves report (see `ArmRequest` in the jr-control actions).
+// "Start in" has its own control (auto/manual) below.
 const armFields: Array<{
   key: 'showId' | 'fileId';
   label: string;
@@ -112,7 +119,14 @@ const JRControlPanel = (): JSX.Element => {
   const showDuration = useSelector(getTimelineDuration);
   const phaseSynced = useSelector(hasPhaseSyncedBoards);
   const derivedFrameCount = Math.max(1, Math.round(showDuration * fps));
+  const mappingRows = useSelector(getLedDroneMappingRows);
+  const mappingConflicts = useSelector(getLedMappingConflicts);
+  const remappedCount = mappingRows.filter((row) => row.remapped).length;
+
   const [ipInput, setIpInput] = useState('');
+  // Collapsed by default: this table is one row per drone, and a hundred-drone
+  // show would otherwise bury the ARM controls below it.
+  const [mappingOpen, setMappingOpen] = useState(false);
   // 결선 확인용 LED 색. 행의 전구 버튼과 '전체 점등'이 같은 색을 쓴다.
   const [ledPresetId, setLedPresetId] = useState(JR_LED_PRESETS[0]!.id);
   const ledColor =
@@ -335,6 +349,93 @@ const JRControlPanel = (): JSX.Element => {
           ))}
         </TableBody>
       </Table>
+
+      <Divider sx={{ my: 2 }} />
+
+      {/* 기체 교체 매핑. 보드는 파일 이름을 보지 않고 GET /download/<client_id>
+          로 슬롯을 받아가며, client_id = IP 마지막 옥텟 − 1 이다. 그래서 기체를
+          바꾸는 일은 이름을 고치는 게 아니라 슬롯을 다시 겨누는 일이다. */}
+      <Stack direction='row' spacing={1} alignItems='center' sx={{ mb: 1 }}>
+        <Typography variant='subtitle2' sx={{ flex: 1 }}>
+          기체 교체 매핑
+          {remappedCount > 0 ? ` — ${remappedCount}건 변경됨` : ''}
+        </Typography>
+        {mappingConflicts.length > 0 && (
+          <Chip
+            size='small'
+            color='error'
+            label={`충돌: ${mappingConflicts.join(', ')}번`}
+          />
+        )}
+        <Button
+          size='small'
+          disabled={remappedCount === 0}
+          onClick={() => dispatch(clearDroneMapping())}
+        >
+          초기화
+        </Button>
+        <Button size='small' onClick={() => setMappingOpen(!mappingOpen)}>
+          {mappingOpen ? '접기' : '펼치기'}
+        </Button>
+      </Stack>
+      {mappingOpen && (
+        <>
+          <Typography
+            variant='caption'
+            color='text.secondary'
+            sx={{ display: 'block', mb: 1 }}
+          >
+            LED 내용을 다른 기체가 재생하도록 바꿉니다. 보드는 파일 이름이 아니라
+            슬롯 번호로 받아가므로, 여기서 지정한 기체의 보드가 그 내용을
+            내려받습니다. 변경은 다음 컴파일·업로드부터 적용됩니다.
+          </Typography>
+          <Table size='small'>
+            <TableHead>
+              <TableRow>
+                <TableCell>LED 드론</TableCell>
+                <TableCell>재생할 기체</TableCell>
+                <TableCell>보드</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {mappingRows.map((row) => (
+                <TableRow key={row.droneIndex}>
+                  <TableCell>{row.sourceDroneNumber}</TableCell>
+                  <TableCell>
+                    <TextField
+                      size='small'
+                      type='number'
+                      value={row.targetDroneNumber}
+                      error={mappingConflicts.includes(row.targetDroneNumber)}
+                      onChange={(event) =>
+                        dispatch(
+                          setDroneMappingEntry({
+                            droneIndex: row.droneIndex,
+                            targetDroneNumber: Number(event.target.value),
+                          })
+                        )
+                      }
+                      sx={{ width: 90 }}
+                      slotProps={{ htmlInput: { min: 1, step: 1 } }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography
+                      variant='body2'
+                      color={row.remapped ? 'warning.main' : 'text.primary'}
+                    >
+                      {row.ip}
+                    </Typography>
+                    <Typography variant='caption' color='text.secondary'>
+                      {row.fileName}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
 
       <Divider sx={{ my: 2 }} />
 

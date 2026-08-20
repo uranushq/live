@@ -10,7 +10,10 @@
 import { createSelector } from '@reduxjs/toolkit';
 
 import {
+  getDroneCount,
+  getDroneMapping,
   getLedStartDelaySec,
+  hasAuthoredLedShow,
   hasPhaseSyncedBoards,
 } from '~/features/led-editor/selectors';
 import {
@@ -22,6 +25,7 @@ import type { AppSelector, RootState } from '~/store/reducers';
 
 import {
   deriveJRBoardStatus,
+  JRBoardStatus,
   type JRBoardStatusId,
   type JRBoardHealthRecord,
 } from './status';
@@ -198,3 +202,101 @@ export const getJRBoardStatusCounts: AppSelector<
 
   return counts;
 });
+
+/** 지금 ARM 을 쏘면 실제로 받을 수 있는지에 따라 가른 보드 주소들. */
+export type JRArmReadiness = {
+  /** ARM_WAIT — 지금 쏘면 받는다. */
+  ready: string[];
+  /** 다른 상태 (DOWNLOADING / LOAD_SHOW / PLAYING / ERROR ...) — 이번 ARM 을 놓친다. */
+  notReady: string[];
+  /** 헬스체크가 꺼져 있거나 아직 응답이 없어 판단 불가. */
+  unknown: string[];
+};
+
+/**
+ * Which boards would actually latch an ARM sent right now.
+ *
+ * The firmware only listens for sync packets while it sits in `ARM_WAIT`
+ * (`app_state.c`); one still in `DOWNLOADING` or `LOAD_SHOW` misses the burst
+ * outright, since five packets 50 ms apart cannot outlast a multi-second
+ * download, and it will simply not play this show.
+ *
+ * `UNKNOWN` is kept separate from `notReady` on purpose: health polling is
+ * switched off after every ARM, so "no recent health" is the normal state
+ * rather than evidence of a problem, and reporting it as a failure would
+ * train the operator to ignore the warning.
+ */
+export const getJRArmReadiness: AppSelector<JRArmReadiness> = createSelector(
+  getJRBoardRows,
+  (rows) => {
+    const readiness: JRArmReadiness = { ready: [], notReady: [], unknown: [] };
+    for (const row of rows) {
+      if (row.status === JRBoardStatus.ARM_WAIT) {
+        readiness.ready.push(row.ip);
+      } else if (row.status === JRBoardStatus.UNKNOWN) {
+        readiness.unknown.push(row.ip);
+      } else {
+        readiness.notReady.push(row.ip);
+      }
+    }
+
+    return readiness;
+  }
+);
+
+/**
+ * Whether starting the show should also arm the LED boards.
+ *
+ * Both halves matter. The board list is built from the connected drones, so it
+ * is non-empty for *any* show; gating on it alone would fire a doomed ARM on
+ * every start for operators who never authored LED content, and the server
+ * would answer 409 ("no board has a show loaded") each time. Teaching people
+ * to ignore that error costs more than not arming.
+ */
+export const shouldArmLedBoardsOnShowStart = (state: RootState): boolean =>
+  hasAuthoredLedShow(state) && getJRMonitorTargets(state).length > 0;
+
+/** One row of the JR panel's airframe-substitution table. */
+export type LedDroneMappingRow = {
+  /** 0-based index into the LED show's drone list. */
+  droneIndex: number;
+  /** Drone number this content was authored for (`droneIndex + 1`). */
+  sourceDroneNumber: number;
+  /** Drone number whose board will actually play it. */
+  targetDroneNumber: number;
+  /** Whether this row has been pointed away from its own airframe. */
+  remapped: boolean;
+  /** Download slot the file occupies — the firmware's `client_id`. */
+  tileId: number;
+  /** What the board calls the file on its own SD card. */
+  fileName: string;
+  /** Board address the content ends up on. */
+  ip: string;
+};
+
+/**
+ * The LED show's drone list paired with the board each drone's content lands
+ * on, ready to render.
+ *
+ * The numbers an operator reads off an aircraft are 1-based, so those lead;
+ * the slot and `file<n>.bin` name are carried alongside because they are what
+ * appears in the board's own logs, and they are off by one from the drone
+ * number (`client_id = IP last octet - 1`).
+ */
+export const getLedDroneMappingRows: AppSelector<LedDroneMappingRow[]> =
+  createSelector(getDroneCount, getDroneMapping, (droneCount, mapping) =>
+    Array.from({ length: droneCount }, (_unused, droneIndex) => {
+      const sourceDroneNumber = droneIndex + 1;
+      const targetDroneNumber = mapping[droneIndex] ?? sourceDroneNumber;
+      const tileId = targetDroneNumber - 1;
+      return {
+        droneIndex,
+        sourceDroneNumber,
+        targetDroneNumber,
+        remapped: targetDroneNumber !== sourceDroneNumber,
+        tileId,
+        fileName: `file${tileId}.bin`,
+        ip: jrBoardIpForDroneNumber(targetDroneNumber),
+      };
+    })
+  );

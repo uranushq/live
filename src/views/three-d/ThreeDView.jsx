@@ -2,6 +2,7 @@
  * @file Component that shows a three-dimensional view of the drone flock.
  */
 
+import JSZip from 'jszip';
 import PropTypes from 'prop-types';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { connect } from 'react-redux';
@@ -76,9 +77,11 @@ import {
   setPlaying,
   setThreeDSync,
   setFormationSync,
+  selectBoardByPhaseId,
   upsertImageBoard,
 } from '~/features/led-editor/slice';
 import {
+  getActiveBoardPhaseId,
   getPlayheadSec,
   getPlaying,
   getThreeDSync,
@@ -304,8 +307,16 @@ const sanitizeFormationSettings = (settings) => {
   };
 };
 
-const generateImportedFormationPhaseId = (index) =>
-  `phase-import-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * Id for a phase imported from a file that carries none of its own.
+ *
+ * Derived from the position alone, deliberately: a random or clock-based id
+ * changed on every import, so re-uploading the same path left every already
+ * synced LED board pointing at a phase id that no longer existed. Clicking a
+ * phase then did nothing, and re-syncing detached the boards people had
+ * already painted. The same file must name the same phases twice running.
+ */
+const generateImportedFormationPhaseId = (index) => `phase-import-${index}`;
 
 const normalizeFormationPhaseForImport = (raw, index) => {
   const id =
@@ -552,8 +563,155 @@ const remapFormationPhasesToDroneIds = (phases, drones) => {
   });
 };
 
+/** Archive member the planner writes its phase annotation into, inside a .skyc. */
+const FORMATION_PLAN_FILENAME = 'formation_plan.json';
+
+/**
+ * Read the planner's `formationPlan` block into the two things the app needs:
+ * the formation phases themselves, and the timeline regions the LED editor
+ * paints.
+ *
+ * Only the planner knows which stretch of a generated trajectory is a
+ * formation the operator asked for. Recovering that from the finished
+ * positions means hunting for windows where every drone happens to be
+ * stationary, which cannot tell an intended formation from a drone pausing at
+ * a waypoint — on a real 30-drone show it turns up 1-second "formations" that
+ * were never asked for. So a generated show carries the answer with it.
+ *
+ * Returns null unless the block is a recognisable v1 plan.
+ */
+const readFormationPlan = (rawPlan, existingPhases) => {
+  if (!rawPlan || typeof rawPlan !== 'object') return null;
+  if (Number(rawPlan.version) !== 1) return null;
+
+  const rawPhases = Array.isArray(rawPlan.phases) ? rawPlan.phases : [];
+  const rawTransits = Array.isArray(rawPlan.transits) ? rawPlan.transits : [];
+  if (!rawPhases.length) return null;
+
+  const phases = rawPhases.map((p, i) =>
+    normalizeFormationPhaseForImport(
+      { id: p?.id, name: p?.name, holdMs: p?.holdMs, points: p?.points },
+      i
+    )
+  );
+
+  /**
+   * Which phase in the editor a block entry describes.
+   *
+   * Prefer the phase that is already loaded: frozen layouts are keyed by *its*
+   * id, so inventing a fresh one here would leave every layout unreachable and
+   * the sync would silently reshape nothing. The block reports the index it
+   * was sent as, which holds even against a planner too old to echo ids.
+   */
+  const resolvePhase = (raw, order) => {
+    const index = Number.isInteger(raw?.index) ? raw.index : order;
+    const existing = Array.isArray(existingPhases)
+      ? existingPhases[index]
+      : undefined;
+    if (existing?.id) {
+      return { id: String(existing.id), name: existing.name, matched: true };
+    }
+
+    // No phase to attach to. Stamping the freshly minted id from `phases`
+    // would be worse than leaving it off: nothing in app state carries that
+    // id, so the board created from it can never be found again — its layout
+    // lookup misses and clicking the phase does nothing at all, with no sign
+    // of why. Better to keep the band as a plain time marker and let the sync
+    // skip it. When the caller is *replacing* the phases (a file import) the
+    // freshly minted ids are the real ones, so they are used.
+    return Array.isArray(existingPhases)
+      ? { id: undefined, name: phases[order].name, matched: false }
+      : { id: phases[order].id, name: phases[order].name, matched: true };
+  };
+
+  const finite = (value) =>
+    Number.isFinite(Number(value)) ? Number(value) : null;
+  const timeline = [];
+  let unmatched = 0;
+  rawPhases.forEach((p, i) => {
+    const startSec = finite(p?.startSec);
+    // The requested hold is the formation's visible window. `endSec` also
+    // covers the neutral-yaw rotation the planner appends whenever the next
+    // leg moves, which is travel rather than the formation itself.
+    const endSec = finite(p?.holdEndSec) ?? finite(p?.endSec);
+    if (startSec === null || endSec === null) return;
+    // Name and id must come from the SAME phase. Taking the name by loop
+    // position while the id followed the planner's own index let a board be
+    // named after one formation and linked to another — the click then opened
+    // a board labelled correctly that was not the phase at all.
+    const resolved = resolvePhase(p, i);
+    if (!resolved.matched) unmatched += 1;
+    timeline.push({
+      name: resolved.name,
+      startSec,
+      endSec,
+      color: FORMATION_COLORS[i % FORMATION_COLORS.length],
+      ...(resolved.id ? { phaseId: resolved.id } : {}),
+    });
+  });
+  rawTransits.forEach((t) => {
+    const startSec = finite(t?.startSec);
+    const endSec = finite(t?.endSec);
+    if (startSec === null || endSec === null) return;
+    timeline.push({
+      name: String(t?.name || 'transit'),
+      startSec,
+      endSec,
+      color: '#546e7a',
+      kind: 'transit',
+    });
+  });
+  timeline.sort((a, b) => a.startSec - b.startSec);
+  if (!timeline.length) return null;
+
+  return { phases, timeline, unmatched };
+};
+
+/**
+ * Pull the phase annotation out of whatever the planner answered with.
+ *
+ * The default request returns a .skyc, i.e. a ZIP, and the annotation is its
+ * own member in there — reading it before the blob reaches the download link
+ * is the only chance to keep the timing the server just computed.
+ */
+const readFormationPlanFromBlob = async (blob, ext, existingPhases) => {
+  try {
+    if (ext === 'skyc') {
+      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+      const entry = zip.file(FORMATION_PLAN_FILENAME);
+      if (!entry) return null;
+      return readFormationPlan(
+        JSON.parse(await entry.async('string')),
+        existingPhases
+      );
+    }
+
+    return readFormationPlan(
+      JSON.parse(await blob.text())?.formationPlan,
+      existingPhases
+    );
+  } catch {
+    // A malformed archive is not a reason to lose the user's download.
+    return null;
+  }
+};
+
 const readFormationImportFromParsed = (parsed) => {
   if (!parsed || typeof parsed !== 'object') return null;
+
+  // A show the planner generated carries its own phase annotation. Read that
+  // first: it is the only source that states which stretch of the trajectory
+  // is a formation rather than a pause, and it brings the phase timing with
+  // it, which none of the authored formats below do.
+  //
+  // `settings` is deliberately null here. The block records what the planner
+  // applied, not what the operator authored — takeoff_time has been floored
+  // and min_separation clamped — so adopting it would rewrite their settings
+  // on every import. The caller keeps the existing ones instead.
+  const plan = readFormationPlan(parsed.formationPlan);
+  if (plan) {
+    return { phases: plan.phases, settings: null, timeline: plan.timeline };
+  }
 
   if (parsed.formation && typeof parsed.formation === 'object') {
     const { phases: phasesRaw, settings: settingsRaw } = parsed.formation;
@@ -671,6 +829,7 @@ const buildSelectedDroneFromShowSpec = (drone) => {
 const ThreeDView = React.forwardRef((props, ref) => {
   const {
     cameraRef,
+    ledActivePhaseId,
     grid,
     interactionMode,
     isCreateMode: isCreateModeProp,
@@ -705,11 +864,6 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // clock). With no boards the LED clock can't advance, so fall back to the
   // 3D view's own independent playback even when the checkbox is on.
   const syncActive = threeDSync && ledTimelineDuration > 0;
-
-  // Mirroring the path *into* the LED editor is a different question from
-  // playback sync and must not require an LED show to already exist: pulling
-  // the phases in to create the very first boards is the whole point.
-  const pathMirrorActive = threeDSync;
 
   const isCreateMode =
     typeof isCreateModeProp === 'boolean'
@@ -832,8 +986,19 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 옛 응답이 이미 무효화된 타임라인을 되살리는 것을 막는다 (이 타이밍이 이제
   // LED 보드 자동 생성까지 좌우한다).
   const planGenerationRef = useRef(0);
+  // Set to the exact phases array that arrives together with its own timing,
+  // so the invalidation below can tell "the user edited a phase" (throw the
+  // timing away) from "a file brought both at once" (keep it). Without this an
+  // imported show lost its real phase times one render after gaining them, and
+  // silently fell back to the client-side estimate.
+  const phasesWithOwnTimelineRef = useRef(null);
 
   useEffect(() => {
+    if (phasesWithOwnTimelineRef.current === formationPhases) {
+      phasesWithOwnTimelineRef.current = null;
+      return;
+    }
+
     planGenerationRef.current += 1;
     setPlannedTimeline(null);
   }, [formationPhases, formationSettings]);
@@ -1075,11 +1240,26 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
         const formationImport = readFormationImportFromParsed(parsed);
         if (formationImport) {
-          setFormationPhases(
-            remapFormationPhasesToDroneIds(formationImport.phases, normalizedDrones)
+          const importedPhases = remapFormationPhasesToDroneIds(
+            formationImport.phases,
+            normalizedDrones
           );
+          if (formationImport.timeline) {
+            phasesWithOwnTimelineRef.current = importedPhases;
+          }
+
+          setFormationPhases(importedPhases);
           setLastReversedPhaseIds([]);
-          setFormationSettings(formationImport.settings);
+          // A planner-generated file reports applied settings, not authored
+          // ones, so it declines to supply any — keep what the operator has.
+          if (formationImport.settings) {
+            setFormationSettings(formationImport.settings);
+          }
+
+          // Real phase timing straight from the planner. Without this the LED
+          // timeline would fall back to the client-side estimate, which is
+          // what made a generated show impossible to line LED boards up with.
+          setPlannedTimeline(formationImport.timeline ?? null);
         }
 
         clearPathOverrides();
@@ -1199,7 +1379,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
           // phase 동기화 정보 (없는 보드는 키 자체를 생략)
           ...(b.sourcePhaseId ? { sourcePhaseId: b.sourcePhaseId } : {}),
           ...(b.droneLayout ? { droneLayout: b.droneLayout } : {}),
+          ...(b.droneGroups ? { droneGroups: b.droneGroups } : {}),
+          // 타이밍 출처 — 실측(false)인지 추정(true)인지. 없으면 추정으로 읽는다.
+          ...(b.sourcePhaseId
+            ? { timingEstimated: b.timingEstimated !== false }
+            : {}),
         })),
+        // 기체 교체 매핑 — 비어 있으면 키 자체를 생략한다.
+        ...(ledState.droneMapping &&
+        Object.keys(ledState.droneMapping).length > 0
+          ? { droneMapping: ledState.droneMapping }
+          : {}),
       };
     }
 
@@ -2096,6 +2286,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
         startSec,
         endSec,
         color: FORMATION_COLORS[i % FORMATION_COLORS.length],
+        // Straight-line distance over cruise speed. Nothing here knows about
+        // acceleration, avoidance or the solver's actual route, so say so and
+        // let everything downstream decide what to do about it.
+        estimated: true,
       };
     });
   }, [plannedTimeline, formationPhases, formationSettings]);
@@ -2111,26 +2305,122 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // Same convention as layoutDotsOnPlane (`y: (0.5 - u) * widthM`, i.e. image
   // left → +y) and the image-to-dots preview — get this sign wrong and every
   // synced board is painted mirror-imaged.
-  const phaseLayouts = useMemo(() => {
-    const droneList = Array.isArray(effectiveConfig?.drones)
+  // The drone order every frozen layout and group is expressed in. Both memos
+  // below must agree on it: an index meaning one drone in the layout and a
+  // different one in the groups would draw the wrong drones together.
+  const layoutDroneList = useMemo(() => {
+    const configured = Array.isArray(effectiveConfig?.drones)
       ? effectiveConfig.drones
       : [];
-    if (!droneList.length || !Array.isArray(formationPhases)) return {};
+    if (configured.length) return configured;
+    if (!Array.isArray(formationPhases) || !formationPhases.length) return [];
+    // An imported path can carry phases before the scene has a drone config.
+    // The phases' own point keys are then the only statement of who is in the
+    // show, ordered by the number in the id ("drone-2" before "drone-10") so
+    // the index lines up with the drone numbers everything else uses.
+    const ids = new Set();
+    for (const phase of formationPhases) {
+      for (const droneId of Object.keys(phase?.points || {})) ids.add(droneId);
+    }
+    const numberIn = (id) => {
+      const match = /(\d+)\s*$/.exec(String(id));
+      return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+    };
+    return [...ids]
+      .sort(
+        (a, b) =>
+          numberIn(a) - numberIn(b) || String(a).localeCompare(String(b))
+      )
+      .map((id) => ({ id }));
+  }, [formationPhases, effectiveConfig]);
+
+  const phaseLayouts = useMemo(() => {
+    if (!Array.isArray(formationPhases) || !formationPhases.length) return {};
+    if (!layoutDroneList.length) return {};
+    // Same rule remapFormationPhasesToDroneIds uses: identify a drone by the
+    // number in its id. A path can arrive keyed "drone-1" while the scene
+    // calls the same aircraft "1" or "show-drone-1", and an exact-string
+    // lookup then finds nothing — for every drone, in every phase, with the
+    // only symptom being that the editor quietly stops grouping.
+    const idNumber = (value) => {
+      const match = /(\d+)\s*$/.exec(String(value));
+      return match ? Number(match[1]) : Number.NaN;
+    };
     const result = {};
     for (const phase of formationPhases) {
       if (!phase?.id) continue;
       const points = phase.points || {};
-      result[String(phase.id)] = droneList.map((d) => {
-        const p = points[String(d?.id)];
+      const byNumber = new Map();
+      for (const [key, value] of Object.entries(points)) {
+        const number = idNumber(key);
+        if (Number.isFinite(number) && !byNumber.has(number)) {
+          byNumber.set(number, value);
+        }
+      }
+
+      result[String(phase.id)] = layoutDroneList.map((d) => {
+        const p = points[String(d?.id)] ?? byNumber.get(idNumber(d?.id));
+        const x = Number(p?.x);
         const y = Number(p?.y);
         const z = Number(p?.z);
-        return Number.isFinite(y) && Number.isFinite(z)
-          ? { x: -y, y: -z }
-          : null;
+        if (!Number.isFinite(y) || !Number.isFinite(z)) return null;
+        const point = { x: -y, y: -z };
+        // World coordinates ride along so the LED editor can tell which drones
+        // share a plane — the audience projection throws world x away.
+        if (Number.isFinite(x)) {
+          point.world = { x, y, z };
+        }
+        return point;
       });
     }
     return result;
-  }, [formationPhases, effectiveConfig]);
+  }, [formationPhases, layoutDroneList]);
+
+  // Groups the path itself declares: explicit clusters first, then a grid
+  // selection if one is left over. A drone lands in at most one group — the
+  // editor draws each group separately, so a drone in two would appear twice
+  // and the copies would disagree about its pixels.
+  const phaseGroups = useMemo(() => {
+    if (!Array.isArray(formationPhases) || !layoutDroneList.length) return {};
+    const idNumber = (value) => {
+      const match = /(\d+)\s*$/.exec(String(value));
+      return match ? Number(match[1]) : Number.NaN;
+    };
+    const indexById = new Map(
+      layoutDroneList.map((d, index) => [String(d?.id), index])
+    );
+    // Same number-based fallback the layouts use, so a path whose clusters are
+    // keyed differently from the scene still groups instead of silently
+    // contributing nothing.
+    const indexByNumber = new Map();
+    layoutDroneList.forEach((d, index) => {
+      const number = idNumber(d?.id);
+      if (Number.isFinite(number) && !indexByNumber.has(number)) {
+        indexByNumber.set(number, index);
+      }
+    });
+    const result = {};
+    for (const phase of formationPhases) {
+      if (!phase?.id) continue;
+      const claimed = new Set();
+      const groups = [];
+      const take = (ids) => {
+        const members = [];
+        for (const droneId of Array.isArray(ids) ? ids : []) {
+          const index =
+            indexById.get(String(droneId)) ?? indexByNumber.get(idNumber(droneId));
+          if (index === undefined || claimed.has(index)) continue;
+          claimed.add(index);
+          members.push(index);
+        }
+        if (members.length) groups.push(members);
+      };
+      (Array.isArray(phase.clusters) ? phase.clusters : []).forEach(take);
+      take(phase.gridDroneIds);
+      if (groups.length) result[String(phase.id)] = groups;
+    }
+    return result;
+  }, [formationPhases, layoutDroneList]);
 
   const ledStartDelaySec = useMemo(() => {
     if (!formationTimeline.length) return null;
@@ -2146,33 +2436,28 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // JR-control start delay, and the "path와 동기화" button all read this. The
   // boards themselves are never touched here: pulling the phases onto the
   // timeline is an explicit user action in the LED editor.
+  // Unconditional: making the path readable by the LED editor is a different
+  // question from whether the 3D view mirrors LED playback, and tying the two
+  // together meant that turning the playback checkbox off silently disabled
+  // "path와 동기화" with no way to tell why. When the phases go away the
+  // timeline is empty and this clears the mirror on its own.
   useEffect(() => {
-    if (pathMirrorActive) {
-      store.dispatch(
-        setFormationSync({
-          timeline: formationTimeline,
-          delaySec: ledStartDelaySec,
-          layouts: phaseLayouts,
-        })
-      );
-    } else {
-      store.dispatch(
-        setFormationSync({ timeline: [], delaySec: null, layouts: {} })
-      );
-    }
-  }, [pathMirrorActive, formationTimeline, ledStartDelaySec, phaseLayouts]);
+    store.dispatch(
+      setFormationSync({
+        timeline: formationTimeline,
+        delaySec: ledStartDelaySec,
+        layouts: phaseLayouts,
+        groups: phaseGroups,
+      })
+    );
+  }, [formationTimeline, ledStartDelaySec, phaseLayouts, phaseGroups]);
 
-  // Clear the mirrored formation data when the 3D view unmounts so stale
-  // regions don't linger on the LED timeline. Already-synced boards keep their
-  // own frozen copy of the phase shape, so they survive untouched.
-  useEffect(
-    () => () => {
-      store.dispatch(
-        setFormationSync({ timeline: [], delaySec: null, layouts: {} })
-      );
-    },
-    []
-  );
+  // Deliberately no unmount cleanup. This view is a workbench panel, so it is
+  // gone the moment the operator switches to the LED editor tab — clearing the
+  // mirror on the way out left "path와 동기화" permanently disabled in exactly
+  // the place it is used. The phases themselves outlive the panel in
+  // `viewRuntime`, so the mirrored copy is no more stale than its source, and
+  // it is refreshed on remount.
 
   useEffect(() => {
     const onGizmoDragState = (e) => {
@@ -2217,6 +2502,15 @@ const ThreeDView = React.forwardRef((props, ref) => {
   };
 
   const handlePausePlayback = () => {
+    if (syncActive) {
+      // With sync on, the shared LED clock is the thing that is running —
+      // handlePlayAll starts only that and returns. Clearing the local
+      // playback flag therefore stopped nothing, and the button appeared dead
+      // while the drones kept moving. handleResetAll already knew this; pause
+      // did not.
+      store.dispatch(setPlaying(false));
+    }
+
     setIsPlaybackRunning(false);
     // Freeze any leftover segment animations (single-drone path play, etc.).
     window.dispatchEvent(new CustomEvent('drone-path-stop'));
@@ -2792,11 +3086,39 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 드론들로 그 phase 전환의 클러스터(통째로 움직이는 그룹)를 만들 수 있다.
   const [selectedPhaseId, setSelectedPhaseId] = useState(null);
 
-  const handleTogglePhaseSelected = useCallback((phaseId) => {
-    const pid = phaseId != null ? String(phaseId) : '';
-    if (!pid) return;
-    setSelectedPhaseId((prev) => (prev === pid ? null : pid));
-  }, []);
+  // Which phase the LED editor was last seen on. The two panels follow each
+  // other, so this records what has already been applied — without it a phase
+  // deselected here would be pulled straight back by the editor still sitting
+  // on that board.
+  const lastLedPhaseRef = useRef(ledActivePhaseId);
+
+  useEffect(() => {
+    if (ledActivePhaseId === lastLedPhaseRef.current) {
+      return;
+    }
+
+    lastLedPhaseRef.current = ledActivePhaseId;
+    if (ledActivePhaseId) {
+      setSelectedPhaseId(String(ledActivePhaseId));
+    }
+  }, [ledActivePhaseId]);
+
+  const handleTogglePhaseSelected = useCallback(
+    (phaseId) => {
+      const pid = phaseId != null ? String(phaseId) : '';
+      if (!pid) return;
+      const next = selectedPhaseId === pid ? null : pid;
+      setSelectedPhaseId(next);
+      // Move the editor onto the matching board so a two-screen setup stays on
+      // one formation. Deselecting is deliberately not mirrored: clearing the
+      // editor's board would take the canvas away from whoever is painting.
+      if (next) {
+        lastLedPhaseRef.current = next;
+        store.dispatch(selectBoardByPhaseId(next));
+      }
+    },
+    [selectedPhaseId]
+  );
 
   /**
    * 3D 뷰 클릭이 참고하는 그룹 표 — droneId -> { key, members }.
@@ -3133,7 +3455,13 @@ const ThreeDView = React.forwardRef((props, ref) => {
           path: [{ x: point.x, y: point.y, z: point.z }],
         }));
 
+      // The id goes with it so the planner can echo it back: without it the
+      // annotation that comes home cannot be joined to the phase it describes,
+      // and every frozen layout — which is keyed by this id — is unreachable.
       const phasePayload = { name, holdMs, points };
+      if (phase?.id != null && String(phase.id).trim()) {
+        phasePayload.id = String(phase.id);
+      }
       if (fixedPaths.length) {
         phasePayload.fixedPaths = fixedPaths;
       }
@@ -3288,7 +3616,31 @@ const ThreeDView = React.forwardRef((props, ref) => {
           // 백엔드가 계산한 phase별 실제 도착/종료 시각(절대 초)을 LED
           // 타임라인 마커로 반영. staging-grid / return-to-start 구간은
           // 회색 'transit' 구간으로 구분한다.
-          if (Array.isArray(json.phases)) {
+          // 서버가 직접 붙인 주석을 우선 사용한다 — phase 이름·id, 플래너가
+          // 스스로 끼워넣은 leg 구분, hold 와 그 뒤 회전의 분리가 모두 명시돼
+          // 있다. 아래 json.phases 폴백은 그 셋을 순번과 이름으로 추측해야
+          // 하므로 구버전 서버에 대해서만 쓴다.
+          const serverPlan = readFormationPlan(
+            json.formationPlan,
+            formationPhases
+          );
+          if (serverPlan && myGeneration === planGenerationRef.current) {
+            setPlannedTimeline(serverPlan.timeline);
+            if (serverPlan.unmatched > 0) {
+              // Say it rather than let those phases quietly refuse to open.
+              summaryDetail +=
+                "\n(phase " +
+                serverPlan.unmatched +
+                "개는 현재 phase 목록과 짝이 맞지 않아 보드에 연결되지 않았습니다)";
+            }
+            summaryDetail +=
+              '\nLED 타임라인에 phase 타이밍 반영 (' +
+              serverPlan.timeline.length +
+              '개 구간, 서버 주석)';
+          } else if (serverPlan) {
+            summaryDetail +=
+              '\n(요청 중 phase가 바뀌어 이 타이밍은 반영하지 않음)';
+          } else if (Array.isArray(json.phases)) {
             let formationIndex = 0;
             const planned = json.phases
               .filter(
@@ -3338,6 +3690,17 @@ const ThreeDView = React.forwardRef((props, ref) => {
           : payload.output === 'path'
             ? 'json'
             : 'skyc';
+        // 다운로드 링크로 넘기기 전에 주석을 읽는다 — 여기서 놓치면 서버가
+        // 방금 계산한 타이밍은 파일이 Downloads 로 떨어지는 순간 사라진다.
+        const blobPlan = await readFormationPlanFromBlob(
+          blob,
+          ext,
+          formationPhases
+        );
+        if (blobPlan && myGeneration === planGenerationRef.current) {
+          setPlannedTimeline(blobPlan.timeline);
+        }
+
         a.href = objectUrl;
         a.download = `formation-plan.${ext}`;
         document.body.appendChild(a);
@@ -3351,6 +3714,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
         }
         URL.revokeObjectURL(objectUrl);
         summaryDetail = `\n다운로드: formation-plan.${ext}`;
+        if (blobPlan && myGeneration === planGenerationRef.current) {
+          summaryDetail +=
+            '\nLED 타임라인에 phase 타이밍 반영 (' +
+            blobPlan.timeline.length +
+            '개 구간, 서버 주석)';
+        }
       }
 
       setFormationDeliveryStatus(
@@ -3859,6 +4228,7 @@ ThreeDView.propTypes = {
   onSetViewRuntimeState: PropTypes.func,
   ledPlayheadSec: PropTypes.number,
   ledPlaying: PropTypes.bool,
+  ledActivePhaseId: PropTypes.string,
   threeDSync: PropTypes.bool,
   ledTimelineDuration: PropTypes.number,
 };
@@ -3879,6 +4249,7 @@ export default connect(
     uavToMissionIndex: getReverseMissionMapping(state),
     ledPlayheadSec: getPlayheadSec(state),
     ledPlaying: getPlaying(state),
+    ledActivePhaseId: getActiveBoardPhaseId(state),
     threeDSync: getThreeDSync(state),
     ledTimelineDuration: getTimelineDuration(state),
   }),

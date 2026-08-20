@@ -13,12 +13,18 @@ const PRESET_DELAYS_SECONDS = [15, 30, 60] as const;
 const DEFAULT_DELAY_SECONDS = 30;
 
 type ShowStartDelayDialogProps = Readonly<{
+  /**
+   * How many JR LED boards this start will also arm. Shown so the operator
+   * knows the one button reaches the LED boards too; zero hides the notice.
+   */
+  ledBoardCount?: number;
   onCancel: () => void;
   onConfirm: (delaySeconds: number) => void;
   open: boolean;
 }>;
 
 const ShowStartDelayDialog = ({
+  ledBoardCount = 0,
   onCancel,
   onConfirm,
   open,
@@ -87,6 +93,12 @@ const ShowStartDelayDialog = ({
             </Button>
           ))}
         </ButtonGroup>
+
+        {ledBoardCount > 0 && (
+          <Typography color='textSecondary' sx={{ mt: 2 }} variant='body2'>
+            {`LED 보드 ${ledBoardCount}대도 같이 ARM 되어, 위 시각에 맞춰 첫 프레임이 나갑니다.`}
+          </Typography>
+        )}
       </DialogContent>
 
       <DialogActions>
