@@ -2,6 +2,7 @@ import Add from '@mui/icons-material/Add';
 import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import Download from '@mui/icons-material/Download';
 import FolderOpen from '@mui/icons-material/FolderOpen';
+import GridOn from '@mui/icons-material/GridOn';
 import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
 import Pause from '@mui/icons-material/Pause';
 import PlayArrow from '@mui/icons-material/PlayArrow';
@@ -70,7 +71,16 @@ const sectionLabelStyle = {
   marginBottom: 12,
 };
 
-function ActionIconButton({ title, onClick, disabled, iconColor, children }) {
+function ActionIconButton({
+  title,
+  onClick,
+  disabled,
+  iconColor,
+  children,
+  // 'wait' fits a button disabled because it is busy; a button disabled
+  // because there is nothing to act on should not imply something is running.
+  disabledCursor = 'wait',
+}) {
   return (
     <Tooltip title={title} placement='top'>
       <button
@@ -80,7 +90,7 @@ function ActionIconButton({ title, onClick, disabled, iconColor, children }) {
         style={{
           ...iconButtonStyle,
           opacity: disabled ? 0.45 : 1,
-          cursor: disabled ? 'wait' : 'pointer',
+          cursor: disabled ? disabledCursor : 'pointer',
           color: iconColor,
         }}
         onMouseEnter={(e) => {
@@ -176,6 +186,7 @@ export default function PathControlPanel({
   onSendPathsClick,
   onFileChange,
   onAddDroneClick,
+  onOpenInitialGrid,
   isSendingPaths,
   pathDeliveryStatus,
 }) {
@@ -666,6 +677,19 @@ export default function PathControlPanel({
                   <Add />
                 </ActionIconButton>
                 <ActionIconButton
+                  title={
+                    droneCount > 0
+                      ? '초기 위치 일괄 배치'
+                      : '드론이 없습니다'
+                  }
+                  onClick={onOpenInitialGrid}
+                  disabled={!droneCount}
+                  disabledCursor='not-allowed'
+                  iconColor={NEUTRAL_300}
+                >
+                  <GridOn />
+                </ActionIconButton>
+                <ActionIconButton
                   title={isSendingPaths ? '다운로드 중...' : '내보내기'}
                   onClick={onSendPathsClick}
                   disabled={isSendingPaths}
@@ -729,6 +753,8 @@ PathControlPanel.propTypes = {
   onSendPathsClick: PropTypes.func.isRequired,
   onFileChange: PropTypes.func.isRequired,
   onAddDroneClick: PropTypes.func.isRequired,
+  /** 모든 드론의 초기(이륙) 위치를 격자 편집기로 한꺼번에 다시 놓는다 */
+  onOpenInitialGrid: PropTypes.func.isRequired,
   isSendingPaths: PropTypes.bool.isRequired,
   pathDeliveryStatus: PropTypes.string.isRequired,
 };

@@ -444,8 +444,18 @@ export default function FormationGridModal({
   previousDrones = null,
   previousLabel = '',
   minSeparation = 1.45,
+  confirmLabel = '',
+  confirmHint = '',
 }) {
   const isEdit = mode === 'edit';
+  /** 확정 버튼 문구 — phase 편집이 아닌 용도로도 쓰이므로 주입할 수 있다. */
+  const applyLabel =
+    confirmLabel || (isEdit ? 'Phase 수정 적용' : 'Phase로 추가');
+  const applyHint =
+    confirmHint ||
+    (isEdit
+      ? '배치를 마친 뒤 Phase 수정 적용을 누르면 이 phase 좌표가 갱신되고 3D 씬에 반영됩니다.'
+      : '배치를 마친 뒤 Phase로 추가를 누르면 새 formation phase가 만들어지고 3D 씬에 반영됩니다.');
   const viewRef = useRef(null);
   const paintRef = useRef(null);
   /** 뷰 드래그 회전: { startX, startYaw } */
@@ -1944,7 +1954,7 @@ export default function FormationGridModal({
                 disabled={placedDroneIds.size === 0}
                 onClick={handleConfirm}
               >
-                {isEdit ? 'Phase 수정 적용' : 'Phase로 추가'}
+                {applyLabel}
               </button>
             </div>
           </div>
@@ -2565,12 +2575,7 @@ export default function FormationGridModal({
                     '뷰 조작',
                     '빈 배경을 드래그하거나 우클릭 드래그로 회전하고, 마우스 휠로 확대·축소합니다. 왼쪽 슬라이더로도 조절할 수 있습니다.',
                   ],
-                  [
-                    isEdit ? 'Phase 수정 적용' : 'Phase로 추가',
-                    isEdit
-                      ? '배치를 마친 뒤 Phase 수정 적용을 누르면 이 phase 좌표가 갱신되고 3D 씬에 반영됩니다.'
-                      : '배치를 마친 뒤 Phase로 추가를 누르면 새 formation phase가 만들어지고 3D 씬에 반영됩니다.',
-                  ],
+                  [applyLabel, applyHint],
                 ].map(([stepTitle, body], idx) => (
                   <React.Fragment key={stepTitle}>
                     <div
@@ -2654,6 +2659,10 @@ FormationGridModal.propTypes = {
   previousLabel: PropTypes.string,
   /** 이미지 → 평면 배치가 지켜야 할 최소 간격 (m) */
   minSeparation: PropTypes.number,
+  /** 확정 버튼 문구 (기본: phase 추가/수정). 다른 용도로 열 때 덮어쓴다. */
+  confirmLabel: PropTypes.string,
+  /** 도움말에서 확정 버튼을 설명하는 문장 */
+  confirmHint: PropTypes.string,
   initialLattice: PropTypes.shape({
     nx: PropTypes.number,
     ny: PropTypes.number,

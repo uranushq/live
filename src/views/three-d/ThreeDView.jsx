@@ -925,6 +925,9 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 드론 추가 모달
   const [addDroneModalOpen, setAddDroneModalOpen] = useState(false);
   const [formationGridModalOpen, setFormationGridModalOpen] = useState(false);
+  // 초기(이륙) 위치 일괄 배치 — 같은 격자 편집기를 phase가 아니라 드론의
+  // 시작 위치에 대해 연다.
+  const [initialGridModalOpen, setInitialGridModalOpen] = useState(false);
   const [formationGridEditPhaseId, setFormationGridEditPhaseId] = useState(null);
   const [pathGeneratorModalOpen, setPathGeneratorModalOpen] = useState(false);
   const [isSendingPaths, setIsSendingPaths] = useState(false);
@@ -2628,6 +2631,98 @@ const ThreeDView = React.forwardRef((props, ref) => {
     setFormationGridModalOpen(true);
   }, []);
 
+  /**
+   * 초기 위치 일괄 배치 시드 — 각 드론의 *현재 시작 위치*를 격자 편집기에
+   * 넘긴다. path가 있는 드론은 path[0]이 곧 시작 위치이므로
+   * getDroneInitialPositionTuple 이 그대로 정답이다 (payload.initial 과 같은 규칙).
+   */
+  const initialGridDrones = useMemo(() => {
+    const drones = Array.isArray(effectiveConfig?.drones)
+      ? effectiveConfig.drones
+      : [];
+    return drones
+      .filter((d) => d?.id)
+      .map((d) => {
+        const [x, y, z] = getDroneInitialPositionTuple(d);
+        return { id: String(d.id), x, y, z };
+      });
+  }, [effectiveConfig]);
+
+  /**
+   * 격자 편집기에서 확정한 좌표를 모든 드론의 초기 위치로 반영한다.
+   *
+   * initialPos 뿐 아니라 path[0] 도 같이 고쳐 쓰는 게 핵심이다:
+   * getDroneInitialPositionTuple 이 path[0] 을 우선하므로, path 가 있는
+   * 드론(= show 파일을 불러온 경우 전부)은 path[0] 을 안 고치면 편집이
+   * 플래너까지 전달되지 않는다. 드론별 "초기 위치 적용"(useThreeDViewDroneEvents
+   * 의 onInitialPosUpdated)이 쓰는 규칙과 동일하다.
+   */
+  const handleConfirmInitialGrid = useCallback(
+    (pointsByDroneId) => {
+      if (!pointsByDroneId || typeof pointsByDroneId !== 'object') return;
+
+      const next = {};
+      for (const [droneId, pos] of Object.entries(pointsByDroneId)) {
+        if (!droneId || !pos || typeof pos !== 'object') continue;
+        const x = Number(pos.x);
+        const y = Number(pos.y);
+        const z = Number(pos.z);
+        if (![x, y, z].every(Number.isFinite)) continue;
+        next[String(droneId)] = [x, y, z];
+      }
+      if (!Object.keys(next).length) return;
+
+      setDroneConfig((prev) => {
+        const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
+        if (!base || !Array.isArray(base.drones)) return prev;
+        const drones = base.drones.map((d) => {
+          const target = d?.id != null ? next[String(d.id)] : undefined;
+          if (!target) return d;
+          const [nx, ny, nz] = target;
+          const updated = { ...d, initialPos: [nx, ny, nz], pos: [nx, ny, nz] };
+          if (Array.isArray(d.path) && d.path.length > 0) {
+            updated.path = [
+              { ...d.path[0], x: nx, y: ny, z: nz },
+              ...d.path.slice(1),
+            ];
+          }
+          return updated;
+        });
+        return { ...base, drones };
+      });
+
+      // 선택 중인 드론의 패널 값도 같이 맞춰준다.
+      setSelectedDrone((prev) => {
+        const target = prev?.id != null ? next[String(prev.id)] : undefined;
+        if (!target) return prev;
+        const [nx, ny, nz] = target;
+        const updated = {
+          ...prev,
+          initialPosition: { x: nx, y: ny, z: nz },
+        };
+        if (Array.isArray(prev.path) && prev.path.length > 0) {
+          updated.path = [
+            { ...prev.path[0], x: nx, y: ny, z: nz },
+            ...prev.path.slice(1),
+          ];
+        }
+        return updated;
+      });
+
+      // 씬의 드론도 새 시작 위치로 옮겨, 편집 결과가 바로 보이게 한다.
+      for (const [droneId, [nx, ny, nz]] of Object.entries(next)) {
+        window.dispatchEvent(
+          new CustomEvent('drone-move-request', {
+            detail: { id: droneId, x: nx, y: ny, z: nz },
+          })
+        );
+      }
+
+      setInitialGridModalOpen(false);
+    },
+    [collectConfigFromScene]
+  );
+
   /** Lattice 그리드 툴로 새 phase 추가 또는 기존 phase 좌표 수정 후 씬에 반영 */
   const handleConfirmFormationGridPhase = useCallback(
     (pointsByDroneId, latticeRaw, gridDroneIdsRaw) => {
@@ -3779,6 +3874,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         onSendPathsClick={handleSendPathsClick}
         onFileChange={handleFileChange}
         onAddDroneClick={() => setAddDroneModalOpen(true)}
+        onOpenInitialGrid={() => setInitialGridModalOpen(true)}
         isSendingPaths={isSendingPaths}
         pathDeliveryStatus={pathDeliveryStatus}
       />
@@ -3819,6 +3915,25 @@ const ThreeDView = React.forwardRef((props, ref) => {
                 formationGridEditPhaseName ? ` · ${formationGridEditPhaseName}` : ''
               }`
             : undefined
+        }
+      />
+      )}
+      {isCreateMode && initialGridModalOpen && (
+      <FormationGridModal
+        open
+        onClose={() => setInitialGridModalOpen(false)}
+        drones={initialGridDrones}
+        onConfirm={handleConfirmInitialGrid}
+        mode='edit'
+        minSeparation={
+          sanitizeFormationSettings(formationSettings).min_separation
+        }
+        title='초기 위치 · 일괄 배치 (지면 기준 · 이륙 전)'
+        confirmLabel='초기 위치로 적용'
+        confirmHint={
+          '배치를 마친 뒤 누르면 모든 드론의 시작 위치(플래너로 나가는 initial)가 ' +
+          '갱신됩니다. 지면 좌표이므로 z는 보통 0이고, 이륙 후 호버 고도는 ' +
+          '전송 옵션의 이륙 고도가 따로 정합니다. LED 색이나 phase 좌표는 바뀌지 않습니다.'
         }
       />
       )}
