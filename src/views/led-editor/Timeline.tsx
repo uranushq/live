@@ -13,6 +13,8 @@
 import Add from '@mui/icons-material/Add';
 import CloudUpload from '@mui/icons-material/CloudUpload';
 import Download from '@mui/icons-material/Download';
+import FolderOpen from '@mui/icons-material/FolderOpen';
+import Save from '@mui/icons-material/Save';
 import ContentCopy from '@mui/icons-material/ContentCopy';
 import ContentPaste from '@mui/icons-material/ContentPaste';
 import Delete from '@mui/icons-material/Delete';
@@ -40,6 +42,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   downloadCompiledBinaries,
   exportAndUpload,
+  exportLedShowToFile,
+  importLedShowFromFile,
 } from '~/features/led-editor/actions';
 import {
   canExport,
@@ -131,6 +135,7 @@ const Timeline = (): JSX.Element => {
 
   const trackRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const showFileInputRef = useRef<HTMLInputElement>(null);
   const drag = useRef<DragState | undefined>(undefined);
 
   // Horizontal zoom: pixels per second. A ref mirrors it so the drag/scrub math
@@ -742,6 +747,38 @@ const Timeline = (): JSX.Element => {
             {upload.message}
           </Typography>
         )}
+        <Button
+          size='small'
+          startIcon={<Save />}
+          disabled={boards.length === 0}
+          title='작업 중인 LED 쇼를 .ledshow 파일로 저장합니다. 새로고침해도 이 파일로 되살릴 수 있습니다.'
+          onClick={() => dispatch(exportLedShowToFile())}
+        >
+          쇼 저장
+        </Button>
+        <Button
+          size='small'
+          startIcon={<FolderOpen />}
+          title='.ledshow 또는 uranus-show-project.json 을 불러옵니다. 현재 보드는 대체됩니다.'
+          onClick={() => showFileInputRef.current?.click()}
+        >
+          쇼 열기
+        </Button>
+        <input
+          ref={showFileInputRef}
+          type='file'
+          accept='.ledshow,.json'
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void dispatch(importLedShowFromFile(file));
+            }
+
+            // Clear it so re-picking the same file fires onChange again.
+            event.target.value = '';
+          }}
+        />
         <Button
           size='small'
           startIcon={<Download />}
