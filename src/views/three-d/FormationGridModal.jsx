@@ -446,6 +446,9 @@ export default function FormationGridModal({
   minSeparation = 1.45,
   confirmLabel = '',
   confirmHint = '',
+  snapOnOpen = true,
+  allowImagePlacement = true,
+  allowYaw = true,
 }) {
   const isEdit = mode === 'edit';
   /** 확정 버튼 문구 — phase 편집이 아닌 용도로도 쓰이므로 주입할 수 있다. */
@@ -563,6 +566,29 @@ export default function FormationGridModal({
         normalizeLattice(lastLatticeRef.current) ??
         normalizeLattice(initialLattice) ??
         DEFAULT_LATTICE;
+    } else if (!snapOnOpen) {
+      // 좌표 자체가 원본인 용도(예: 실측 이륙 위치)에서는 열자마자 격자에
+      // 맞춰 옮기면 안 된다. 추론한 격자는 눈금으로만 깔고 드론은 실제
+      // 좌표에 그대로 둔 뒤, 사용자가 올린 드론만 슬롯으로 간다.
+      lattice =
+        normalizeLattice(initialLattice) ??
+        (() => {
+          const inferred = inferLatticeFromPositions(seeded);
+          return inferred
+            ? {
+                nx: inferred.nx,
+                ny: inferred.ny,
+                nz: inferred.nz,
+                sx: inferred.sx,
+                sy: inferred.sy,
+                sz: inferred.sz,
+                ax: inferred.ax,
+                ay: inferred.ay,
+                az: inferred.az,
+              }
+            : DEFAULT_LATTICE;
+        })();
+      occ = {};
     } else {
       const saved = normalizeLattice(initialLattice);
       const phaseDrones = seeded.filter((d) => d.fromPhase);
@@ -1719,6 +1745,9 @@ export default function FormationGridModal({
               </div>
             </div>
 
+            {/* yaw를 저장하지 않는 용도로 열렸다면 아예 감춘다 — 조작해도
+                버려지는 컨트롤을 보여주면 설정된 것으로 오인한다. */}
+            {allowYaw && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>Yaw · 일괄 기입 (°)</span>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -1746,6 +1775,7 @@ export default function FormationGridModal({
                 </div>
               )}
             </div>
+            )}
 
             <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
@@ -1863,6 +1893,9 @@ export default function FormationGridModal({
               </button>
             </div>
 
+            {/* 이미지 → 평면은 기본이 '정면 수직 평면'이라 z가 고도로 퍼진다.
+                지상 좌표를 편집하는 용도에서는 의미가 없고 위험하므로 뺀다. */}
+            {allowImagePlacement && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>평면 배치 · 격자와 별개</span>
               <button
@@ -1883,6 +1916,7 @@ export default function FormationGridModal({
                 </button>
               )}
             </div>
+            )}
 
             <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
 
@@ -2616,7 +2650,7 @@ export default function FormationGridModal({
         ) : null}
 
         <ImageToDotsModal
-          open={imagePlaneOpen}
+          open={allowImagePlacement && imagePlaneOpen}
           mode="place"
           droneIds={drones.map((d) => d.id)}
           droneOrigins={drones.map((d) => ({ x: d.x, y: d.y, z: d.z }))}
@@ -2663,6 +2697,16 @@ FormationGridModal.propTypes = {
   confirmLabel: PropTypes.string,
   /** 도움말에서 확정 버튼을 설명하는 문장 */
   confirmHint: PropTypes.string,
+  /**
+   * 열 때 추론한 격자에 드론을 맞춰 옮길지. 좌표가 격자에서 나온 phase 편집은
+   * true(기본)가 맞지만, 실측 좌표를 다루는 화면은 false 로 꺼야 한다 —
+   * 아무것도 건드리지 않았는데 위치가 반올림되어 버린다.
+   */
+  snapOnOpen: PropTypes.bool,
+  /** '이미지 → 평면에 쏘기'를 노출할지 (수직 평면이라 지상 좌표엔 부적합) */
+  allowImagePlacement: PropTypes.bool,
+  /** yaw 입력을 노출할지. 호출자가 yaw를 저장하지 않으면 꺼야 한다. */
+  allowYaw: PropTypes.bool,
   initialLattice: PropTypes.shape({
     nx: PropTypes.number,
     ny: PropTypes.number,

@@ -2672,6 +2672,48 @@ const ThreeDView = React.forwardRef((props, ref) => {
       }
       if (!Object.keys(next).length) return;
 
+      // 백엔드는 initial 을 그대로 검사한다: 모든 쌍이 x·y·z 중 최소 한 축에서
+      // min_separation 이상 떨어져야 하고(체비셰프), 아니면 전송이 422로 막힌다.
+      // 여기서 미리 잡아 주지 않으면 한참 뒤 전송 단계에서야 알게 된다.
+      const sep = sanitizeFormationSettings(formationSettings).min_separation;
+      const entries = Object.entries(next);
+      let worst = null;
+      for (let i = 0; i < entries.length; i += 1) {
+        for (let j = i + 1; j < entries.length; j += 1) {
+          const [idA, a] = entries[i];
+          const [idB, b] = entries[j];
+          const gap = Math.max(
+            Math.abs(a[0] - b[0]),
+            Math.abs(a[1] - b[1]),
+            Math.abs(a[2] - b[2])
+          );
+          if (gap < sep && (!worst || gap < worst.gap)) {
+            worst = { gap, idA, idB };
+          }
+        }
+      }
+      if (worst) {
+        setFormationDeliveryStatus(
+          `초기 위치 간격 경고: ${worst.idA} ↔ ${worst.idB} 가 ${worst.gap.toFixed(2)} m ` +
+            `(최소 ${sep} m). 이대로 전송하면 서버가 거부합니다 ` +
+            `(FORMATION_SPACING_TOO_CLOSE). 간격을 넓혀 다시 배치하세요.`
+        );
+      }
+
+      // 손으로 고친 경로는 pathOverridesByIdRef 에 따로 남아 있고, 내보내기는
+      // 그 맵을 effectiveConfig 위에 다시 덮는다(getConfigForPathDelivery).
+      // 여기서 같이 고쳐 두지 않으면 플래너로 가는 initial 은 새 위치인데
+      // 내보낸 .skyc 는 옛 위치가 되어 두 결과물이 어긋난다.
+      for (const [droneId, [nx, ny, nz]] of Object.entries(next)) {
+        const override = pathOverridesByIdRef.current.get(String(droneId));
+        if (Array.isArray(override) && override.length > 0) {
+          pathOverridesByIdRef.current.set(String(droneId), [
+            { ...override[0], x: nx, y: ny, z: nz },
+            ...override.slice(1),
+          ]);
+        }
+      }
+
       setDroneConfig((prev) => {
         const base = isDroneConfigState(prev) ? prev : collectConfigFromScene();
         if (!base || !Array.isArray(base.drones)) return prev;
@@ -2688,7 +2730,10 @@ const ThreeDView = React.forwardRef((props, ref) => {
           }
           return updated;
         });
-        return { ...base, drones };
+        // prev 가 부분 상태(예: show-spec 모드의 { deletedIds })면 base 는 씬
+        // 스크랩이라 그 키들이 없다. 삭제 목록을 잃으면 지운 드론이 되살아나
+        // payload.initial 에 다시 실린다.
+        return { ...(prev && typeof prev === 'object' ? prev : {}), ...base, drones };
       });
 
       // 선택 중인 드론의 패널 값도 같이 맞춰준다.
@@ -2720,7 +2765,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
 
       setInitialGridModalOpen(false);
     },
-    [collectConfigFromScene]
+    [collectConfigFromScene, formationSettings]
   );
 
   /** Lattice 그리드 툴로 새 phase 추가 또는 기존 phase 좌표 수정 후 씬에 반영 */
@@ -3929,11 +3974,21 @@ const ThreeDView = React.forwardRef((props, ref) => {
           sanitizeFormationSettings(formationSettings).min_separation
         }
         title='초기 위치 · 일괄 배치 (지면 기준 · 이륙 전)'
+        // 실측 이륙 좌표는 열자마자 격자로 반올림되면 안 된다. 격자는 눈금으로만
+        // 깔리고, 사용자가 올린 드론만 슬롯 좌표를 받는다.
+        snapOnOpen={false}
+        // 이미지 → 평면은 정면 수직 평면이라 z가 고도로 퍼진다 (지상 좌표엔 무의미).
+        allowImagePlacement={false}
+        // 초기 yaw 는 아직 저장/전송하지 않으므로 조작할 수 있게 두지 않는다.
+        allowYaw={false}
         confirmLabel='초기 위치로 적용'
         confirmHint={
-          '배치를 마친 뒤 누르면 모든 드론의 시작 위치(플래너로 나가는 initial)가 ' +
-          '갱신됩니다. 지면 좌표이므로 z는 보통 0이고, 이륙 후 호버 고도는 ' +
-          '전송 옵션의 이륙 고도가 따로 정합니다. LED 색이나 phase 좌표는 바뀌지 않습니다.'
+          '격자에 올린 드론만 슬롯 좌표로 옮겨지고, 건드리지 않은 드론은 실제 ' +
+          '위치 그대로 유지됩니다. 지면 좌표이므로 z는 보통 0이고, 이륙 후 호버 ' +
+          '고도는 전송 옵션의 이륙 고도가 따로 정합니다. 초기 위치를 바꾼 뒤에는 ' +
+          '반드시 포메이션을 다시 전달해 경로를 새로 계산하세요 — 기존 경로의 ' +
+          '첫 점만 옮겨지므로 재계산 전에는 첫 구간이 어긋납니다. LED 색, phase ' +
+          '좌표, 기수 방향(yaw)은 바뀌지 않습니다.'
         }
       />
       )}

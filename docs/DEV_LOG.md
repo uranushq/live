@@ -7,6 +7,25 @@
 
 <!-- ENTRIES -->
 
+## 2026-08-24 17:34:21 +0900 — `82319248` 초기 그리드 간격 수정
+
+_branch: dev · author: directorBae <bjw020615@gmail.com>_
+
+**요약**: 격자 편집기(FormationGridModal)를 phase 배치뿐 아니라 모든 드론의 **초기(이륙) 위치 일괄 재배치**에도 재사용할 수 있게 확장한 기능 추가 커밋이다.
+
+**주요 변경점**:
+- **모달 재사용화**: `FormationGridModal`에 `confirmLabel`·`confirmHint` prop을 추가해, phase 전용이던 확정 버튼 문구/도움말을 외부에서 주입 가능하게 일반화(하드코딩 문구를 `applyLabel`/`applyHint`로 대체).
+- **패널 진입점 추가**: `PathControlPanel`에 `GridOn` 아이콘 버튼("초기 위치 일괄 배치")과 `onOpenInitialGrid` prop 신설. 드론이 없으면 비활성화.
+- **커서 UX 보정**: `ActionIconButton`에 `disabledCursor` 옵션을 추가해, '할 일이 없어' 비활성인 버튼은 `not-allowed`, '작업 중'인 버튼만 `wait` 커서를 쓰도록 의미를 분리.
+- **핵심 로직(ThreeDView)**: `initialGridModalOpen` 상태·`initialGridDrones`(각 드론 현재 시작 위치 시드)·`handleConfirmInitialGrid` 추가. 확정 시 `initialPos`/`pos`뿐 아니라 **`path[0]`까지 함께 갱신**하고, 선택 드론 패널 값 동기화 + `drone-move-request` 이벤트로 씬에 즉시 반영. `isCreateMode`에서 전용 모달 렌더링.
+
+**의미/영향**: 기존 3D 그리드 배치(Formation) 자산을 그대로 재활용해, show 파일을 불러온 뒤 모든 드론의 이륙 출발점을 한 번에 정렬하는 실무 워크플로가 추가됐다. 특히 path가 있는 드론은 `getDroneInitialPositionTuple`이 `path[0]`을 우선하므로 `path[0]`까지 고쳐야 편집이 플래너로 전달된다는 점을 정확히 처리해, 드론별 "초기 위치 적용"과 규칙 일관성을 유지한다. 배치→플래너 전송 파이프라인의 편의성·정합성을 높이는 진척이다.
+
+**주의/리스크**: 커밋 메시지("초기 그리드 간격 수정")가 실제 내용(초기 위치 일괄 배치 **기능 추가**)과 어긋나 히스토리 추적성이 떨어진다. 기능상 z를 지면 좌표(보통 0)로 덮어쓰므로, 이미 고도가 설정된 path의 첫 웨이포인트 z가 0으로 초기화될 수 있어 이륙 고도 옵션과의 상호작용을 실제 하드웨어로 검증할 필요가 있다.
+
+---
+
+
 ## 2026-08-20 15:16:36 +0900 — `551e6bf0` .
 
 _branch: dev · author: directorBae <bjw020615@gmail.com>_
