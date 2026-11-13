@@ -155,9 +155,19 @@ const FORMATION_COLORS = Object.freeze([
   '#ec407a',
 ]);
 
-// 드론 간 최소 간격의 절대 하한 (m). 백엔드 HARD_MIN_SEPARATION과 동일 —
-// 어떤 축에서도 이보다 가까워질 수 없고, 사용자 설정으로도 낮출 수 없다.
+// 간격을 지정하지 않았을 때 쓰는 기본값 (m). 백엔드 HARD_MIN_SEPARATION 과 동일.
 export const HARD_MIN_SEPARATION_M = 1.45;
+
+/**
+ * 사용자가 요구할 수 있는 최소 간격의 하한 (m). 백엔드
+ * MIN_SEPARATION_FLOOR 와 반드시 같아야 한다 — 프론트가 더 낮게 보내면
+ * 서버가 400 SEPARATION_BELOW_HARD_FLOOR 로 거부하고, 더 높게 막으면
+ * 서버가 허용하는 값을 UI 가 못 쓰게 된다.
+ *
+ * 간격은 체비셰프(축 기준)라 회전 불변이 아니다 — 하한에 딱 맞춘 격자를
+ * 비스듬히 돌리면 최대 √2배까지 줄어든다. 회전 대형에는 여유를 둘 것.
+ */
+export const MIN_SEPARATION_FLOOR_M = 1.0;
 
 const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   step_size: 1.0,
@@ -167,7 +177,8 @@ const DEFAULT_FORMATION_SETTINGS = Object.freeze({
   auto_upload: false,
   // 빈 문자열 = 백엔드 기본값(.skyc 다운로드) 사용. payload에서 output 키를 생략.
   output: '',
-  // 드론 간 최소 간격 (모든 축, m). 1.5 미만으로는 내려갈 수 없다.
+  // 드론 간 최소 간격 (모든 축, m). 기본값은 보수적으로 1.45를 쓰고,
+  // 사용자는 MIN_SEPARATION_FLOOR_M 까지 내릴 수 있다.
   min_separation: HARD_MIN_SEPARATION_M,
   // 복귀(return-to-start) 시 착륙 지점을 이륙 지점보다 더 넓게 벌릴지 여부와 간격 (m).
   landing_grid: false,
@@ -282,14 +293,15 @@ const sanitizeFormationSettings = (settings) => {
   const output = FORMATION_OUTPUT_OPTIONS.includes(rawOutput)
     ? rawOutput
     : DEFAULT_FORMATION_SETTINGS.output;
-  // 최소 간격: 어떤 입력이 와도 절대 하한(1.5 m) 밑으로는 내려가지 않는다.
+  // 최소 간격: 하한(MIN_SEPARATION_FLOOR_M)까지 내릴 수 있다. 값이 없거나
+  // 숫자가 아니면 하한이 아니라 기본값으로 — "미지정"이 "최소 여유"가 되면 안 된다.
   const minSeparation = Number(merged.min_separation);
   const resolvedMinSeparation = Number.isFinite(minSeparation)
-    ? Math.max(HARD_MIN_SEPARATION_M, minSeparation)
+    ? Math.max(MIN_SEPARATION_FLOOR_M, minSeparation)
     : HARD_MIN_SEPARATION_M;
   const landingSpacing = Number(merged.landing_spacing);
   const resolvedLandingSpacing = Number.isFinite(landingSpacing)
-    ? Math.max(HARD_MIN_SEPARATION_M, landingSpacing)
+    ? Math.max(MIN_SEPARATION_FLOOR_M, landingSpacing)
     : DEFAULT_FORMATION_SETTINGS.landing_spacing;
   return {
     step_size: resolvedStepSize,
@@ -421,6 +433,10 @@ const normalizeFormationLattice = (raw) => {
   ) {
     return null;
   }
+  // rot(격자판 회전각)은 나중에 추가된 필드 — 없으면 0으로 읽어 예전 파일과
+  // 호환된다. 여기서 빠뜨리면 회전이 저장/복원에서 조용히 사라진다.
+  const rawRot = Number(raw.rot);
+  const rot = Number.isFinite(rawRot) ? ((rawRot % 360) + 360) % 360 : 0;
   return {
     nx: Math.min(MAX_GRID_COUNT, Math.max(1, nx)),
     ny: Math.min(MAX_GRID_COUNT, Math.max(1, ny)),
@@ -431,6 +447,7 @@ const normalizeFormationLattice = (raw) => {
     ax,
     ay,
     az: Math.max(0, az),
+    rot,
   };
 };
 
@@ -928,6 +945,11 @@ const ThreeDView = React.forwardRef((props, ref) => {
   // 초기(이륙) 위치 일괄 배치 — 같은 격자 편집기를 phase가 아니라 드론의
   // 시작 위치에 대해 연다.
   const [initialGridModalOpen, setInitialGridModalOpen] = useState(false);
+  /**
+   * 초기 위치 일괄 배치에 마지막으로 쓴 격자(회전 포함). 이 모달은 phase 처럼
+   * 저장될 곳이 없으므로 여기 들고 있어야 다시 열 때 회전이 유지된다.
+   */
+  const [initialGridLattice, setInitialGridLattice] = useState(null);
   const [formationGridEditPhaseId, setFormationGridEditPhaseId] = useState(null);
   const [pathGeneratorModalOpen, setPathGeneratorModalOpen] = useState(false);
   const [isSendingPaths, setIsSendingPaths] = useState(false);
@@ -2658,8 +2680,12 @@ const ThreeDView = React.forwardRef((props, ref) => {
    * 의 onInitialPosUpdated)이 쓰는 규칙과 동일하다.
    */
   const handleConfirmInitialGrid = useCallback(
-    (pointsByDroneId) => {
+    (pointsByDroneId, latticeRaw) => {
       if (!pointsByDroneId || typeof pointsByDroneId !== 'object') return;
+
+      // 쓴 격자를 기억해 둔다. 안 그러면 다시 열 때 좌표에서 격자를 역추론하는데,
+      // 그 추론은 축 정렬을 전제하므로 회전된 배치에서는 엉뚱한 격자가 나온다.
+      setInitialGridLattice(normalizeFormationLattice(latticeRaw));
 
       const next = {};
       for (const [droneId, pos] of Object.entries(pointsByDroneId)) {
@@ -3970,6 +3996,7 @@ const ThreeDView = React.forwardRef((props, ref) => {
         drones={initialGridDrones}
         onConfirm={handleConfirmInitialGrid}
         mode='edit'
+        initialLattice={initialGridLattice}
         minSeparation={
           sanitizeFormationSettings(formationSettings).min_separation
         }

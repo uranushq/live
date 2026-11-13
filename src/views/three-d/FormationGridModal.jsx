@@ -7,6 +7,7 @@ import Colors from '~/components/colors';
 import FillDirectionPicker from './FillDirectionPicker';
 import GridSatelliteGround from './GridSatelliteGround';
 import ImageToDotsModal from './ImageToDotsModal';
+import { solveAssignment } from './utils/assignment';
 import {
   axisIndices,
   PLANE_AXES,
@@ -22,6 +23,20 @@ const AXIS_COLORS = {
 };
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+/**
+ * 자동 배정을 포기하는 크기 — 후보 드론 × 슬롯. solveAssignment 는 n×n 비용
+ * 행렬을 만들고 n>400 부터 greedy+2opt 로 떨어지는데, 그 경로는 n² 개의 배열을
+ * 만들어 정렬하므로 수천 대 규모에서 탭이 수 초간 멈춘다. 조용히 멈추는 대신
+ * 건너뛰고 UI로 알린다.
+ */
+const AUTO_ASSIGN_MAX_CELLS = 400 * 400;
+
+/** 각도를 [0, 360) 으로 정규화 (-90 → 270) */
+const normalizeAngle = (deg) => {
+  const v = Number(deg) % 360;
+  return Math.round((v < 0 ? v + 360 : v) * 10) / 10;
+};
 
 const nodeKey = (i, j, k) => `${i}_${j}_${k}`;
 
@@ -68,8 +83,33 @@ const DEFAULT_LATTICE = { nx: 6, ny: 6, nz: 4, sx: 8, sy: 8, sz: 6, ax: 0, ay: 0
 /** 이 대수까지만 이전 phase 회색 점에 드론 라벨을 붙인다. */
 const GHOST_LABEL_LIMIT = 40;
 
-/** 축별 최대 격자 개수 — 세 축 모두 동일하다. */
-export const MAX_GRID_COUNT = 14;
+/**
+ * 축별 최대 격자 개수.
+ *
+ * 진짜 비용은 축 하나가 아니라 **슬롯 총개수**다 — 슬롯마다 마우스 핸들러가
+ * 달린 div 하나가 nx×ny×nz 전부 만들어진다(현재 층만이 아니다). 그래서 축마다
+ * 같은 상한을 걸면 한계의 모양이 거꾸로가 된다: 25×25×1(625개)은 막히는데
+ * 14×14×14(2744개)는 통과한다. 축 상한은 넉넉히 두고 총개수를
+ * MAX_GRID_SLOTS 로 묶는다.
+ */
+export const MAX_GRID_COUNT = 40;
+
+/**
+ * 한 번에 렌더할 슬롯 총개수 상한. 기존 상한의 최악값(14³=2744)보다 여유 있게
+ * 잡아, 넓고 납작한 격자(예: 40×40×1 = 1600, 30×30×4 = 3600)가 가능해진다.
+ */
+export const MAX_GRID_SLOTS = 4000;
+
+/**
+ * 다른 두 축이 주어졌을 때 이 축에 허용되는 최대 개수.
+ * 총 슬롯 예산을 넘지 않는 선에서 한 축을 얼마나 늘릴 수 있는지.
+ */
+export const axisCountLimit = (otherA, otherB) =>
+  clamp(
+    Math.floor(MAX_GRID_SLOTS / Math.max(1, (otherA || 1) * (otherB || 1))),
+    1,
+    MAX_GRID_COUNT
+  );
 /** 간격(m) 허용 범위 */
 const MIN_SPACING = 1;
 const MAX_SPACING = 60;
@@ -80,11 +120,34 @@ const ZERO_PAN = Object.freeze({ x: 0, y: 0 });
  * 기준점(ax,ay,az) = 격자 시작 모서리 (i=j=k=0).
  * 월드 원점(0,0,0)의 XYZ 축과 별개로, 격자만 이 좌표에서 시작한다.
  */
-const latticeSlotPos = (i, j, k, { ax, ay, az, sx, sy, sz }) => ({
-  x: ax + i * sx,
-  y: ay + j * sy,
-  z: az + k * sz,
-});
+/**
+ * 격자판 회전 — 기준점(ax, ay)을 축으로 수평면에서 rot°만큼 돌린다.
+ *
+ * 수직축(Z) 회전 하나만 둔다: 바닥 격자를 비스듬히 놓는 경우도, 벽 대형이
+ * 바라보는 방위를 바꾸는 경우도 전부 이 회전이다. 고도(z)는 건드리지 않으므로
+ * 레이어 구조와 이륙 고도 계산이 그대로 유지된다.
+ */
+const rotateLocal = (lx, ly, rot) => {
+  const t = ((Number(rot) || 0) * Math.PI) / 180;
+  if (!t) return { dx: lx, dy: ly };
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  return { dx: lx * cos - ly * sin, dy: lx * sin + ly * cos };
+};
+
+/** 월드 오프셋 → 격자 로컬 오프셋 (rotateLocal 의 역변환) */
+const unrotateLocal = (dx, dy, rot) => {
+  const t = ((Number(rot) || 0) * Math.PI) / 180;
+  if (!t) return { lx: dx, ly: dy };
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  return { lx: dx * cos + dy * sin, ly: -dx * sin + dy * cos };
+};
+
+const latticeSlotPos = (i, j, k, { ax, ay, az, sx, sy, sz, rot }) => {
+  const { dx, dy } = rotateLocal(i * sx, j * sy, rot);
+  return { x: ax + dx, y: ay + dy, z: az + k * sz };
+};
 
 const normalizeLattice = (raw) => {
   if (!raw || typeof raw !== 'object') return null;
@@ -110,16 +173,34 @@ const normalizeLattice = (raw) => {
   ) {
     return null;
   }
-  return {
+  // rot 은 나중에 추가된 필드 — 없는 예전 phase 는 회전 0으로 읽힌다.
+  const rawRot = Number(raw.rot);
+  const rot = Number.isFinite(rawRot) ? normalizeAngle(rawRot) : 0;
+  // 축별 상한을 먼저 적용하고, 총개수가 예산을 넘으면 가장 큰 축부터 줄인다.
+  // (예전 상한이 14였으므로 기존 저장 파일은 최악 2744 < 예산이라 영향 없다.)
+  const counts = {
     nx: clamp(nx, 1, MAX_GRID_COUNT),
     ny: clamp(ny, 1, MAX_GRID_COUNT),
     nz: clamp(nz, 1, MAX_GRID_COUNT),
+  };
+  while (counts.nx * counts.ny * counts.nz > MAX_GRID_SLOTS) {
+    const biggest = ['nx', 'ny', 'nz'].reduce((a, b) =>
+      counts[a] >= counts[b] ? a : b
+    );
+    if (counts[biggest] <= 1) break;
+    counts[biggest] -= 1;
+  }
+  return {
+    nx: counts.nx,
+    ny: counts.ny,
+    nz: counts.nz,
     sx: clamp(sx, MIN_SPACING, MAX_SPACING),
     sy: clamp(sy, MIN_SPACING, MAX_SPACING),
     sz: clamp(sz, MIN_SPACING, MAX_SPACING),
     ax,
     ay,
     az: Math.max(0, az),
+    rot,
   };
 };
 
@@ -170,7 +251,9 @@ const inferLatticeFromPositions = (positions) => {
   const ax = xs[0];
   const ay = ys[0];
   const az = Math.max(0, zs[0]);
-  const lattice = { nx, ny, nz, sx, sy, sz, ax, ay, az };
+  // 추론은 축 정렬(uniqSorted)을 전제하므로 회전은 0으로 둔다 — 돌아간 격자는
+  // 사용자가 회전값을 직접 준다.
+  const lattice = { nx, ny, nz, sx, sy, sz, ax, ay, az, rot: 0 };
   const occupancy = matchOccupancyToLattice(positions, lattice);
   return { ...lattice, occupancy };
 };
@@ -183,7 +266,7 @@ const parseNodeKey = (key) => {
 const compareDroneId = (a, b) =>
   String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
-const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
+const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz, rot }) => {
   const { i, j, k } = parseNodeKey(key);
   if (
     !Number.isFinite(i) ||
@@ -198,7 +281,7 @@ const slotWorldPos = (key, { ax, ay, az, nx, ny, nz, sx, sy, sz }) => {
   ) {
     return null;
   }
-  return latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz });
+  return latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz, rot });
 };
 
 /**
@@ -501,6 +584,19 @@ export default function FormationGridModal({
   const [sx, setSx] = useState(DEFAULT_LATTICE.sx);
   const [sy, setSy] = useState(DEFAULT_LATTICE.sy);
   const [sz, setSz] = useState(DEFAULT_LATTICE.sz);
+  /** 격자판 회전각(도, 수직축 기준). 기준점을 축으로 수평면에서 돈다. */
+  const [rot, setRot] = useState(0);
+  /**
+   * 모양만 그리고 번호는 자동으로 — 켜 두면 배치를 마칠 때마다 점유된 슬롯에
+   * 드론 번호를 "원래 자리에서 가장 덜 움직이는" 조합으로 다시 배정한다.
+   * 기존 배치가 있는 phase를 열 때는 그 배정이 안무 그 자체이므로 꺼 둔다.
+   */
+  const [autoAssign, setAutoAssign] = useState(false);
+  /**
+   * 칠하기가 끝났을 때 자동 배정을 부르기 위한 다리. 마우스 이벤트 effect 가
+   * runAutoAssign 선언보다 위에 있어 직접 참조할 수 없다.
+   */
+  const autoAssignHookRef = useRef(null);
   const [ax, setAx] = useState(DEFAULT_LATTICE.ax);
   const [ay, setAy] = useState(DEFAULT_LATTICE.ay);
   const [az, setAz] = useState(DEFAULT_LATTICE.az);
@@ -585,6 +681,7 @@ export default function FormationGridModal({
                 ax: inferred.ax,
                 ay: inferred.ay,
                 az: inferred.az,
+                rot: inferred.rot ?? 0,
               }
             : DEFAULT_LATTICE;
         })();
@@ -609,6 +706,7 @@ export default function FormationGridModal({
             ax: inferred.ax,
             ay: inferred.ay,
             az: inferred.az,
+            rot: inferred.rot ?? 0,
           };
           occ = inferred.occupancy || {};
         }
@@ -630,6 +728,7 @@ export default function FormationGridModal({
     setAx(lattice.ax);
     setAy(lattice.ay);
     setAz(lattice.az);
+    setRot(Number.isFinite(Number(lattice.rot)) ? Number(lattice.rot) : 0);
     setOccupancy(occ);
     setFreePos({});
     setDrones(laidOut);
@@ -643,6 +742,12 @@ export default function FormationGridModal({
     setPan(ZERO_PAN);
     setGuide(!isEdit);
     setImagePlaneOpen(false);
+    // 새 phase 를 만들 때만 기본으로 켠다. 편집 모드에서는 켜지 않는다:
+    // 기존 phase 의 번호 배정은 안무 그 자체이고, 초기 위치 일괄 배치에서는
+    // "몇 번 기체가 어느 패드에 있는지"가 바꿔선 안 되는 현장 사실이다.
+    // (`occ` 가 비었다는 건 "지킬 배정이 없다"가 아니라 "배정을 못 알아봤다"는
+    // 뜻일 수도 있어서 판단 근거로 쓰지 않는다.)
+    setAutoAssign(!isEdit);
     paintRef.current = null;
     // dronesProp / mode / initialLattice는 open 시점에만 시드
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- seed on open only
@@ -656,8 +761,8 @@ export default function FormationGridModal({
   // 시드가 된다). 위 시드 효과보다 뒤에 있어야 시드된 값이 기록된다.
   useEffect(() => {
     if (!open) return;
-    lastLatticeRef.current = { nx, ny, nz, sx, sy, sz, ax, ay, az };
-  }, [open, nx, ny, nz, sx, sy, sz, ax, ay, az]);
+    lastLatticeRef.current = { nx, ny, nz, sx, sy, sz, ax, ay, az, rot };
+  }, [open, nx, ny, nz, sx, sy, sz, ax, ay, az, rot]);
 
   /**
    * 가장자리/꼭짓점 드래그 → 반대쪽 변을 고정한 채 간격(과 필요하면 기준점)을
@@ -679,8 +784,10 @@ export default function FormationGridModal({
 
     const { handle, start, offset } = state;
     const round1 = (v) => Math.round(v * 10) / 10;
-    const targetX = world.x - offset.x;
-    const targetY = world.y - offset.y;
+    // 모든 산술은 격자 로컬 좌표(회전 전)에서 — 회전해도 식이 그대로다.
+    const local = unrotateLocal(world.x - state.ax, world.y - state.ay, state.rot);
+    const targetX = local.lx - offset.x;
+    const targetY = local.ly - offset.y;
     let { x0, y0, x1, y1 } = start;
 
     if (handle.includes('x1')) x1 = targetX;
@@ -688,14 +795,18 @@ export default function FormationGridModal({
     if (handle.includes('y1')) y1 = targetY;
     else if (handle.includes('y0')) y0 = targetY;
 
+    // 기준점은 로컬 원점이 어디로 갔는지로 정해, 마지막에 한 번만 월드로 되돌린다.
+    let originLx = 0;
+    let originLy = 0;
+
     if (handle.includes('x0') || handle.includes('x1')) {
       if (state.nx > 1) {
         setSx(
           clamp(round1(Math.abs(x1 - x0) / (state.nx - 1)), MIN_SPACING, MAX_SPACING)
         );
-        setAx(round1(Math.min(x0, x1)));
+        originLx = Math.min(x0, x1);
       } else {
-        setAx(round1(targetX));
+        originLx = targetX;
       }
     }
 
@@ -704,10 +815,19 @@ export default function FormationGridModal({
         setSy(
           clamp(round1(Math.abs(y1 - y0) / (state.ny - 1)), MIN_SPACING, MAX_SPACING)
         );
-        setAy(round1(Math.min(y0, y1)));
+        originLy = Math.min(y0, y1);
       } else {
-        setAy(round1(targetY));
+        originLy = targetY;
       }
+    }
+
+    if (originLx || originLy) {
+      const { dx, dy } = rotateLocal(originLx, originLy, state.rot);
+      // 회전이 없으면 로컬 축과 월드 축이 일치하므로, 끌지 않은 축은 아예
+      // 건드리지 않는다 — 그러지 않으면 Y만 끌었는데 ax 가 0.1 m 단위로
+      // 반올림되어 격자 전체가 X로 살짝 밀린다.
+      if (dx !== 0 || state.rot) setAx(round1(state.ax + dx));
+      if (dy !== 0 || state.rot) setAy(round1(state.ay + dy));
     }
   }, []);
 
@@ -757,6 +877,9 @@ export default function FormationGridModal({
       if (paintRef.current !== null) {
         paintRef.current = null;
         setPaintTick((t) => t + 1);
+        // 칠하는 동안이 아니라 손을 뗀 뒤 한 번만 — 드래그 중 매 칸마다 최적
+        // 배정을 다시 푸는 건 비싸고, 번호가 눈앞에서 요동쳐 보기도 나쁘다.
+        autoAssignHookRef.current?.();
       }
       if (resizeRef.current) {
         resizeRef.current = null;
@@ -853,15 +976,15 @@ export default function FormationGridModal({
   );
 
   const nodePos = useCallback(
-    (i, j, k) => latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz }),
-    [ax, ay, az, sx, sy, sz]
+    (i, j, k) => latticeSlotPos(i, j, k, { ax, ay, az, sx, sy, sz, rot }),
+    [ax, ay, az, sx, sy, sz, rot]
   );
 
   // spacing / anchor / lattice·occupancy 가 바뀌면 배치 드론만 슬롯으로 다시
   // 옮긴다 (대기 드론은 이전 상태 그대로).
   useEffect(() => {
     if (!open) return;
-    const lattice = { ax, ay, az, nx, ny, nz, sx, sy, sz };
+    const lattice = { ax, ay, az, nx, ny, nz, sx, sy, sz, rot };
     const nextOcc = {};
     Object.entries(occupancy).forEach(([key, droneId]) => {
       if (slotWorldPos(key, lattice)) nextOcc[key] = droneId;
@@ -892,7 +1015,7 @@ export default function FormationGridModal({
     });
 
     if (occChanged) setOccupancy(nextOcc);
-  }, [open, sx, sy, sz, ax, ay, az, nx, ny, nz, occupancy]);
+  }, [open, sx, sy, sz, ax, ay, az, rot, nx, ny, nz, occupancy]);
 
   const axIndex = laxis === 'x' ? 0 : laxis === 'y' ? 1 : 2;
   const axCount = laxis === 'x' ? nx : laxis === 'y' ? ny : nz;
@@ -903,6 +1026,23 @@ export default function FormationGridModal({
       return az + idx * sz;
     },
     [laxis, ax, ay, az, sx, sy, sz]
+  );
+  /**
+   * 층 라벨. 회전은 수평면에서만 일어나므로 Z 층은 언제나 월드 고도지만,
+   * 회전된 X·Y 층은 더 이상 "월드 X가 일정한 평면"이 아니다. 그때는 월드
+   * 기준점(ax)을 더한 값을 보여주면 월드도 로컬도 아닌 숫자가 되므로,
+   * 격자 기준 거리(idx × 간격)만 축 이름 없이 보여준다.
+   */
+  const axValueIsWorld = laxis === 'z' || !rot;
+  const axLabel = useCallback(
+    (idx) => {
+      if (axValueIsWorld) {
+        return `${laxis.toUpperCase()} ${axValue(idx).toFixed(1)} m`;
+      }
+      const step = laxis === 'x' ? sx : sy;
+      return `격자 ${laxis === 'x' ? 'i' : 'j'}=${idx} · ${(idx * step).toFixed(1)} m`;
+    },
+    [laxis, axValue, axValueIsWorld, sx, sy]
   );
 
   // 투영·회전은 항상 월드 원점(0,0,0) 기준.
@@ -917,14 +1057,17 @@ export default function FormationGridModal({
         for (const i of [0, nx - 1]) pts.push(nodePos(i, j, k));
       }
     }
+    // 여백 사각형도 격자와 같이 돌려야 한다 — 돌지 않으면 180° 회전 같은 경우
+    // 실제 격자와 전혀 다른 곳을 감싸서 화면이 엉뚱하게 축소된다.
     const pad = Math.max(sx, sy) * 0.6;
-    const x0 = ax - pad;
-    const x1 = ax + Math.max(0, nx - 1) * sx + pad;
-    const y0 = ay - pad;
-    const y1 = ay + Math.max(0, ny - 1) * sy + pad;
-    for (const x of [x0, x1]) {
-      for (const y of [y0, y1]) {
-        pts.push({ x, y, z: 0 });
+    const lx0 = -pad;
+    const lx1 = Math.max(0, nx - 1) * sx + pad;
+    const ly0 = -pad;
+    const ly1 = Math.max(0, ny - 1) * sy + pad;
+    for (const lx of [lx0, lx1]) {
+      for (const ly of [ly0, ly1]) {
+        const { dx, dy } = rotateLocal(lx, ly, rot);
+        pts.push({ x: ax + dx, y: ay + dy, z: 0 });
       }
     }
 
@@ -936,7 +1079,7 @@ export default function FormationGridModal({
       height: view.h,
       pan,
     });
-  }, [nx, ny, nz, sx, sy, ax, ay, yaw, nodePos, view, zoom, pan]);
+  }, [nx, ny, nz, sx, sy, ax, ay, rot, yaw, nodePos, view, zoom, pan]);
 
   // 크기 조절 중에는 드래그 시작 시점의 맞춤을 그대로 쓴다 (위 fitFreeze 주석)
   const fit = fitFreeze ?? autoFit;
@@ -965,20 +1108,27 @@ export default function FormationGridModal({
    * 꼭짓점을 끌면 두 축의 간격이 함께 바뀐다 (반대쪽 변은 제자리에 고정).
    */
   const resizeFrame = useMemo(() => {
-    const x0 = ax;
-    const x1 = ax + Math.max(0, nx - 1) * sx;
-    const y0 = ay;
-    const y1 = ay + Math.max(0, ny - 1) * sy;
+    // 테두리는 격자 로컬 좌표(회전 전)로 계산하고, 화면에 그릴 때만 회전시킨다.
+    // 드래그 산술도 같은 로컬 좌표에서 돌아가므로 회전과 무관하게 동일하다.
+    const x0 = 0;
+    const x1 = Math.max(0, nx - 1) * sx;
+    const y0 = 0;
+    const y1 = Math.max(0, ny - 1) * sy;
     // 손잡이는 격자 밖으로 조금 밀어 둔다 — 꼭짓점 슬롯 클릭을 가리지 않게.
     const mx = sx * 0.3;
     const my = sy * 0.3;
-    const c00 = proj(x0 - mx, y0 - my, az);
-    const c10 = proj(x1 + mx, y0 - my, az);
-    const c11 = proj(x1 + mx, y1 + my, az);
-    const c01 = proj(x0 - mx, y1 + my, az);
+    const projLocal = (lx, ly) => {
+      const { dx, dy } = rotateLocal(lx, ly, rot);
+      return proj(ax + dx, ay + dy, az);
+    };
+    const c00 = projLocal(x0 - mx, y0 - my);
+    const c10 = projLocal(x1 + mx, y0 - my);
+    const c11 = projLocal(x1 + mx, y1 + my);
+    const c01 = projLocal(x0 - mx, y1 + my);
     const mid = (a, b) => ({ px: (a.px + b.px) / 2, py: (a.py + b.py) / 2 });
 
     return {
+      /** 로컬(회전 전) 테두리 — applyResize 가 쓰는 좌표계 */
       world: { x0, y0, x1, y1 },
       polygon: [c00, c10, c11, c01]
         .map((p) => `${p.px.toFixed(1)},${p.py.toFixed(1)}`)
@@ -994,7 +1144,7 @@ export default function FormationGridModal({
         { id: 'y1', axisLabel: 'Y', ...mid(c01, c11) },
       ],
     };
-  }, [ax, ay, az, nx, ny, sx, sy, proj]);
+  }, [ax, ay, az, rot, nx, ny, sx, sy, proj]);
 
   const beginResize = useCallback(
     (handleId) => (e) => {
@@ -1007,18 +1157,20 @@ export default function FormationGridModal({
       // 잡은 지점과 실제 변 사이의 차이를 기억해 두면 손잡이를 격자 밖에
       // 그려도 드래그가 커서를 정확히 따라온다.
       const rect = el.getBoundingClientRect();
-      const grab = unprojectOnZ(e.clientX - rect.left, e.clientY - rect.top, az);
+      const grabWorld = unprojectOnZ(e.clientX - rect.left, e.clientY - rect.top, az);
+      // 테두리는 로컬(회전 전) 좌표이므로 잡은 지점도 로컬로 되돌려 비교한다.
+      const grab = unrotateLocal(grabWorld.x - ax, grabWorld.y - ay, rot);
       const world = resizeFrame.world;
       const offset = {
         x: handleId.includes('x1')
-          ? grab.x - world.x1
+          ? grab.lx - world.x1
           : handleId.includes('x0')
-            ? grab.x - world.x0
+            ? grab.lx - world.x0
             : 0,
         y: handleId.includes('y1')
-          ? grab.y - world.y1
+          ? grab.ly - world.y1
           : handleId.includes('y0')
-            ? grab.y - world.y0
+            ? grab.ly - world.y0
             : 0,
       };
 
@@ -1029,11 +1181,14 @@ export default function FormationGridModal({
         nx,
         ny,
         az,
+        ax,
+        ay,
+        rot,
         unproject: unprojectOnZ,
       };
       setFitFreeze(autoFit);
     },
-    [autoFit, az, guide, nx, ny, resizeFrame, unprojectOnZ]
+    [autoFit, ax, ay, az, rot, guide, nx, ny, resizeFrame, unprojectOnZ]
   );
 
   const planeGeom = useMemo(() => {
@@ -1043,7 +1198,42 @@ export default function FormationGridModal({
     return { A: ny, B: nz, mk: (a, b) => P(layer, a, b) };
   }, [laxis, nx, ny, nz, layer, nodePos]);
 
+  /**
+   * 지금 좌표의 최소 간격 — 서버와 같은 체비셰프 기준.
+   *
+   * 체비셰프는 회전 불변이 아니라서, 간격 3 m 격자를 45° 돌리면 실제 거리는
+   * 그대로인데도 기준값이 2.12 m(1/√2 배)로 줄어 서버가 거부할 수 있다. 눈으로는
+   * 전혀 알 수 없는 변화라 여기서 실시간으로 알려 준다. 어떤 각도에서도 안전하려면
+   * 간격이 최소 간격의 √2 배는 되어야 한다.
+   */
+  const separationCheck = useMemo(() => {
+    const pts = drones.filter(
+      (d) => Number.isFinite(d.x) && Number.isFinite(d.y) && Number.isFinite(d.z)
+    );
+    if (pts.length < 2) return null;
+    let worst = Infinity;
+    let pair = null;
+    for (let i = 0; i < pts.length; i += 1) {
+      for (let j = i + 1; j < pts.length; j += 1) {
+        const gap = Math.max(
+          Math.abs(pts[i].x - pts[j].x),
+          Math.abs(pts[i].y - pts[j].y),
+          Math.abs(pts[i].z - pts[j].z)
+        );
+        if (gap < worst) {
+          worst = gap;
+          pair = [pts[i], pts[j]];
+        }
+      }
+    }
+    if (!pair || worst >= minSeparation) return null;
+    return { gap: worst, a: pair[0].label || pair[0].id, b: pair[1].label || pair[1].id };
+  }, [drones, minSeparation]);
+
   const occupiedCount = Object.keys(occupancy).length;
+  /** 자동 배정이 크기 때문에 건너뛰어지는 상태인지 (runAutoAssign 과 같은 기준) */
+  const autoAssignTooBig =
+    occupiedCount > 0 && drones.length * occupiedCount > AUTO_ASSIGN_MAX_CELLS;
   const freeDroneIds = useMemo(() => new Set(Object.keys(freePos)), [freePos]);
   /** 격자 슬롯이든 평면이든 어딘가에 올라간 드론 (= 대기가 아닌 드론) */
   const placedDroneIds = useMemo(
@@ -1091,9 +1281,120 @@ export default function FormationGridModal({
   }, []);
 
   const latticeParams = useCallback(
-    () => ({ ax, ay, az, nx, ny, nz, sx, sy, sz }),
-    [ax, ay, az, nx, ny, nz, sx, sy, sz]
+    () => ({ ax, ay, az, nx, ny, nz, sx, sy, sz, rot }),
+    [ax, ay, az, nx, ny, nz, sx, sy, sz, rot]
   );
+
+  /**
+   * 출발점 — 어디서 이 대형으로 날아오는지.
+   *
+   * phase 편집에서는 직전 phase 좌표(previousDrones)가 정답이다. 모달을 열
+   * 때의 좌표(homePos)를 쓰면 편집 중인 phase 자신의 좌표라서, 그게 바로
+   * 슬롯 위치이므로 비용이 대각선에서 0이 되고 최적해가 항등 치환이 된다 —
+   * 즉 아무것도 못 고른다. 직전 phase가 없는 경우(새 phase의 첫 단계, 초기
+   * 위치 일괄 배치)에만 homePos 로 떨어진다.
+   */
+  const assignOrigins = useMemo(() => {
+    const byId = {};
+    if (Array.isArray(previousDrones) && previousDrones.length) {
+      previousDrones.forEach((d) => {
+        if (d?.id == null) return;
+        const x = Number(d.x);
+        const y = Number(d.y);
+        const z = Number(d.z);
+        if ([x, y, z].every(Number.isFinite)) byId[String(d.id)] = { x, y, z };
+      });
+    }
+    return byId;
+  }, [previousDrones]);
+
+  /**
+   * 사용자가 그린 모양은 그대로 두고, 그 칸들에 들어갈 드론을 다시 고른다.
+   *
+   * 번호 순서를 바꾸는 것만이 아니라 **어떤 드론이 들어갈지도** 다시 고른다.
+   * 칸을 칠할 때 들어가는 드론은 `placeAtKey` 가 "번호가 가장 작은 대기 드론"
+   * 으로 뽑기 때문에, 그 조합만 섞으면 엉뚱한 드론이 현장을 가로지르는 결과가
+   * 그대로 남는다. 그래서 (평면 배치된 드론을 뺀) 전체 드론 × 점유 슬롯으로
+   * 직사각 최적 배정을 풀어, 가장 가까운 드론들이 뽑히게 한다.
+   *
+   * @returns 바뀐 점이 있으면 true
+   */
+  const runAutoAssign = useCallback(() => {
+    const {
+      drones: curDrones,
+      occupancy: curOcc,
+      freePos: curFree,
+    } = placementRef.current;
+    const keys = Object.keys(curOcc);
+    if (keys.length < 1) return false;
+
+    const lattice = latticeParams();
+    const slots = keys.map((k) => slotWorldPos(k, lattice));
+    if (slots.some((s) => !s)) return false;
+
+    // 후보 = 평면 배치되지 않은 모든 드론. 슬롯보다 많아도 되고(직사각 배정),
+    // 남는 드론은 -1 로 돌아와 대기로 남는다.
+    const pool = curDrones.filter((d) => d?.id != null && !curFree?.[d.id]);
+    if (pool.length < 1) return false;
+
+    // 너무 큰 문제는 메인 스레드를 수 초 멈추게 하므로 손대지 않는다.
+    if (pool.length * slots.length > AUTO_ASSIGN_MAX_CELLS) return false;
+
+    const home = homePosRef.current || {};
+    const originOf = (d) =>
+      assignOrigins[String(d.id)] ||
+      home[d.id] || { x: d.x, y: d.y, z: d.z };
+
+    const assign = solveAssignment(
+      (r, c) => {
+        const o = originOf(pool[r]);
+        const s = slots[c];
+        if (!o || !s) return Number.POSITIVE_INFINITY;
+        return (o.x - s.x) ** 2 + (o.y - s.y) ** 2 + (o.z - s.z) ** 2;
+      },
+      pool.length,
+      slots.length
+    );
+
+    const nextOcc = {};
+    assign.forEach((col, row) => {
+      if (col < 0 || !keys[col]) return;
+      nextOcc[keys[col]] = String(pool[row].id);
+    });
+    // 모든 슬롯이 채워지지 않았다면(후보가 모자람) 손대지 않는다 — 드론을
+    // 잃는 것보다 원래 배치를 두는 게 낫다.
+    if (Object.keys(nextOcc).length !== keys.length) return false;
+    const changed = keys.some((k) => curOcc[k] !== nextOcc[k]);
+    if (!changed) return false;
+
+    commitPlacement({
+      drones: relayoutDrones(
+        curDrones,
+        nextOcc,
+        lattice,
+        homePosRef.current,
+        curFree
+      ),
+      occupancy: nextOcc,
+    });
+    return true;
+  }, [assignOrigins, commitPlacement, latticeParams]);
+
+  // 칠하기가 끝났을 때 자동 배정이 켜져 있으면 돌도록 연결한다.
+  autoAssignHookRef.current = autoAssign ? runAutoAssign : null;
+
+  /**
+   * 격자 자체가 바뀌면(회전·간격·기준점·개수) 번호도 다시 뽑는다.
+   *
+   * 모양은 그대로여도 슬롯의 월드 좌표가 전부 움직이므로, 어느 드론이 어느
+   * 칸에 가야 가장 덜 움직이는지가 달라진다. 특히 회전은 그 영향이 가장 큰
+   * 조작인데, 가장자리 드래그와 회전 컨트롤은 paintRef 를 건드리지 않아
+   * 칠하기 종료 훅으로는 잡히지 않는다.
+   */
+  useEffect(() => {
+    if (!open || !autoAssign) return;
+    runAutoAssign();
+  }, [open, autoAssign, rot, sx, sy, sz, ax, ay, az, nx, ny, nz, runAutoAssign]);
 
   const placeAtKey = useCallback(
     (key, preferredId) => {
@@ -1176,11 +1477,14 @@ export default function FormationGridModal({
         commitPlacement(releaseAtKey(key));
         return;
       }
-      const next = placeAtKey(key, sel);
+      // 자동 배정 중에는 "이 드론을 여기에" 라는 지정을 받지 않는다. 받아 두고
+      // 손을 뗄 때 다시 배정해 버리면 사용자가 방금 고른 번호가 눈앞에서
+      // 뒤바뀐다 — 모순되는 두 조작을 같이 열어 두지 않는다.
+      const next = placeAtKey(key, autoAssign ? null : sel);
       paintRef.current = !!next;
       if (next) commitPlacement(next);
     },
-    [commitPlacement, placeAtKey, releaseAtKey]
+    [autoAssign, commitPlacement, placeAtKey, releaseAtKey]
   );
 
   const handleNodeEnter = useCallback(
@@ -1255,6 +1559,7 @@ export default function FormationGridModal({
           const next = placeAtKey(key, null);
           if (!next) {
             commitPlacement({ drones: d, occupancy: occ });
+            if (autoAssign) runAutoAssign();
             return;
           }
           d = next.drones;
@@ -1263,6 +1568,7 @@ export default function FormationGridModal({
       }
     }
     commitPlacement({ drones: d, occupancy: occ, selectedId: null });
+    if (autoAssign) runAutoAssign();
   };
 
   const clearAll = () => {
@@ -1387,6 +1693,7 @@ export default function FormationGridModal({
       ax: round3(ax),
       ay: round3(ay),
       az: round3(az),
+      rot: normalizeAngle(rot),
     };
     onConfirm?.(points, lattice, gridDroneIds);
     onClose();
@@ -1435,20 +1742,25 @@ export default function FormationGridModal({
   const scene = useMemo(() => {
     const plate = [];
     const pad = Math.max(sx, sy) * 0.6;
-    const x0 = ax - pad;
-    const x1 = ax + Math.max(0, nx - 1) * sx + pad;
-    const y0 = ay - pad;
-    const y1 = ay + Math.max(0, ny - 1) * sy + pad;
+    // 지면 참조 격자도 격자판과 함께 돌려야 실제 슬롯 위에 깔린다.
+    const lx0 = -pad;
+    const lx1 = Math.max(0, nx - 1) * sx + pad;
+    const ly0 = -pad;
+    const ly1 = Math.max(0, ny - 1) * sy + pad;
+    const projLocal = (lx, ly) => {
+      const { dx, dy } = rotateLocal(lx, ly, rot);
+      return proj(ax + dx, ay + dy, 0);
+    };
     for (let i = 0; i <= nx; i += 1) {
-      const x = x0 + (i / nx) * (x1 - x0);
-      const a = proj(x, y0, 0);
-      const b = proj(x, y1, 0);
+      const lx = lx0 + (i / nx) * (lx1 - lx0);
+      const a = projLocal(lx, ly0);
+      const b = projLocal(lx, ly1);
       plate.push({ x1: a.px, y1: a.py, x2: b.px, y2: b.py, key: `px${i}` });
     }
     for (let j = 0; j <= ny; j += 1) {
-      const y = y0 + (j / ny) * (y1 - y0);
-      const a = proj(x0, y, 0);
-      const b = proj(x1, y, 0);
+      const ly = ly0 + (j / ny) * (ly1 - ly0);
+      const a = projLocal(lx0, ly);
+      const b = projLocal(lx1, ly);
       plate.push({ x1: a.px, y1: a.py, x2: b.px, y2: b.py, key: `py${j}` });
     }
 
@@ -1612,6 +1924,7 @@ export default function FormationGridModal({
     sz,
     ax,
     ay,
+    rot,
     allLayers,
     planeGeom,
     proj,
@@ -1638,14 +1951,14 @@ export default function FormationGridModal({
       rows.push({
         key: `L${k}`,
         name: `L${k + 1}`,
-        alt: `${laxis.toUpperCase()} ${axValue(k).toFixed(1)} m`,
+        alt: axLabel(k),
         count: c,
         sel,
         index: k,
       });
     }
     return rows.reverse();
-  }, [axCount, occupancy, axIndex, allLayers, layer, laxis, axValue]);
+  }, [axCount, occupancy, axIndex, allLayers, layer, laxis, axLabel]);
 
   if (!open) return null;
 
@@ -1704,20 +2017,38 @@ export default function FormationGridModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={labStyle}>격자 개수 (X · Y · Z)</span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <NumberField value={nx} min={1} max={MAX_GRID_COUNT} integer onChange={setNx} />
-                <NumberField value={ny} min={1} max={MAX_GRID_COUNT} integer onChange={setNy} />
+                {/* 각 축의 상한은 나머지 두 축에 따라 달라진다 — 총 슬롯 수가
+                    예산을 넘지 않는 선까지. 납작한 격자는 훨씬 넓게 갈 수 있다. */}
+                <NumberField
+                  value={nx}
+                  min={1}
+                  max={axisCountLimit(ny, nz)}
+                  integer
+                  onChange={setNx}
+                />
+                <NumberField
+                  value={ny}
+                  min={1}
+                  max={axisCountLimit(nx, nz)}
+                  integer
+                  onChange={setNy}
+                />
                 <NumberField
                   value={nz}
                   min={1}
-                  max={MAX_GRID_COUNT}
+                  max={axisCountLimit(nx, ny)}
                   integer
                   onChange={(v) => {
-                    const next = clamp(Math.round(v), 1, MAX_GRID_COUNT);
+                    const next = clamp(Math.round(v), 1, axisCountLimit(nx, ny));
                     setNz(next);
                     setLayer((L) => Math.min(L, next - 1));
                   }}
                 />
               </div>
+              <span style={{ fontSize: 11, opacity: 0.5 }}>
+                슬롯 {(nx * ny * nz).toLocaleString()} / {MAX_GRID_SLOTS.toLocaleString()}개
+                {' · '}축당 최대 {MAX_GRID_COUNT}
+              </span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1727,6 +2058,53 @@ export default function FormationGridModal({
                 <NumberField value={sy} min={1} max={60} step={0.5} onChange={setSy} />
                 <NumberField value={sz} min={1} max={60} step={0.5} onChange={setSz} />
               </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={labStyle}>격자판 회전 (°)</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <NumberField
+                  value={rot}
+                  step={5}
+                  free
+                  allowNegative
+                  onChange={(v) => setRot(normalizeAngle(v))}
+                />
+                {[45, 90].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    style={{
+                      ...btnStyle(false),
+                      flex: '0 0 auto',
+                      padding: '8px 10px',
+                      fontSize: 12,
+                    }}
+                    title={`기준점을 축으로 ${d}° 돌립니다`}
+                    onClick={() => setRot((r) => normalizeAngle(r + d))}
+                  >
+                    +{d}°
+                  </button>
+                ))}
+                {rot !== 0 && (
+                  <button
+                    type="button"
+                    style={{
+                      ...btnStyle(false),
+                      flex: '0 0 auto',
+                      padding: '8px 10px',
+                      fontSize: 12,
+                    }}
+                    title="회전 해제"
+                    onClick={() => setRot(0)}
+                  >
+                    0°
+                  </button>
+                )}
+              </div>
+              <span style={{ fontSize: 11, opacity: 0.5 }}>
+                기준점을 축으로 수평면에서 회전합니다. 고도는 그대로입니다.
+              </span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1823,7 +2201,7 @@ export default function FormationGridModal({
                 활성 층 ·{' '}
                 {allLayers
                   ? '전체'
-                  : `L${layer + 1} · ${laxis.toUpperCase()} ${axValue(layer).toFixed(1)} m`}
+                  : `L${layer + 1} · ${axLabel(layer)}`}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <input
@@ -1890,6 +2268,57 @@ export default function FormationGridModal({
               </button>
               <button type="button" style={{ ...btnStyle(false), flex: 1, padding: '8px 10px', fontSize: 12 }} onClick={clearAll}>
                 전체 대기
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={labStyle}>번호 배정</span>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+                title="켜면 모양만 그리면 됩니다 — 칠하기를 끝낼 때마다 번호가 가장 덜 움직이는 조합으로 다시 배정됩니다."
+              >
+                <input
+                  type="checkbox"
+                  checked={autoAssign}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setAutoAssign(on);
+                    if (on) runAutoAssign();
+                  }}
+                  style={{ width: 14, height: 14, cursor: 'pointer' }}
+                />
+                모양만 그리고 번호는 자동
+              </label>
+              {autoAssign && (
+                <span style={{ fontSize: 11, opacity: 0.5 }}>
+                  켜져 있는 동안은 하단 스택의 드론 지정이 무시됩니다 (모양만
+                  그리면 됩니다).
+                </span>
+              )}
+              {autoAssignTooBig && (
+                <span style={{ fontSize: 11, color: 'rgba(255, 196, 120, 0.9)' }}>
+                  드론·슬롯이 너무 많아 자동 배정을 건너뜁니다 — 번호는 작은 수부터
+                  순서대로 들어갑니다.
+                </span>
+              )}
+              <button
+                type="button"
+                style={{ ...btnStyle(false), padding: '8px 10px', fontSize: 12 }}
+                disabled={occupiedCount < 2}
+                title={
+                  occupiedCount < 2
+                    ? '배치된 드론이 2대 이상일 때 쓸 수 있습니다'
+                    : '지금 모양 그대로 두고 번호만 최적으로 다시 배정합니다'
+                }
+                onClick={() => runAutoAssign()}
+              >
+                지금 번호 다시 배정
               </button>
             </div>
 
@@ -1980,6 +2409,31 @@ export default function FormationGridModal({
                 <span>{idleDrones.length}</span>
               </div>
             </div>
+
+            {separationCheck && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255, 167, 38, 0.45)',
+                  background: 'rgba(255, 167, 38, 0.12)',
+                  color: 'rgba(255, 196, 120, 0.95)',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}
+              >
+                간격 경고 · {separationCheck.a} ↔ {separationCheck.b}{' '}
+                {separationCheck.gap.toFixed(2)} m (최소 {minSeparation} m)
+                {rot !== 0 && (
+                  <>
+                    <br />
+                    회전하면 축 기준 간격이 최대 √2배까지 줄어듭니다 — 간격을 넓히거나
+                    회전각을 90° 단위로 두세요.
+                  </>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
               <button
@@ -2598,8 +3052,16 @@ export default function FormationGridModal({
                     '격자 개수는 X·Y·Z 방향 점 수, 간격은 점 사이 거리(m), 기준점은 격자 시작 모서리입니다. XYZ 축은 항상 (0,0,0)에 있고, 기준점만큼 떨어진 곳에서 격자가 시작됩니다.',
                   ],
                   [
+                    '격자판 회전',
+                    '회전각을 주면 격자판 전체가 기준점을 축으로 수평면에서 돕니다. 고도(층 구조)는 그대로입니다. 슬롯 위치만 돌아가고 각 기체의 기수 방향(yaw)은 바뀌지 않으니, 기수까지 돌리려면 Yaw 일괄 기입을 따로 쓰세요. 축 기준 간격이 최대 √2배까지 줄어들 수 있어 간격 경고를 함께 확인하세요.',
+                  ],
+                  [
                     '바로 배치',
-                    '대기 드론은 하단 스택에 모입니다. 드론을 고른 뒤 격자를 누르면 바로 배치되고, 빈 격자만 눌러도 가장 가까운 대기 드론이 올라갑니다.',
+                    '대기 드론은 하단 스택에 모입니다. 드론을 고른 뒤 격자를 누르면 그 드론이 올라가고, 빈 격자만 눌러도 대기 드론이 하나 올라갑니다.',
+                  ],
+                  [
+                    '모양만 그리고 번호는 자동',
+                    '이 옵션을 켜면 어느 칸을 켤지(모양)만 신경 쓰면 됩니다. 칠하기를 끝낼 때마다 각 번호가 직전 위치에서 가장 덜 움직이는 조합으로 다시 배정되어, 드론 경로가 서로 교차하지 않습니다. 모양은 그대로 두고 번호만 다시 뽑고 싶으면 "지금 번호 다시 배정"을 누르세요.',
                   ],
                   [
                     '건드리지 않은 드론',

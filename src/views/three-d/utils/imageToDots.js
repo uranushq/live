@@ -24,6 +24,22 @@
  */
 export const DOWNWASH_SAFE_VERTICAL_SEP = 2.6;
 
+/**
+ * 수평 최소 간격의 하한 (m). 백엔드 MIN_SEPARATION_FLOOR / 프론트
+ * ThreeDView 의 MIN_SEPARATION_FLOOR_M 과 반드시 같아야 한다.
+ *
+ * 여기 두는 이유: 이 모듈이 이미 간격 상수의 출처이고(위 DOWNWASH 값),
+ * ThreeDView 는 이 모듈을 import 하므로 반대 방향으로 끌어오면 순환이 된다.
+ */
+export const MIN_SEPARATION_FLOOR_M = 1.0;
+
+/**
+ * 호출자가 간격을 넘기지 않았을 때 쓰는 기본값 (m). 백엔드
+ * HARD_MIN_SEPARATION 과 동일하며, 하한보다 보수적인 쪽이 기본이다 —
+ * "미지정"이 "최소 여유"가 되면 안 된다.
+ */
+export const HARD_MIN_SEPARATION_DEFAULT_M = 1.45;
+
 /** 고정 시드 PRNG (mulberry32) — 결과 재현성 보장. */
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -117,14 +133,14 @@ export function suggestPlaneWidth(
   count,
   {
     imageAspect,
-    minSeparation = 1.45,
+    minSeparation = HARD_MIN_SEPARATION_DEFAULT_M,
     spacingFactor = 1.4,
     mode = 'auto',
     headroom = 1.35,
   } = {}
 ) {
   const sepY =
-    Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
+    Math.max(MIN_SEPARATION_FLOOR_M, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
   const sepZ = Math.max(sepY, DOWNWASH_SAFE_VERTICAL_SEP);
   const weights = computeImportance(image, { mode });
   let content = 0;
@@ -292,7 +308,7 @@ export function layoutDotsOnPlane(
     imageAspect, // width / height
     widthM = 20,
     bottomZ = 5,
-    minSeparation = 1.45,
+    minSeparation = HARD_MIN_SEPARATION_DEFAULT_M,
     spacingFactor = 1.4,
     relaxIterations = 120,
     // 세로 간격 하한 (m). 벽면은 다운워시 회피를 위해 이 값을 지켜야 하지만,
@@ -311,7 +327,7 @@ export function layoutDotsOnPlane(
   }));
 
   const sep =
-    Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
+    Math.max(MIN_SEPARATION_FLOOR_M, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
   const sepZ = Math.max(sep, verticalSeparation);
   const eps = 1e-6;
 
@@ -488,7 +504,7 @@ export function layoutDotsInVolume(
     depthM = 8,
     bottomZ = 5,
     planeX = 0,
-    minSeparation = 1.45,
+    minSeparation = HARD_MIN_SEPARATION_DEFAULT_M,
     spacingFactor = 1.4,
     relaxIterations = 120,
     verticalSeparation = DOWNWASH_SAFE_VERTICAL_SEP,
@@ -506,7 +522,7 @@ export function layoutDotsInVolume(
   }));
 
   const sep =
-    Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
+    Math.max(MIN_SEPARATION_FLOOR_M, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
   const sepZ = Math.max(sep, verticalSeparation);
   const eps = 1e-6;
 

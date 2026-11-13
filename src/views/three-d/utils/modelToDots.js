@@ -19,7 +19,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js';
 
-import { DOWNWASH_SAFE_VERTICAL_SEP } from './imageToDots';
+import {
+  DOWNWASH_SAFE_VERTICAL_SEP,
+  HARD_MIN_SEPARATION_DEFAULT_M,
+  MIN_SEPARATION_FLOOR_M,
+} from './imageToDots';
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -118,11 +122,11 @@ export async function loadModelPoints(file, { samples = 20000 } = {}) {
 export function suggestModelWidth(
   points,
   count,
-  { minSeparation = 1.45, spacingFactor = 1.4, headroom = 1.35 } = {}
+  { minSeparation = HARD_MIN_SEPARATION_DEFAULT_M, spacingFactor = 1.4, headroom = 1.35 } = {}
 ) {
   const n = Math.floor(points.length / 3);
   const sepY =
-    Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
+    Math.max(MIN_SEPARATION_FLOOR_M, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
   const sepZ = Math.max(sepY, DOWNWASH_SAFE_VERTICAL_SEP);
   const needed = Math.max(1, count) * sepY * sepZ * headroom;
   if (!n) return Math.sqrt(needed);
@@ -324,7 +328,7 @@ export function layoutModelDots(
     widthM = 20,
     bottomZ = 5,
     planeX = 0,
-    minSeparation = 1.45,
+    minSeparation = HARD_MIN_SEPARATION_DEFAULT_M,
     spacingFactor = 1.4,
     // 세로 간격 하한 (m) — 바닥 평면처럼 "세로"가 고도가 아니면 0을 넘긴다.
     verticalSeparation = DOWNWASH_SAFE_VERTICAL_SEP,
@@ -359,7 +363,7 @@ export function layoutModelDots(
   }));
 
   const sep =
-    Math.max(1.45, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
+    Math.max(MIN_SEPARATION_FLOOR_M, minSeparation) * Math.max(1, Number(spacingFactor) || 1);
   const scaledUp = enforceSeparation3D(
     pts,
     sep,

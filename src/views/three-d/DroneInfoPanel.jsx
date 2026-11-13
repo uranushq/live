@@ -45,6 +45,7 @@ import {
   setVelocitySmoothing,
   subscribeSmoothingKnobs,
 } from './utils/pathSmoothing';
+import { MIN_SEPARATION_FLOOR_M } from './utils/imageToDots';
 import { RAMP_SHAPES, RAMP_SHAPE_LABELS } from './utils/velocityProfile';
 import PlanFailureReport from './PlanFailureReport';
 import VelocityProfileChart from './VelocityProfileChart';
@@ -2203,9 +2204,12 @@ export default function DroneInfoPanel({
                 label: '최소 간격 (m)',
                 placeholder: '1.45',
                 title:
-                  '드론 간 최소 간격 (모든 축 기준, m). 절대 하한 1.45 m — ' +
-                  '그보다 작은 값을 입력해도 1.45로 강제됩니다. ' +
-                  '초기 배치·모든 phase 좌표·비행 중 경로 전부에 적용됩니다.',
+                  '드론 간 최소 간격 (모든 축 기준 = 체비셰프, m). ' +
+                  `하한 ${MIN_SEPARATION_FLOOR_M} m — 그보다 작은 값은 ` +
+                  `${MIN_SEPARATION_FLOOR_M}로 올라갑니다. 비우면 기본값 1.45가 쓰입니다. ` +
+                  '초기 배치·모든 phase 좌표·비행 중 경로 전부에 적용됩니다. ' +
+                  '축 기준이므로 격자를 비스듬히 돌리면 최대 √2배까지 줄어듭니다 — ' +
+                  '회전 대형에는 여유를 두세요.',
               },
               // landing_spacing은 여기 두면 눈에 안 띄어서, 아래 landing_grid
               // 체크박스 바로 옆에 한 세트로 붙여 렌더링한다.

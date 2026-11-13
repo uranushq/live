@@ -12,6 +12,7 @@ import {
   extractDots,
   layoutDotsInVolume,
   layoutDotsOnPlane,
+  MIN_SEPARATION_FLOOR_M,
   sampleDepths,
   suggestPlaneWidth,
 } from './utils/imageToDots';
@@ -1146,7 +1147,7 @@ export default function ImageToDotsModal({
               />
             </div>
             <div style={{ fontSize: 10.5, color: '#8a8d95', lineHeight: 1.5 }}>
-              최소 간격 {Math.max(1.45, minSeparation).toFixed(2)} m 자동 적용
+              최소 간격 {Math.max(MIN_SEPARATION_FLOOR_M, minSeparation).toFixed(2)} m 자동 적용
               — 점이 겹치면 밀어내고, 부족하면 전체를 확대합니다. 상하
               간격은 다운워시 회피를 위해 최소 2.6 m로 자동 확대됩니다.
             </div>
